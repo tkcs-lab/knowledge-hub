@@ -1,0 +1,16 @@
+tld:
+  version: ">=1.0,<2"
+project:
+  name: REPO
+docs:
+  must_read:
+    - README.md
+git:
+  main_branch: main
+  branch_pattern: "<type>/<kebab-case>"
+verify:
+  fast:
+    - echo "replace with your lint + quick tests"
+  dod:
+    - echo "replace with your full gate"
+stacks: []
