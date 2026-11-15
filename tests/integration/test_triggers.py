@@ -259,12 +259,16 @@ def seed_sources(admin):
                   " WHERE id = %s", (r,))
     dr = derived(admin, required_audiences=["contracts"])
     parents = (derived(admin), uid(), uid())
-    insert(admin, "candidates", dict(
-        id=parents[1], state="proposed", domain="product", target_repo="canonical-all",
-        target_path="product/x.md", title="t", body_sha="s", dedupe_key=uid(), created_by_sub=SUB,
-        required_audiences=["all"], allowed_emails=None))
-    insert(admin, "conflicts", dict(id=parents[2], state="open", created_by_sub=SUB,
-                                    required_audiences=["all"], allowed_emails=None))
+    # Bare parents with no sources would fail the 0006 constraint triggers at commit; these
+    # 0004 tests need them, so insert them with user triggers off.
+    with admin.transaction():
+        admin.execute("SET LOCAL session_replication_role = replica")
+        insert(admin, "candidates", dict(
+            id=parents[1], state="proposed", domain="product", target_repo="canonical-all",
+            target_path="product/x.md", title="t", body_sha="s", dedupe_key=uid(), created_by_sub=SUB,
+            required_audiences=["all"], allowed_emails=None))
+        insert(admin, "conflicts", dict(id=parents[2], state="open", created_by_sub=SUB,
+                                        required_audiences=["all"], allowed_emails=None))
     return {"doc": (d, ["hr"], ["a@example.org"]), "raw": (r, ["mgmt"], None),
             "derived": (dr, ["contracts"], None)}, parents
 
