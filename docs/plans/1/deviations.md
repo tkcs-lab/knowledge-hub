@@ -176,7 +176,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p19b2-propose-change
 
-- pending
+- worker: Persistence: tool_guard rolls the caller transaction back when a tool raises, which would delete the failed candidate, so the candidate insert and every kh.candidate_mark call run in their own committed caller_tx on the app pool (a second pool connection per call, pool max 10); the guard transaction is used for reads only.
+- worker: Choices left open: unresolved sources and target_id answer NOT_FOUND; local fixed texts for exactly one of target_id and new_path, at least one source id, and promotion unavailable without a Forgejo connection; an @version on a source id gives BAD_VERSION and target_id must be a plain doc: id; a candidate_id retry must resend the same proposal (recomputed dedupe key must equal the stored one, else BAD_CANDIDATE), skips the dedupe, daily-limit and insert steps, tolerates create_branch failing bec
+- review: Worker ran 10 mutation checks and 9 were caught; the survivor is equivalent because the unique-violation fallback returns the same DUPLICATE. Open item: tool_guard rolls back on any KhError, so later tools that must keep a write after an error (flag_conflict) hit the same problem; letting the guard commit before raising would be cleaner. Orchestrator ran ruff and the full suite (657 passed, 1 skipped).
 
 ## p20-conflicts-stale
 
