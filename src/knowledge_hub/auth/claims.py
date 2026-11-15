@@ -17,6 +17,7 @@ from knowledge_hub.auth.pf_claim_verify import (
     InMemoryReplayCache,
     Principal,
 )
+from knowledge_hub.metrics import METRICS
 from knowledge_hub.settings import Settings
 
 __all__ = [
@@ -142,6 +143,7 @@ class ClaimMiddleware:
         except _Refuse as exc:
             if exc.status == 401:
                 log.warning("claim refused: %s", exc.code)
+                METRICS.claim_rejection(exc.code)
             await self._empty(send, exc.status)
 
     async def _handle(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
