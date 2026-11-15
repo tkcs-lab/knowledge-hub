@@ -133,7 +133,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p15-ingest-raw
 
-- pending
+- worker: Choices left open: a bad domain or occurred_at raises a local KhError with fixed texts (domain must be one of the domains; occurred_at must be ISO 8601 with a UTC offset) because the catalogue has none and errors.py was closed to additions; ALREADY_INGESTED fills the id as raw:<uuid>; generated_by is stored as jsonb {label: string} or NULL; get_doc on a raw row without a blob falls back to the excerpt; embed_raw deletes the record existing chunks before inserting so a retry is safe; unembeddable
+- review: The ingest_raw leak-matrix case is registered with no seed cases because a write tool cannot single out a seed row; the matrix calls it once per principal with a fresh ingest. Orchestrator ran ruff and the full suite (537 passed).
 
 ## p16a-derived-sql
 
