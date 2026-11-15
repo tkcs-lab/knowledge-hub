@@ -55,7 +55,11 @@ def derived(admin, **over) -> str:
                created_by_type="n8n_workflow", domain="technical", entities=["prd:c"],
                required_audiences=["all"], allowed_emails=None)
     row.update(over)
-    return insert(admin, "derived_records", row)
+    # A bare derived row with no sources would fail derived_visibility_matches (0005) at
+    # commit; these 0004 tests need one, so insert it with user triggers off.
+    with admin.transaction():
+        admin.execute("SET LOCAL session_replication_role = replica")
+        return insert(admin, "derived_records", row)
 
 
 def insert(conn, table, row) -> str:
@@ -170,11 +174,14 @@ def test_raw_insert_by_kh_app_queues_one_embed_job_it_cannot_read(fresh_db, admi
 
 
 def test_derived_insert_queues_embed_derived_job(fresh_db, admin):
-    did = uid()
-    with app_conn(fresh_db) as conn:
+    did, src = uid(), doc(admin)
+    with app_conn(fresh_db) as conn, conn.transaction():
         insert(conn, "derived_records", dict(
             id=did, kind="summary", title="t", body="b", created_by_sub=SUB,
             created_by_type="n8n_workflow", required_audiences=["all"], allowed_emails=None))
+        insert(conn, "derived_sources", dict(
+            derived_id=did, source_kind="doc", source_id=src,
+            src_required_audiences=["all"], src_allowed_emails=None))
     assert jobs(admin) == [("embed_derived", {"id": did})]
 
 
