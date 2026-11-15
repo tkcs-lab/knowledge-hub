@@ -62,7 +62,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9a-trust
 
-- pending
+- worker: Choices the plan left open: commits is the first-parent chain newest first; reviews map PR number to review list; changed_files map commit sha to paths; Verdict is a frozen dataclass; TrustResult has an extra anchor_verdict field and verdict_for(path); an untrusted repo downgrades every file verdict to disputed; a merge commit counts only if its PR base is main.
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full test suite.
 
 ## p9b-forgejo-client
 
