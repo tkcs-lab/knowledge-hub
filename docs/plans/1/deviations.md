@@ -48,7 +48,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-mcp-get-doc
 
-- pending
+- worker: get_doc returns owner empty, approved_by empty, no review_by, successor or commit_sha, status current and stale false for raw and derived records, because those tables have no such columns and a raw ingester sub would leak; indexed_at is ingested_at or created_at. A refused dispatch (no caller, name mismatch, changed arguments) returns the INTERNAL text with a ref because 3.9 has no code for it.
+- worker: tool_guard(name, deps) wraps fn(call, **args) and rewrites the signature to (ctx, **args); later tool modules must not use from __future__ import annotations. get_doc returns a dict; source_link is empty without forgejo_web_url. The mcp_client fixture runs the app lifespan in its own task. Deps.indexer_pool is required, not defaulted. The SDK prefixes tool errors with Error executing tool <name>:.
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full suite (327 passed).
 
 ## p6a-search-core
 
