@@ -222,7 +222,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p25b-docs-ops
 
-- pending
+- worker: Choices left open: the README quick start uses python3 -m venv with pip install -e .[dev] because no separate stack guide exists in the repo; the runbook reads index_alerts with SQL since no kh command shows alerts; the runbook adds alert rows for the pull-request mismatch text and the supersedes same-repo text, and rotation rows for the metrics token and database passwords; the restore command is pg_restore --data-only --disable-triggers --no-owner; the link test skips fenced and inline code, i
+- review: Open for the final review: the restore step in the deploy/backup-kh.sh header comment lacks --data-only --disable-triggers and should match the runbook; whether embedding fails or is skipped when Ollama is down was not verified. README is 43 lines and the runbook 93. Orchestrator ran ruff and the full suite (756 passed, 1 skipped).
 
 ## p26-release-workflow
 
