@@ -21,7 +21,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3b-tables
 
-- pending
+- review: Diff matched the touches list; worker tld steps and roles waived by the owner, orchestrator ran ruff, unit and integration tests.
 
 ## p3c-rls
 
