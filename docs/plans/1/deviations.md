@@ -24,6 +24,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - review: Diff matched the touches list; worker tld steps and roles waived by the owner, orchestrator ran ruff, unit and integration tests.
 - scope: scope: tests/integration/test_migrate_runner.py
 - review: The worker loosened one assertion in test_migrate_runner.py from an exact list to the first entry, because it breaks once 0002 exists; accepted.
+- worker: Worker chose column types the plan left open: conflicts.closed_by_pr is text; candidates.derived_id and target_doc_id are foreign keys ON DELETE SET NULL; index_jobs.id and index_alerts.id are bigint identity; composite primary keys on document_versions, derived_sources, candidate_sources and conflict_items. Owner may want to review.
 
 ## p3c-rls
 
