@@ -1,0 +1,3 @@
+# The vendored verifier must stay byte for byte as upstream; do not lint it.
+extend = "../../../pyproject.toml"
+extend-exclude = ["pf_claim_verify.py"]
