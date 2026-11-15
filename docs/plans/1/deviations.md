@@ -155,7 +155,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p18-routing
 
-- pending
+- worker: Choices left open: an unknown explicit_repo raises NO_REPO with the repo name; SPAN names the first two audiences in sorted order; WIDER shows the audiences as a sorted comma-joined list; visibility.py now imports KhError from mcp/errors.py at load time (no circular import).
+- review: Worker ran 9 mutation checks; 2 survived the first tests (the flag threshold and dropping the T0 filter), so two tests were added and both now fail the mutation. Orchestrator ran ruff and the full suite (608 passed, 1 skipped).
 
 ## p19a-candidates-sql
 
