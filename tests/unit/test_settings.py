@@ -76,5 +76,5 @@ def test_cli_serve_exits_2_on_settings_error(monkeypatch, capsys):
 
 
 def test_cli_stub_exits_3(capsys):
-    assert cli.main(["migrate"]) == 3
+    assert cli.main(["daily"]) == 3
     assert "not implemented yet" in capsys.readouterr().out
