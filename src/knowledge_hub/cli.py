@@ -76,6 +76,22 @@ def _check(settings: Settings, config: Config) -> int:
     return 0 if report.clean else 1
 
 
+def _recompute(settings: Settings, config: Config) -> int:
+    from knowledge_hub.jobs.recompute import recompute_visibility
+
+    digest = asyncio.run(_with_deps(settings, config, lambda d: recompute_visibility(d.indexer_pool, config)))
+    print(f"recomputed visibility (config hash {digest[:12]})")
+    return 0
+
+
+def _requeue(settings: Settings, config: Config) -> int:
+    from knowledge_hub.jobs.requeue import requeue_embeddings
+
+    count = asyncio.run(_with_deps(settings, config, lambda d: requeue_embeddings(d.indexer_pool)))
+    print(f"queued {count} embed jobs")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -101,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             pass
         return 0
-    if args.command not in ("migrate", "rebuild", "check"):
+    if args.command not in ("migrate", "rebuild", "check", "recompute-visibility", "requeue-embeddings"):
         return _not_implemented()
     try:
         settings = load_settings()
@@ -114,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "rebuild":
             return _rebuild(settings, config, args.repo)
+        if args.command == "recompute-visibility":
+            return _recompute(settings, config)
+        if args.command == "requeue-embeddings":
+            return _requeue(settings, config)
         return _check(settings, config)
     except ValueError as exc:
         print(exc, file=sys.stderr)
