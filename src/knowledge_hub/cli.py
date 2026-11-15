@@ -92,6 +92,33 @@ def _requeue(settings: Settings, config: Config) -> int:
     return 0
 
 
+def _daily(settings: Settings, config: Config) -> int:
+    from datetime import date
+
+    from knowledge_hub.grist.client import GristClient, GristError
+    from knowledge_hub.jobs.daily import run_daily
+
+    if not settings.grist_url or not settings.grist_doc_id or settings.grist_key_file is None:
+        print("daily: KH_GRIST_URL, KH_GRIST_DOC_ID and KH_GRIST_KEY_FILE must be set", file=sys.stderr)
+        return 2
+    key = settings.grist_key_file.read_text().strip()
+    grist = GristClient(settings.grist_url, settings.grist_doc_id, key)
+
+    async def go(deps: Any) -> dict[str, int]:
+        try:
+            return await run_daily(deps.indexer_pool, grist, config, date.today())
+        finally:
+            await grist.aclose()
+
+    try:
+        result = asyncio.run(_with_deps(settings, config, go))
+    except GristError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print("daily: " + ", ".join(f"{k}={v}" for k, v in result.items()))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -117,7 +144,9 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             pass
         return 0
-    if args.command not in ("migrate", "rebuild", "check", "recompute-visibility", "requeue-embeddings"):
+    if args.command not in (
+        "migrate", "rebuild", "check", "daily", "recompute-visibility", "requeue-embeddings"
+    ):
         return _not_implemented()
     try:
         settings = load_settings()
@@ -130,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "rebuild":
             return _rebuild(settings, config, args.repo)
+        if args.command == "daily":
+            return _daily(settings, config)
         if args.command == "recompute-visibility":
             return _recompute(settings, config)
         if args.command == "requeue-embeddings":
