@@ -110,7 +110,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p12-webhook-worker
 
-- pending
+- worker: Choices left open: a missing or empty webhook secret gives 401 (fails closed); an oversize body gives 413; invalid JSON or a non-object gives 400 after the signature check; the event type is read from X-Forgejo-Event with X-Gitea-Event as fallback; the repo comes from repository.full_name with owner equal to KH_FORGEJO_ORG and the name a key of config.repos.
+- worker: Retry model: a failed job with fewer than 5 attempts is claimed again once run_after has passed because the state constraint has no retry state, so the claim query accepts queued and failed; after the fifth attempt it stays failed. Worker has extra optional keywords chunker_version and poll_seconds and a stop() method; callers should pass settings.chunker_version.
+- review: Open item: embed_raw and embed_derived jobs are marked done without being processed, because no phase handles them yet, and the worker is not started in the app lifespan. A later phase must process those kinds or raw and derived chunks stay unembedded.
 
 ## p14-blobs
 
