@@ -43,7 +43,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-rls-access
 
-- pending
+- worker: Choices the plan left open: pools are created with open=False and the caller awaits pool.open(); PgReplayCache.add_if_new is synchronous and runs the query on the pool loop, raising RuntimeError if called on that loop thread; pool sizes are min 1 and max 10; the chunk drift query of 3.3 did not exist and is written as DRIFT_SQL in tests/support/seed.py, for the later check phase to reuse or move.
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full suite (300 passed).
 
 ## p5-mcp-get-doc
 
