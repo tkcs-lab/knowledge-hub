@@ -1,0 +1,92 @@
+"""Registry of tool cases for the leak matrix (plan 3.3).
+
+Every tool that returns or searches rows appends a ``ToolCase`` here; ``test_leak_matrix`` then runs
+it for every principal and every seed visibility case. A case names, for one seed case, the call
+that targets that row, the call that targets a row that does not exist, and how to read the
+response.
+
+``ids`` is the seed result ``{table: {case: id}}`` of ``tests.support.seed.seed_rows``.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from tests.support.mcp_client import ToolResult
+from tests.support.seed import CASES
+
+Ids = dict[str, dict[str, str]]
+ArgsFor = Callable[[Ids, str], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ToolCase:
+    name: str  # the tool
+    args_for_hidden: ArgsFor  # (ids, case): arguments aimed at that row, used when it is hidden
+    args_for_visible: ArgsFor  # (ids, case): arguments aimed at that row, used when it is visible
+    expect_hidden: Callable[[ToolResult], None]  # asserts the response of a call that reaches nothing
+    args_for_missing: Callable[[Ids], dict[str, Any]]  # arguments aimed at a row that does not exist
+    cited: Callable[[ToolResult], set[str]]  # citation ids a response contains
+    citation: Callable[[Ids, str], str]  # citation id of the seed row of a case
+    cases: tuple[str, ...] = tuple(CASES)  # seed cases the call can single out
+    label: str = ""
+
+    @property
+    def id(self) -> str:
+        return f"{self.name}-{self.label}" if self.label else self.name
+
+
+def _not_found(res: ToolResult) -> None:
+    assert res.status == 200 and res.is_error and res.text.endswith("not found"), res
+
+
+def _get_doc_case(table: str, prefix: str) -> ToolCase:
+    def args(ids: Ids, case: str) -> dict[str, Any]:
+        return {"id": f"{prefix}:{ids[table][case]}"}
+
+    return ToolCase(
+        name="get_doc",
+        args_for_hidden=args,
+        args_for_visible=args,
+        expect_hidden=_not_found,
+        args_for_missing=lambda ids: {"id": f"{prefix}:{uuid.uuid4()}"},
+        cited=lambda res: {res.data["citation_id"]} if res.data else set(),
+        citation=lambda ids, case: f"{prefix}:{ids[table][case]}",
+        label=prefix,
+    )
+
+
+# The seed gives every chunk the text "chunk <case>"; websearch AND-s the words. "all" is a
+# stop word, so the "all" case cannot be singled out by text and is left to get_doc.
+_SEARCH_CASES = tuple(c for c in CASES if c != "all")
+
+
+def _search_args(ids: Ids, case: str) -> dict[str, Any]:
+    return {"query": f"chunk {case}", "min_tier": "T3", "limit": 50}
+
+
+def _search_empty(res: ToolResult) -> None:
+    assert res.status == 200 and not res.is_error, res
+    assert res.data["hits"] == [] and res.data["next_cursor"] == "", res
+
+
+SEARCH = ToolCase(
+    name="search",
+    args_for_hidden=_search_args,
+    args_for_visible=_search_args,
+    expect_hidden=_search_empty,
+    args_for_missing=lambda ids: {"query": "chunk zzqxjv", "min_tier": "T3", "limit": 50},
+    cited=lambda res: {h["citation_id"] for h in (res.data or {}).get("hits", [])},
+    citation=lambda ids, case: f"doc:{ids['documents'][case]}",
+    cases=_SEARCH_CASES,
+)
+
+TOOL_CASES: list[ToolCase] = [
+    SEARCH,
+    _get_doc_case("documents", "doc"),
+    _get_doc_case("raw_records", "raw"),
+    _get_doc_case("derived_records", "derived"),
+]
