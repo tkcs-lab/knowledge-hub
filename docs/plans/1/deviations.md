@@ -65,7 +65,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-http-e2e
 
-- pending
+- worker: ToolCase has more fields than the four in the brief (args_for_missing, cited, citation, cases, label); the args_* fields are callables taking ids and the case, and expect_hidden is a callable that asserts on the response. search is not run for the seed case all, because all is an English stop word; get_doc covers it. Both test files reuse the app_settings and deps fixtures from test_search_ranking.py.
+- review: Milestone 1 closed. Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full suite (464 passed).
 
 ## p8-frontmatter-chunker
 
