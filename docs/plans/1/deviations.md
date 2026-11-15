@@ -186,7 +186,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p21-pr-outcomes
 
-- pending
+- worker: Choices left open: conflicts.closed_by_pr stores <repo>#<number>; the PR repo comes from the job repo and is compared with candidates.target_repo and pr_number; a PR that is neither merged nor closed is ignored; a merge promotes a candidate in pr_open or rejected but a close without merge rejects only from pr_open, so a stale event cannot undo a promotion; conflicts close only when the candidate is promoted, only if open, matched on (kind, id); the mismatch alert goes to index_alerts with the PR
+- review: Worker ran 7 mutation checks; two first survived and tests were added so all now fail. Orchestrator ran ruff and the full suite (668 passed, 1 skipped).
 
 ## p22a-grist-daily
 
