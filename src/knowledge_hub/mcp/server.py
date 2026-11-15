@@ -20,7 +20,8 @@ class Deps:
     indexer_pool: AsyncConnectionPool | None
     embedder: Any = None
     blobs: Any = None
-    forgejo: Any = None
+    forgejo: Any = None  # read-only (indexer token)
+    forgejo_bot: Any = None  # bot token; used only by propose_change
     grist: Any = None
     verifier: Any = None
     ratelimiter: Any = None

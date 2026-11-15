@@ -65,3 +65,25 @@ def test_serve_with_invalid_setting_exits_2(monkeypatch, capsys):
     monkeypatch.setenv("KH_EMBED_PROVIDER", "fake")
     assert main(["serve"]) == 2
     assert "KH_EMBED_PROVIDER" in capsys.readouterr().err
+
+
+async def test_build_deps_bot_client_only_when_bot_token_file_is_set(wiring_settings, tmp_path):
+    indexer, bot = tmp_path / "indexer", tmp_path / "bot"
+    indexer.write_text("indexer-token-for-test\n")
+    bot.write_text("bot-token-for-test\n")
+    base = wiring_settings.model_copy(
+        update={"forgejo_url": "https://forgejo.test.example", "forgejo_indexer_token_file": indexer}
+    )
+    deps = await build_deps(base, Config())
+    try:
+        assert deps.forgejo is not None and deps.forgejo_bot is None
+    finally:
+        await close_deps(deps)
+    deps = await build_deps(base.model_copy(update={"forgejo_bot_token_file": bot}), Config())
+    try:
+        assert deps.forgejo is not None and deps.forgejo_bot is not None
+        assert deps.forgejo_bot is not deps.forgejo
+        assert deps.forgejo_bot._http.headers["Authorization"] == "token bot-token-for-test"
+        assert deps.forgejo._http.headers["Authorization"] == "token indexer-token-for-test"
+    finally:
+        await close_deps(deps)
