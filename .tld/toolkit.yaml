@@ -1,7 +1,7 @@
 tld:
   version: ">=1.0,<2"
 project:
-  name: REPO
+  name: knowledge-hub
 docs:
   must_read:
     - README.md
@@ -10,7 +10,11 @@ git:
   branch_pattern: "<type>/<kebab-case>"
 verify:
   fast:
-    - echo "replace with your lint + quick tests"
+    - .venv/bin/python -m ruff check .
+    - .venv/bin/python -m pytest -q -m unit
   dod:
-    - echo "replace with your full gate"
-stacks: []
+    - .venv/bin/python -m ruff check .
+    - .venv/bin/python -m pytest -q
+  after_merge_allow:
+    - .venv/bin/python -m pytest
+stacks: [python]
