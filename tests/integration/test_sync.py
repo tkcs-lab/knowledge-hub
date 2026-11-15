@@ -114,3 +114,30 @@ async def test_rewritten_main_changes_nothing_but_alerts(fresh_db, indexer_pool)
     assert rows(fresh_db, "SELECT message FROM kh.index_alerts") == [
         ("main of canonical-all was rewritten; run kh rebuild after review",)
     ]
+
+
+def offset_repo():
+    """Anchor commit dated +01:00 (anchor-trusted a.md) and a PR approval with fractional seconds."""
+    c, p, r = merged("m1", "a0", {"b.md": doc("b")}, 1)
+    r[0]["submitted_at"] = "2026-11-02T11:00:00.750+01:00"
+    repo = repo_of([(c, p, r)], {"a.md": doc("a")})
+    repo.commits[0].date = "2026-11-01T11:00:00+01:00"
+    return repo
+
+
+SNAP = (
+    "SELECT d.doc_key, d.id, d.indexed_at, d.updated_at, d.approved_at, c.id, c.content_sha"
+    " FROM kh.documents d LEFT JOIN kh.chunks c ON c.document_id = d.id ORDER BY 1, 7"
+)
+
+
+async def test_offset_and_fractional_dates_resync_unchanged(fresh_db, indexer_pool):
+    r = offset_repo()
+    await sync(indexer_pool, r)
+    first = rows(fresh_db, SNAP)
+    state = rows(fresh_db, "SELECT * FROM kh.repo_state")
+    stamps = {x[0]: x[4].isoformat() for x in first}
+    assert stamps == {"a": "2026-11-01T10:00:00+00:00", "b": "2026-11-02T10:00:00+00:00"}
+    await sync(indexer_pool, r)
+    assert rows(fresh_db, SNAP) == first
+    assert rows(fresh_db, "SELECT * FROM kh.repo_state") == state

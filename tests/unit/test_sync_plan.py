@@ -181,3 +181,20 @@ async def test_notes_repo_needs_no_approval():
     u = up(p, "a")
     assert (u.tier, u.status, u.approved_by, u.commit_sha) == ("T1", "current", [], "n1")
     assert p.repo_state["trusted"] is True
+
+
+def test_doc_changed_compares_instants_not_strings():
+    from types import SimpleNamespace
+
+    from knowledge_hub.indexer.sync_plan import _doc_changed
+
+    row = {"path": "a.md", "content_sha": "c", "commit_sha": "k", "status": "current",
+           "approved_by": ["bob"], "approved_at": "2026-11-02T10:00:00Z", "merge_pr": 1}  # fmt: skip
+    base = dict(
+        path="a.md", content_sha="c", commit_sha="k", status="current", approved_by=["bob"], merge_pr=1
+    )
+    same = SimpleNamespace(**base, approved_at="2026-11-02T11:00:00.600+01:00")
+    other = SimpleNamespace(**base, approved_at="2026-11-02T10:00:01Z")
+    assert not _doc_changed(row, same)
+    assert _doc_changed(row, other)
+    assert _doc_changed(row, SimpleNamespace(**base, approved_at=None))
