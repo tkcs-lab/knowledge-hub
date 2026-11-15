@@ -122,7 +122,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p16a-derived-sql
 
-- pending
+- scope: scope: tests/integration/test_triggers.py
+- review: The worker changed test_triggers.py because a derived row with no sources can no longer commit: bare derived rows are inserted with session_replication_role replica and the embed-job test inserts a source row too; accepted.
+- worker: The deferred trigger raises SQLSTATE P0K04 for both no sources and differing visibility (the plan names no code; P0K04 is next free); it compares sets, re-reads the stored visibility at commit and skips a row deleted in the same transaction. Malformed source ids count as unresolved instead of raising; an empty input returns (0, {}, NULL, {}); derive_visibility([]) raises ValueError; Visibility is a frozen dataclass.
+- review: Worker ran 12 mutation checks on 0005 and each broke a test. Open for p16b: map P0K04 at commit to an internal error, and consider refusing a derived row whose allowed_emails is an empty list (visible to nobody).
 
 ## p16b-write-derived
 
