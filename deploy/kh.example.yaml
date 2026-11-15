@@ -1,0 +1,22 @@
+# Example kh.yaml (mounted at the path in KH_CONFIG_FILE). Values shown are the defaults.
+audiences: [all, mgmt, hr, contracts]
+participant_label: attendees
+domains: [portfolio, product, technical]
+repos:
+  canonical-all: {tier: T0, audience: all, trust_anchor: null}
+  canonical-mgmt: {tier: T0, audience: mgmt, trust_anchor: null}
+  canonical-hr: {tier: T0, audience: hr, trust_anchor: null}
+  canonical-contracts: {tier: T0, audience: contracts, trust_anchor: null}
+  notes-all: {tier: T1, audience: all, trust_anchor: null}
+# Map a raw-record series or folder to the audiences that may read it, for example:
+# raw_audience_map:
+#   "series:weekly-sync": [mgmt]
+raw_audience_map: {}
+ingest_principal_types: [n8n_workflow]
+restricted_audiences_imply_all: false
+entities:
+  prd: [all]
+  cmp: [all]
+  ver: [all]
+  cus: [contracts]
+forgejo_web_url: null
