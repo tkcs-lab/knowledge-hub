@@ -36,7 +36,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3d-triggers
 
-- pending
+- scope: scope: tests/integration/test_rls_policies.py
+- scope: scope: tests/integration/test_schema_tables.py
+- review: The worker switched off user triggers in the seed fixtures of the two earlier test files, because the new triggers overwrite or reject their hand-written rows; accepted, trigger behaviour is covered by test_triggers.py.
+- worker: Choices the plan left open: owner created time is documents.indexed_at, raw_records.ingested_at or derived_records.created_at; raw_audience_map is matched on separate kind (series, folder) and key columns; one shared sources_snapshot_visibility function serves the three source tables and raises P0K03 for an unknown kind or a non-uuid id; chunks_inherit_owner and owner_propagate_to_chunks are SECURITY INVOKER and call none of the caller helpers; the propagate trigger does a no-op UPDATE chunks SE
 
 ## p4-rls-access
 
