@@ -179,3 +179,59 @@ PROPOSE_CHANGE = ToolCase(
     cases=(),
 )
 TOOL_CASES.append(PROPOSE_CHANGE)
+
+
+def _flag_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    first = f"doc:{ids['documents'][case]}" if case else f"doc:{uuid.uuid4()}"
+    return {"a": first, "b": f"doc:{uuid.uuid4()}", "note": "matrix"}
+
+
+# flag_conflict creates a row and cites none back (``cases=()``); the matrix calls it once per principal
+# with ids that do not exist. The per-case comparison is in ``test_conflicts``.
+FLAG_CONFLICT = ToolCase(
+    name="flag_conflict",
+    args_for_hidden=_flag_args,
+    args_for_visible=_flag_args,
+    expect_hidden=_not_found,
+    args_for_missing=lambda ids: _flag_args(ids),
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+
+
+def _list_cited(key: str, field: str) -> Callable[[ToolResult], set[str]]:
+    def cited(res: ToolResult) -> set[str]:
+        out: set[str] = set()
+        for entry in (res.data or {}).get(key, []):
+            value = entry[field]
+            out.update(value if isinstance(value, list) else [value])
+        return out
+
+    return cited
+
+
+# The list tools have no filter that singles out one seed case (``cases=()``); the matrix calls each
+# once per principal and checks that no hidden seed row is cited. Exact page contents are in the
+# tool's own test module.
+LIST_CONFLICTS = ToolCase(
+    name="list_conflicts",
+    args_for_hidden=lambda ids, case="": {"limit": 50},
+    args_for_visible=lambda ids, case="": {"limit": 50},
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: {"limit": 50},
+    cited=_list_cited("conflicts", "items"),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+LIST_STALE = ToolCase(
+    name="list_stale",
+    args_for_hidden=lambda ids, case="": {"limit": 50},
+    args_for_visible=lambda ids, case="": {"limit": 50},
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: {"limit": 50},
+    cited=_list_cited("documents", "citation_id"),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+TOOL_CASES.extend([FLAG_CONFLICT, LIST_CONFLICTS, LIST_STALE])
