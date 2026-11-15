@@ -144,6 +144,13 @@ def insert(conn: psycopg.Connection, table: str, cols: dict) -> int:
     return conn.execute(q, list(cols.values())).rowcount
 
 
+def seed_mode(conn):
+    """Seed rows verbatim: switch off the 0004 triggers (covered by test_triggers.py)."""
+    for t in ("chunks", "raw_records", "derived_records", "derived_sources", "candidate_sources",
+              "conflict_items"):
+        conn.execute(f"ALTER TABLE kh.{t} DISABLE TRIGGER USER")
+
+
 def set_caller(conn, audiences="all", email="alice@example.org", ptype="n8n_workflow", sub=SUB_A):
     conn.execute(
         "SELECT set_config('kh.audiences', %s, false), set_config('kh.email', %s, false),"
@@ -157,6 +164,7 @@ def seeded(fresh_db):
     """Seed one row per table (visibility ``{all}``, created by SUB_A) as the sandbox superuser."""
     p: dict[str, str] = {}
     with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        seed_mode(conn)
         f = factories(p)
         for table, key in (("documents", "doc"), ("derived_records", "derived"),
                            ("candidates", "candidate"), ("conflicts", "conflict")):
@@ -427,6 +435,7 @@ def test_visible_truth_table(fresh_db):
 def test_no_audience_no_email_caller_sees_nothing_because_open_rows_cannot_exist(fresh_db):
     # kh.visible('{}', NULL) is true for everyone; kh_no_open_rows keeps such rows out.
     with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        seed_mode(conn)
         f = factories({})
         row = f["entities_cache"]()
         row.update(required_audiences=[], allowed_emails=None)
@@ -465,6 +474,7 @@ def owned(fresh_db):
     ids = {"derived": uid(), "candidate": uid(), "conflict": uid(), "raw": uid()}
     hidden = {"required_audiences": ["mgmt"], "allowed_emails": None}
     with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        seed_mode(conn)
         f = factories({})
         for table, key in (("derived_records", "derived"), ("candidates", "candidate"),
                            ("conflicts", "conflict"), ("raw_records", "raw")):

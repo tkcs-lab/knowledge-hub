@@ -51,6 +51,11 @@ def u():
 @pytest.fixture
 def conn(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn("kh_fresh"), autocommit=True) as c:
+        # These tests exercise the table constraints with hand-written rows; the 0004 triggers
+        # (tests/integration/test_triggers.py) would overwrite or reject them.
+        for t in ("chunks", "raw_records", "derived_records", "documents", "derived_sources",
+                  "candidate_sources", "conflict_items"):
+            c.execute(f"ALTER TABLE kh.{t} DISABLE TRIGGER USER")
         yield c
 
 
