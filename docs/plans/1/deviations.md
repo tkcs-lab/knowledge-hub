@@ -22,6 +22,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p3b-tables
 
 - review: Diff matched the touches list; worker tld steps and roles waived by the owner, orchestrator ran ruff, unit and integration tests.
+- scope: scope: tests/integration/test_migrate_runner.py
+- review: The worker loosened one assertion in test_migrate_runner.py from an exact list to the first entry, because it breaks once 0002 exists; accepted.
 
 ## p3c-rls
 
