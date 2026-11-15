@@ -56,8 +56,12 @@ def approval(head_sha: str, user: str = "bob", at: str = "2026-11-02T10:00:00Z")
 
 
 class ForgejoFake:
-    def __init__(self, repos: dict[str, FakeRepo]) -> None:
+    def __init__(self, repos: dict[str, FakeRepo], read_only: bool = False) -> None:
         self.repos = repos
+        # A read-only fake stands for the indexer client: a write is recorded in ``refused_writes``
+        # and fails, so a test can assert no promotion write went through it.
+        self.read_only = read_only
+        self.refused_writes: list[str] = []
         self.calls: list[str] = []
         self.branches: dict[tuple[str, str], str] = {}
         self.files: dict[tuple[str, str, str], str] = {}
@@ -162,11 +166,17 @@ class ForgejoFake:
             return self._snapshot(repo, self._repo(repo).commits[-1].sha)
         return self._snapshot(repo, ref)
 
+    def _write(self, name: str) -> None:
+        if self.read_only:
+            self.refused_writes.append(name)
+            raise ForgejoError(f"{name} refused: read-only client")
+
     async def path_exists(self, repo: str, path: str, ref: str) -> bool:
         self.calls.append("path_exists")
         return path in self._tree_at(repo, ref)
 
     async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
+        self._write("create_branch")
         self.calls.append("create_branch")
         self.written_refs.append(name)
         self._commit(repo, from_sha)
@@ -175,6 +185,7 @@ class ForgejoFake:
         self.branches[(repo, name)] = from_sha
 
     async def put_file(self, repo: str, branch: str, path: str, content: str, message: str) -> None:
+        self._write("put_file")
         self.calls.append("put_file")
         self.written_refs.append(branch)
         if (repo, branch) not in self.branches:
@@ -184,6 +195,7 @@ class ForgejoFake:
     async def open_pull(
         self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
     ) -> dict[str, Any]:
+        self._write("open_pull")
         self.calls.append("open_pull")
         self.written_refs.append(head)
         if (repo, head) not in self.branches:

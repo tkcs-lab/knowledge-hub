@@ -40,6 +40,14 @@ def make_forgejo(settings: Settings) -> ForgejoClient | None:
     return ForgejoClient(settings.forgejo_url, token, settings.forgejo_org)
 
 
+def make_forgejo_bot(settings: Settings) -> ForgejoClient | None:
+    """The write client for ``propose_change`` (bot token); None while the bot token is not set."""
+    if not settings.forgejo_url or settings.forgejo_bot_token_file is None:
+        return None
+    token = settings.forgejo_bot_token_file.read_text().strip()
+    return ForgejoClient(settings.forgejo_url, token, settings.forgejo_org)
+
+
 def make_verifier(settings: Settings) -> ClaimVerifier | None:
     """The production verifier. Without PrivacyFence settings only the dev identity may stand in."""
     if settings.pf_jwks_url and settings.pf_issuer and settings.pf_audience:
@@ -63,6 +71,13 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
     embedder = make_embedder(settings)
     blobs = make_blob_store(settings)
     forgejo = make_forgejo(settings)
+    forgejo_bot = None
+    try:
+        forgejo_bot = make_forgejo_bot(settings)
+    except BaseException:
+        if forgejo is not None:
+            await forgejo.aclose()
+        raise
     app_pool = make_app_pool(settings)
     indexer_pool = make_indexer_pool(settings)
     try:
@@ -73,6 +88,8 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
         await indexer_pool.close()
         if forgejo is not None:
             await forgejo.aclose()
+        if forgejo_bot is not None:
+            await forgejo_bot.aclose()
         raise
     worker = None
     if forgejo is not None:
@@ -87,6 +104,7 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
         embedder=embedder,
         blobs=blobs,
         forgejo=forgejo,
+        forgejo_bot=forgejo_bot,
         verifier=verifier,
         worker=worker,
         ratelimiter=RateLimiter(settings.rate_limit_per_min),
@@ -98,6 +116,8 @@ async def close_deps(deps: Deps) -> None:
         deps.worker.stop()
     if deps.forgejo is not None:
         await deps.forgejo.aclose()
+    if deps.forgejo_bot is not None:
+        await deps.forgejo_bot.aclose()
     if deps.indexer_pool is not None:
         await deps.indexer_pool.close()
     await deps.app_pool.close()

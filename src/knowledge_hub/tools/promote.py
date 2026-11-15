@@ -207,7 +207,8 @@ async def propose_change(
         explicit_repo,
     )
 
-    forgejo = deps.forgejo
+    # Writes use the bot account only; deps.forgejo is the read-only indexer client.
+    forgejo = deps.forgejo_bot
     if forgejo is None:
         raise KhError("no_forgejo", NO_FORGEJO)
     if new_path:

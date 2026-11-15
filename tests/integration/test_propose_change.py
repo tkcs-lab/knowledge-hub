@@ -25,9 +25,24 @@ def forgejo():
 
 
 @pytest.fixture
-def deps(app_settings, app_pool, indexer_pool, forgejo):
+def indexer_forgejo():
+    """The read-only indexer client: any write through it is refused and recorded."""
+    return ForgejoFake(
+        {r: FakeRepo(commits=[FakeCommit("c1", files={"product/old.md": "old"})]) for r in REPOS},
+        read_only=True,
+    )
+
+
+@pytest.fixture
+def deps(app_settings, app_pool, indexer_pool, forgejo, indexer_forgejo):
+    # ``forgejo`` is the bot client (the one that writes); ``deps.forgejo`` is the read-only indexer one.
     return Deps(
-        settings=app_settings, config=Config(), app_pool=app_pool, indexer_pool=indexer_pool, forgejo=forgejo
+        settings=app_settings,
+        config=Config(),
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
+        forgejo=indexer_forgejo,
+        forgejo_bot=forgejo,
     )
 
 
@@ -382,12 +397,38 @@ async def test_visibility_stores_the_full_union(admin, mcp_client):
 
 async def test_no_forgejo_connection_is_a_fixed_text(admin, mcp_client, deps):
     deps.forgejo = None
+    deps.forgejo_bot = None
     s = make_doc(admin, ("all",))
     err(
         await mcp_client.call(alice_all, "propose_change", args([s])),
         "promotion is not available: no Forgejo connection is configured",
     )
     assert n_candidates(admin) == 0
+
+
+async def test_promotion_is_refused_without_the_bot_client(admin, mcp_client, deps, indexer_forgejo):
+    deps.forgejo_bot = None  # the indexer client is still there but must not stand in
+    s = make_doc(admin, ("all",))
+    err(
+        await mcp_client.call(alice_all, "propose_change", args([s])),
+        "promotion is not available: no Forgejo connection is configured",
+    )
+    assert n_candidates(admin) == 0
+    assert indexer_forgejo.refused_writes == [] and indexer_forgejo.opened == []
+
+
+async def test_writes_go_through_the_bot_client_never_the_indexer_one(
+    admin, mcp_client, forgejo, indexer_forgejo
+):
+    s = make_doc(admin, ("all",))
+    ok(await mcp_client.call(alice_all, "propose_change", args([s])))
+    assert [c for c in forgejo.calls if c in ("create_branch", "put_file", "open_pull")] == [
+        "create_branch",
+        "put_file",
+        "open_pull",
+    ]
+    assert indexer_forgejo.refused_writes == []
+    assert not {"create_branch", "put_file", "open_pull", "path_exists"} & set(indexer_forgejo.calls)
 
 
 # --- failure and retry -------------------------------------------------------------------------
