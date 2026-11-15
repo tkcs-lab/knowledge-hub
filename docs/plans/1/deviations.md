@@ -193,7 +193,11 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p22a-grist-daily
 
-- pending
+- scope: scope: tests/unit/test_settings.py
+- review: test_cli_stub_exits_3 asserted that daily was a stub and was replaced by test_cli_daily_exits_2_without_grist_url; the unused _not_implemented helper in cli.py was left; accepted.
+- worker: Entity visibility is set from config.entities on every run (allowed_emails NULL) because recompute does not touch entities_cache, so a config change takes effect at the next daily run; an empty audience list for a kind raises ValueError before any write and the CLI exits 2; a Grist row is skipped and counted if its key is missing, not kind:slug, or its prefix does not match its table (prd, cmp, ver, cus); stale is set both ways (review_by before today) for every document with a review_by, which 
+- worker: All four Grist tables are fetched before any write and one transaction does the stale update, upsert, delete and jti purge; upserts write only when a value differs so a rerun leaves synced_at alone; GristClient raises GristError and kh daily exits 1 on it, and exits 2 unless KH_GRIST_URL, KH_GRIST_DOC_ID and KH_GRIST_KEY_FILE are set. No migration or grant changes were needed.
+- review: Worker ran 4 mutation checks; each broke a test. Orchestrator ran ruff and the full suite (713 passed, 1 skipped).
 
 ## p22b-entities-tools
 
