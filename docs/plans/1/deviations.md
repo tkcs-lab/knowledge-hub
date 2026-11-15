@@ -16,7 +16,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3a-runner-fixture
 
-- pending
+- review: Diff matched the touches list exactly; worker tld steps and roles were waived by the owner, orchestrator ran ruff, unit and integration tests after the merge.
 
 ## p3b-tables
 
