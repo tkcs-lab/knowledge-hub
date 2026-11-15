@@ -28,7 +28,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3c-rls
 
-- pending
+- review: The worker hit the account usage limit and its first report was lost; the orchestrator asked it to resume and report. Orchestrator ran ruff and the full suite (130 passed) on the merge. Security-critical SQL: the final review should read 0003_rls.sql against the matrix.
 
 ## p3d-triggers
 
@@ -75,7 +75,11 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11a1-sync-plan
 
-- pending
+- worker: "Descends from last_indexed_sha" is implemented as the sha being on the first-parent chain of main, which is stricter than ancestry; if the head moves while planning the plan raises ForgejoError and the run retries.
+- worker: Changed files are fetched per first-parent commit; T0 repos only after the anchor and T1 repos only after last_indexed_sha. document_versions rows are planned only for documents whose last-changing commit differs from the existing row.
+- worker: Duplicate id: all files with the id are rejected except exactly one last changed by an approved merge; T1 repos have no approvals so all duplicates are rejected. A document is superseded only by a current same-repo document naming it or via its own superseded_by naming a current one.
+- worker: The commit-to-PR fallback of listing closed PRs is not implemented because the client has no such method; a missing PR means disputed. Every .md file in the tree is parsed, so a README.md without frontmatter gets a rejection alert. The writer phase must resolve superseded_by to a uuid, parse dates and dedupe alerts across syncs.
+- review: The worker commit trailer says Plan-Phase: knowledge-hub/p11a1-sync-plan (wrong slug); accepted because the merge commit carries the correct trailer. The worker hit the account usage limit mid-run and finished after a resume.
 
 ## p11a2-sync-write
 
