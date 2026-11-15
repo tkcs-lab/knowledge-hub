@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from knowledge_hub.config import Config
+from knowledge_hub.indexer.chunker import chunk_markdown
 from knowledge_hub.indexer.sync import sync_repo
 
 log = logging.getLogger(__name__)
@@ -53,7 +55,41 @@ class Worker:
             cur = await conn.execute(_CLAIM, (MAX_ATTEMPTS,))
             return await cur.fetchone()
 
-    async def _run(self, kind: str, repo: str | None) -> None:
+    async def _embed_raw(self, payload: Any) -> None:
+        """Chunk and embed the blob of one raw record; chunk visibility is inherited by the trigger."""
+        if self.blobs is None:
+            raise RuntimeError("no blob store configured")
+        raw_id = payload["id"]
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT blob_key, required_audiences, allowed_emails FROM kh.raw_records WHERE id = %s",
+                (raw_id,),
+            )
+            row = await cur.fetchone()
+        if row is None:
+            return  # the record is gone; nothing to index
+        blob_key, audiences, emails = row
+        text = (await self.blobs.get(blob_key)).decode("utf-8", errors="replace")
+        chunks = chunk_markdown(text, str(self.chunker_version))
+        visibility = SimpleNamespace(required_audiences=audiences, allowed_emails=emails)
+        embeddable = bool(self.embedder.may_embed(visibility))
+        vectors: list[list[float] | None] = [None] * len(chunks)
+        if embeddable and chunks:
+            texts = [f"{c.heading_path}\n\n{c.text}" if c.heading_path else c.text for c in chunks]
+            vectors = list(await self.embedder.embed(texts))
+        model = self.embedder.model if embeddable else None
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("DELETE FROM kh.chunks WHERE raw_id = %s", (raw_id,))
+            for c, vec in zip(chunks, vectors, strict=True):
+                literal = None if vec is None else "[" + ",".join(repr(float(x)) for x in vec) + "]"
+                await conn.execute(
+                    "INSERT INTO kh.chunks (id, raw_id, ordinal, heading_path, text, content_sha,"
+                    " embedding, embedding_model, owner_key, tier, required_audiences)"
+                    " VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s::vector, %s, '', 'T3', '{}')",
+                    (raw_id, c.ordinal, c.heading_path, c.text, c.content_sha, literal, model),
+                )
+
+    async def _run(self, kind: str, repo: str | None, payload: Any = None) -> None:
         if kind == "git_push":
             if repo is None:
                 raise ValueError("git_push job without a repo")
@@ -65,16 +101,18 @@ class Worker:
                 self.embedder,
                 chunker_version=self.chunker_version,
             )
-        # pr_event (and the embed kinds) are recorded as done; later phases handle them.
+        elif kind == "embed_raw":
+            await self._embed_raw(payload)
+        # pr_event and embed_derived are recorded as done; later phases handle them.
 
     async def run_once(self) -> bool:
         """Run one queued job; False when there was none."""
         job = await self._claim()
         if job is None:
             return False
-        job_id, kind, repo, _payload, attempts = job
+        job_id, kind, repo, payload, attempts = job
         try:
-            await self._run(kind, repo)
+            await self._run(kind, repo, payload)
         except Exception as exc:
             log.exception("index job %s failed", job_id)
             await self._finish(job_id, attempts, f"{type(exc).__name__}: {exc}")
