@@ -13,6 +13,7 @@ from starlette.routing import Route
 from knowledge_hub.auth.claims import ClaimMiddleware
 from knowledge_hub.auth.pf_claim_verify import ClaimVerifier
 from knowledge_hub.auth.replay import PgReplayCache
+from knowledge_hub.indexer.webhook import make_webhook_endpoint
 from knowledge_hub.mcp.server import Deps, build_mcp
 from knowledge_hub.settings import Settings
 
@@ -55,6 +56,10 @@ def build_app(settings: Settings, deps: Deps, verifier: ClaimVerifier) -> Starle
             yield
 
     return Starlette(
-        routes=[Route("/mcp", endpoint=McpRoute()), Route("/healthz", healthz)],
+        routes=[
+            Route("/mcp", endpoint=McpRoute()),
+            Route("/healthz", healthz),
+            Route("/webhooks/forgejo", make_webhook_endpoint(deps), methods=["POST"]),
+        ],
         lifespan=lifespan,
     )
