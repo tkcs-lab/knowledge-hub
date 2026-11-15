@@ -227,7 +227,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p26-release-workflow
 
-- pending
+- worker: Choices left open: no tld-release.yml template exists in the repo, so the green-checks gate excludes check runs named build, publish and the workflow name and uses gh api on commits/$SHA/check-runs accepting success, skipped and neutral; the build step tags the image knowledge-hub:release-test and the push step rebuilds with push-by-digest taking the digest from that step; the tag step uses -f object=$SHA -f type=commit with the message Release <version>; the release title is v<version>; the run
+- review: The worker could not run the tld acceptance commands; the orchestrator ran tld profile validate (exit 0) and tld ops release-prepare (current 0.1.0). tld guard allow-profile was not used for the profile edit. The workflow has never run on GitHub; the release environment and the TLD_RELEASE_TOKEN secret are manual steps for the owner. Orchestrator ran ruff and the full suite (762 passed, 1 skipped).
 
 ## Final review
 
