@@ -66,8 +66,6 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
     parsed = parse_id(id)
     if parsed is None:
         raise kh_error("not_found", errors.NOT_FOUND)
-    if version:
-        raise kh_error("version_not_indexed", errors.VERSION_NOT_INDEXED, sha=version)
     kind, key = parsed
     out: dict[str, Any]
     if kind == "doc":
@@ -108,7 +106,39 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
             "indexed_at": _iso(row["indexed_at"]),
             "source_link": (row["source_url"] or "") if kind == "raw" else "",
         }
+    if version:
+        out = await _at_version(call, kind, key, version, out, row)
     out["citation_id"] = f"{kind}:{key}"
+    return out
+
+
+_VERSION_SQL = """
+SELECT v.path, v.tier, v.status, v.approved_by, v.approved_at
+  FROM kh.document_versions v WHERE v.document_id = %s AND v.commit_sha = %s
+"""
+
+
+async def _at_version(
+    call: ToolCall, kind: str, key: uuid.UUID, version: str, out: dict[str, Any], row: dict[str, Any]
+) -> dict[str, Any]:
+    """The document as of an indexed commit; the visible current row has already been read (RLS)."""
+    if kind != "doc":
+        raise kh_error("version_not_indexed", errors.VERSION_NOT_INDEXED, sha=version)
+    async with call.conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(_VERSION_SQL, (key, version))
+        ver = await cur.fetchone()
+    if ver is None:
+        raise kh_error("version_not_indexed", errors.VERSION_NOT_INDEXED, sha=version)
+    text = await call.deps.forgejo.get_raw(row["repo"], ver["path"], version)
+    out.update(
+        text=text,
+        tier=ver["tier"],
+        status=ver["status"],
+        approved_by=list(ver["approved_by"] or []),
+        approved_at=_iso(ver["approved_at"]),
+        commit_sha=version,
+        source_link=source_link(call.deps, row["repo"], version, ver["path"]),
+    )
     return out
 
 
