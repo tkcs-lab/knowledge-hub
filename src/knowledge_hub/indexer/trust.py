@@ -16,12 +16,37 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 TRUSTED = "trusted"
 DISPUTED = "disputed"
 TRUST_ANCHOR = "trust-anchor"
 NON_MERGE = "non-merge commit"
+BAD_TIMESTAMP = "unparsable timestamp"
+_ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def parse_forgejo_ts(value: Any) -> datetime | None:
+    """A Forgejo timestamp as an aware UTC datetime, or ``None`` if it cannot be parsed.
+
+    Accepts ``Z``, numeric offsets (``+01:00``) and fractional seconds. A value without an offset
+    is refused: its instant is unknown.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.astimezone(UTC)
+
+
+def format_ts(dt: datetime) -> str:
+    """Whole-second UTC with ``Z``: the stored form (same as ``sync._fmt_ts``)."""
+    return dt.astimezone(UTC).strftime(_ISO_Z)
 
 
 @dataclass(frozen=True)
@@ -57,9 +82,9 @@ def files_from_compare(compare: dict[str, Any]) -> list[str]:
     return [f["filename"] for f in compare.get("files") or []]
 
 
-def _commit_date(commit: dict[str, Any]) -> str | None:
+def _commit_date(commit: dict[str, Any]) -> datetime | None:
     inner = commit.get("commit") or {}
-    return (inner.get("committer") or {}).get("date") or commit.get("created")
+    return parse_forgejo_ts((inner.get("committer") or {}).get("date") or commit.get("created"))
 
 
 def _approvals(
@@ -111,8 +136,10 @@ def _merge_verdict(
             reason="no approval of the final head",
         )
     names = tuple(sorted({r["user"]["login"] for r in approvals}))
-    latest = max(r.get("submitted_at") or "" for r in approvals) or None
-    return Verdict(TRUSTED, names, latest, pr["number"], pr.get("html_url"))
+    stamps = [parse_forgejo_ts(r.get("submitted_at")) for r in approvals]
+    if any(t is None for t in stamps):
+        return Verdict(DISPUTED, merge_pr=pr["number"], pr_url=pr.get("html_url"), reason=BAD_TIMESTAMP)
+    return Verdict(TRUSTED, names, format_ts(max(t for t in stamps if t)), pr["number"], pr.get("html_url"))
 
 
 def evaluate_chain(
@@ -135,9 +162,14 @@ def evaluate_chain(
             result.trusted = False
             result.alerts.append(f"trust anchor {anchor} is not on main of {repo}")
             return result
-        result.anchor_verdict = Verdict(
-            TRUSTED, (TRUST_ANCHOR,), _commit_date(chain[idx]), reason="at or before the trust anchor"
-        )
+        anchor_at = _commit_date(chain[idx])
+        if anchor_at is None:
+            result.alerts.append(f"trust anchor {anchor} of {repo} has no readable commit date")
+            result.anchor_verdict = Verdict(DISPUTED, reason=BAD_TIMESTAMP)
+        else:
+            result.anchor_verdict = Verdict(
+                TRUSTED, (TRUST_ANCHOR,), format_ts(anchor_at), reason="at or before the trust anchor"
+            )
         start = idx + 1
         for c in chain[:start]:
             result.commit_verdicts[c["sha"]] = result.anchor_verdict

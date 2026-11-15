@@ -91,3 +91,44 @@ def test_null_anchor_checks_every_commit_including_root():
     r = run("all_approved", anchor=None)
     assert not r.trusted
     assert f"non-merge commit {ROOT} on main of kh/canonical-all" in r.alerts
+
+
+def test_parse_forgejo_ts_forms():
+    from knowledge_hub.indexer.trust import format_ts, parse_forgejo_ts
+
+    assert format_ts(parse_forgejo_ts("2026-11-02T10:00:00Z")) == "2026-11-02T10:00:00Z"
+    assert format_ts(parse_forgejo_ts("2026-11-02T11:00:00+01:00")) == "2026-11-02T10:00:00Z"
+    assert format_ts(parse_forgejo_ts("2026-11-02T10:00:00.987654Z")) == "2026-11-02T10:00:00Z"
+    assert format_ts(parse_forgejo_ts("2026-11-02T23:30:00.5-02:00")) == "2026-11-03T01:30:00Z"
+    for bad in (None, "", "yesterday", "2026-11-02T10:00:00", 5):
+        assert parse_forgejo_ts(bad) is None
+
+
+def test_offset_dates_are_normalised_in_verdicts():
+    d = json.loads((DATA / "all_approved.json").read_text())
+    d["commits"][-1]["commit"]["committer"]["date"] = "2026-11-01T11:00:00+01:00"
+    for revs in d["reviews"].values():
+        for rv in revs:
+            rv["submitted_at"] = "2026-11-02T11:00:00.250+01:00"
+    r = run("all_approved", commits=d["commits"], reviews=d["reviews"])
+    assert r.anchor_verdict.approved_at == "2026-11-01T10:00:00Z"
+    assert r.file_verdicts["a.md"].approved_at == "2026-11-02T10:00:00Z"
+
+
+def test_unparsable_review_time_is_disputed_without_free_text():
+    d = json.loads((DATA / "all_approved.json").read_text())
+    for revs in d["reviews"].values():
+        for rv in revs:
+            rv["submitted_at"] = "not a date <script>"
+    r = run("all_approved", reviews=d["reviews"])
+    assert r.file_verdicts["a.md"].status == DISPUTED
+    assert all("script" not in a for a in r.alerts) and r.alerts
+
+
+def test_unparsable_anchor_date_is_disputed():
+    d = json.loads((DATA / "all_approved.json").read_text())
+    d["commits"][-1]["commit"]["committer"]["date"] = "garbage"
+    d["commits"][-1]["created"] = "garbage"
+    r = run("all_approved", commits=d["commits"])
+    assert r.anchor_verdict.status == DISPUTED
+    assert any("no readable commit date" in a for a in r.alerts)

@@ -126,3 +126,15 @@ async def test_check_reports_head_and_content_drift(fresh_db, indexer_pool):
     report = await check(deps)
     assert report.repo_drift == ["canonical-all"]
     assert report.document_drift == ["canonical-all/a.md"]
+
+
+async def test_rebuild_twice_with_offset_dates_changes_nothing(fresh_db, indexer_pool):
+    c, p, r = merged("m1", "a0", {"b.md": doc("b")}, 1)
+    r[0]["submitted_at"] = "2026-11-02T11:00:00.750+01:00"
+    repo = repo_of([(c, p, r)], {"a.md": doc("a")})
+    repo.commits[0].date = "2026-11-01T11:00:00+01:00"
+    deps = make_deps(indexer_pool, repo)
+    await rebuild(deps)
+    first = rows(fresh_db, SNAP)
+    await rebuild(deps, "canonical-all")
+    assert rows(fresh_db, SNAP) == first

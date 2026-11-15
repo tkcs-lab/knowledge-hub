@@ -18,7 +18,7 @@ from typing import Any
 from knowledge_hub.config import Config
 from knowledge_hub.forgejo.client import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
-from knowledge_hub.indexer.trust import TRUSTED, Verdict, evaluate_chain
+from knowledge_hub.indexer.trust import TRUSTED, Verdict, evaluate_chain, parse_forgejo_ts
 
 BOT_LOGINS = ("kh-hub-bot",)
 BRANCH = "main"
@@ -157,6 +157,10 @@ def _doc_changed(row: Mapping[str, Any] | None, up: DocUpsert) -> bool:
         old = row.get(key)
         if key == "approved_by":
             old = list(old or [])
+        if key == "approved_at":
+            old, value = parse_forgejo_ts(old), parse_forgejo_ts(value)
+            old = old and old.replace(microsecond=0)
+            value = value and value.replace(microsecond=0)
         if old != value:
             return True
     return False
