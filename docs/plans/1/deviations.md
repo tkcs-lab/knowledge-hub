@@ -232,7 +232,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: Blocking finding 1: propose_change wrote to Forgejo with the indexer token because nothing read KH_FORGEJO_BOT_TOKEN_FILE; fix-1 builds a separate bot client used only for promotion writes.
+- final: Blocking finding 2: sync compared approved_at as a raw Forgejo string, so a committer date with a local offset or fractional seconds made every anchor-trusted document look changed on each sync; fix-2 normalises timestamps to UTC instants.
 
 ## Finishing
 
