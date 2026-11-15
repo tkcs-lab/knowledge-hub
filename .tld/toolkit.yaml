@@ -5,6 +5,9 @@ project:
 docs:
   must_read:
     - README.md
+  changelog:
+    file: CHANGELOG.md
+    section: "## [Unreleased]"
 git:
   main_branch: main
   branch_pattern: "<type>/<kebab-case>"
@@ -18,3 +21,8 @@ verify:
   after_merge_allow:
     - .venv/bin/python -m pytest
 stacks: [python]
+release:
+  workflow: release.yml
+  version_files:
+    - path: src/knowledge_hub/__init__.py
+      pattern: '^__version__ = "(\d+\.\d+\.\d+)"$'

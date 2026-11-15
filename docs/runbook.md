@@ -91,3 +91,14 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 - **n8n chooses participants.** An `n8n_workflow` token that ingests a record with no mapped series or folder chooses the `participants`, and those become the `allowed_emails` of the record. A compromised or careless workflow token can therefore decide who sees an unmapped record. Map every series and folder you use in `raw_audience_map`, which gives audiences instead, and treat the n8n token like a write credential.
 - **Scan timing.** Exact vector scans take time in proportion to the number of hidden rows; the timing is the one accepted residual of the no-existence-leak rule.
 - **Per-process limits.** The rate limiter is not shared between processes.
+
+## Releasing
+
+Releases follow the `/tld:release` skill. The version lives only in `src/knowledge_hub/__init__.py`.
+
+1. Run `/tld:release`. It moves the `## [Unreleased]` changelog entries under a `## [X.Y.Z] - <date>` heading, bumps `__version__` and opens a `chore/release-<X-Y-Z>` pull request. Review and merge it.
+2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first. A dry run checks the changelog heading, that every other check on the commit is green, builds the arm64 image and runs `docker run --rm <image> --help`. It pushes nothing.
+3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes the image to GHCR by digest only.
+4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The workflow has no `skip_checks` input.
+5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.
+6. To roll the new version out, in the compose repo update the `images_track` entry for knowledge-hub to `X.Y.Z`, run `scripts/pin-images.sh` to pin the digest, and deploy as usual.

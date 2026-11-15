@@ -1,0 +1,138 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and test only; push nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      checks: read
+      statuses: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c 'import re,sys; m=re.search(r"^__version__ = \"(\d+\.\d+\.\d+)\"$", open("src/knowledge_hub/__init__.py").read(), re.M); sys.exit("no version") if not m else print(m.group(1))')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check changelog heading
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          grep -q "^## \[$VERSION\] - " CHANGELOG.md || { echo "CHANGELOG.md has no heading '## [$VERSION] - <date>'"; exit 1; }
+
+      - name: Require green checks on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SELF: ${{ github.workflow }}
+        run: |
+          set -euo pipefail
+          bad=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+            --jq ".check_runs[] | select(.name != \"$SELF\" and .name != \"build\" and .name != \"publish\") | select(.status != \"completed\" or (.conclusion | IN(\"success\",\"skipped\",\"neutral\") | not)) | \"\(.name): \(.status)/\(.conclusion)\"")
+          if [ -n "$bad" ]; then
+            echo "Checks not green:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: knowledge-hub:release-test
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run --rm knowledge-hub:release-test --help
+
+      - name: Log in to GHCR
+        if: inputs.dry_run == false
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image by digest
+        id: push
+        if: inputs.dry_run == false
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+
+  publish:
+    needs: build
+    if: inputs.dry_run == false
+    runs-on: ubuntu-24.04-arm
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the image with the version
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t ghcr.io/${{ github.repository }}:$VERSION ghcr.io/${{ github.repository }}@$DIGEST
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.TLD_RELEASE_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          awk -v v="$VERSION" '
+            /^## \[/ { if (on) exit; if (index($0, "## [" v "] - ") == 1) { on = 1; next } }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+          TAG_SHA=$(gh api -X POST "repos/$REPO/git/tags" \
+            -f tag="v$VERSION" -f message="Release $VERSION" -f object="$SHA" -f type=commit \
+            --jq .sha)
+          gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$TAG_SHA"
+          gh release create "v$VERSION" --repo "$REPO" --verify-tag --title "v$VERSION" --notes-file release-notes.md
