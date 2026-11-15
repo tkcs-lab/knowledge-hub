@@ -126,7 +126,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p13b-rebuild-check
 
-- pending
+- scope: scope: tests/unit/test_settings.py
+- review: One test in test_settings.py called kh migrate, which is now implemented, so it was switched to the daily stub; accepted.
+- worker: Choices left open: rebuild retries a refused sync (main rewritten) by setting repo_state.last_indexed_sha to NULL and syncing again; check re-fetches each indexed document at HEAD and hashes it, counts a document missing at HEAD as drift and does not flag never-indexed files; a versioned get_doc reads the current row first for every id kind so a hidden id gives not found, and returns the whole file with frontmatter while tier, status, approval fields, commit_sha and source_link come from the doc
+- review: Known defect risk for the final review: sync_plan._doc_changed compares approved_at as a string and sync._fmt_ts truncates to whole seconds, so Forgejo timestamps with fractional seconds make every document look changed on each sync and break rebuild-twice idempotence; normalise approved_at in trust.py or sync_plan.py. Orchestrator ran ruff and the full suite (518 passed).
 
 ## p15-ingest-raw
 
