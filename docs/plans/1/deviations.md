@@ -29,6 +29,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p3c-rls
 
 - review: The worker hit the account usage limit and its first report was lost; the orchestrator asked it to resume and report. Orchestrator ran ruff and the full suite (130 passed) on the merge. Security-critical SQL: the final review should read 0003_rls.sql against the matrix.
+- worker: kh_indexer can UPDATE only src_required_audiences and src_allowed_emails on derived_sources, candidate_sources and conflict_items (the 3.3 text, not the matrix row, says so); ALL for kh_indexer means SELECT, INSERT, UPDATE, DELETE without TRUNCATE, REFERENCES or TRIGGER.
+- worker: Decision and closing columns were not listed in the plan: indexer UPDATE on candidates is state, decided_at, required_audiences, allowed_emails; on conflicts state, closed_at, closed_by_pr, required_audiences, allowed_emails.
+- worker: kh.visible wraps the plan expression in coalesce(..., false); kh.candidate_mark keeps stored branch, pr_number and pr_url when given null and always replaces error; the sql-language definer functions use a CTE with RETURNING 1; caller_* helpers and visible have no SET search_path so they can be inlined in policies.
+- review: Worker ran 10 mutation checks on the migration and each broke exactly one test. kh_indexer has no EXECUTE on kh.caller_* or kh.visible; phase p3d must account for that in its triggers.
 
 ## p3d-triggers
 
