@@ -1,0 +1,143 @@
+"""In-memory fake of the read methods of ``ForgejoClient`` (no HTTP).
+
+A repo is described by commits, oldest first. Each commit lists the file changes it makes relative to
+its first parent (``None`` deletes a file); the tree at a commit is the first-parent chain applied in
+order. PRs and reviews are given in Forgejo's JSON shapes (see ``indexer/trust.py``).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from knowledge_hub.forgejo.client import ForgejoError
+
+
+@dataclass
+class FakeCommit:
+    sha: str
+    parents: list[str] = field(default_factory=list)
+    files: dict[str, str | None] = field(default_factory=dict)
+    date: str = "2026-11-01T10:00:00Z"
+
+
+@dataclass
+class FakeRepo:
+    commits: list[FakeCommit]
+    pulls: list[dict[str, Any]] = field(default_factory=list)
+    reviews: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+
+
+def pr(number: int, merge_sha: str, head_sha: str, author: str = "alice") -> dict[str, Any]:
+    return {
+        "number": number,
+        "html_url": f"https://forgejo.test/kh/repo/pulls/{number}",
+        "merged": True,
+        "merge_commit_sha": merge_sha,
+        "user": {"login": author},
+        "base": {"ref": "main"},
+        "head": {"sha": head_sha},
+    }
+
+
+def approval(head_sha: str, user: str = "bob", at: str = "2026-11-02T10:00:00Z") -> dict[str, Any]:
+    return {
+        "state": "APPROVED",
+        "official": True,
+        "dismissed": False,
+        "commit_id": head_sha,
+        "submitted_at": at,
+        "user": {"login": user},
+    }
+
+
+class ForgejoFake:
+    def __init__(self, repos: dict[str, FakeRepo]) -> None:
+        self.repos = repos
+        self.calls: list[str] = []
+
+    def _repo(self, repo: str) -> FakeRepo:
+        try:
+            return self.repos[repo]
+        except KeyError:
+            raise ForgejoError(f"unknown repo {repo}") from None
+
+    def _commit(self, repo: str, sha: str) -> FakeCommit:
+        for c in self._repo(repo).commits:
+            if c.sha == sha:
+                return c
+        raise ForgejoError(f"unknown commit {sha}")
+
+    def _snapshot(self, repo: str, sha: str) -> dict[str, str]:
+        chain: list[FakeCommit] = []
+        cur: str | None = sha
+        while cur is not None:
+            c = self._commit(repo, cur)
+            chain.append(c)
+            cur = c.parents[0] if c.parents else None
+        tree: dict[str, str] = {}
+        for c in reversed(chain):
+            for path, text in c.files.items():
+                if text is None:
+                    tree.pop(path, None)
+                else:
+                    tree[path] = text
+        return tree
+
+    @staticmethod
+    def _shape(c: FakeCommit) -> dict[str, Any]:
+        return {
+            "sha": c.sha,
+            "parents": [{"sha": p} for p in c.parents],
+            "commit": {"committer": {"date": c.date}},
+        }
+
+    async def head_sha(self, repo: str, branch: str) -> str:
+        self.calls.append("head_sha")
+        return self._repo(repo).commits[-1].sha
+
+    async def list_tree(self, repo: str, sha: str) -> list[dict[str, Any]]:
+        self.calls.append("list_tree")
+        return [
+            {"path": p, "type": "blob", "sha": f"blob-{i}", "size": len(t)}
+            for i, (p, t) in enumerate(sorted(self._snapshot(repo, sha).items()))
+        ]
+
+    async def get_raw(self, repo: str, path: str, sha: str) -> str:
+        self.calls.append("get_raw")
+        tree = self._snapshot(repo, sha)
+        if path not in tree:
+            raise ForgejoError(f"GET raw/{path} failed: HTTP 404")
+        return tree[path]
+
+    async def commits_first_parent(
+        self, repo: str, branch: str, since_sha: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.calls.append("commits_first_parent")
+        out: list[dict[str, Any]] = []
+        cur: str | None = await self.head_sha(repo, branch)
+        while cur is not None and cur != since_sha:
+            c = self._commit(repo, cur)
+            out.append(self._shape(c))
+            cur = c.parents[0] if c.parents else None
+        return out
+
+    async def pull_for_commit(self, repo: str, sha: str) -> dict[str, Any] | None:
+        self.calls.append("pull_for_commit")
+        return next((p for p in self._repo(repo).pulls if p.get("merge_commit_sha") == sha), None)
+
+    async def pull(self, repo: str, number: int) -> dict[str, Any]:
+        self.calls.append("pull")
+        for p in self._repo(repo).pulls:
+            if p["number"] == number:
+                return p
+        raise ForgejoError(f"pull {number} not found")
+
+    async def pull_reviews(self, repo: str, number: int) -> list[dict[str, Any]]:
+        self.calls.append("pull_reviews")
+        return list(self._repo(repo).reviews.get(number, []))
+
+    async def changed_files(self, repo: str, base: str, head: str) -> list[str]:
+        self.calls.append("changed_files")
+        a, b = self._snapshot(repo, base), self._snapshot(repo, head)
+        return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
