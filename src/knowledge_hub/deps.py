@@ -10,6 +10,7 @@ from knowledge_hub.embed.factory import make_embedder
 from knowledge_hub.forgejo.client import ForgejoClient
 from knowledge_hub.indexer.worker import Worker
 from knowledge_hub.mcp.server import Deps
+from knowledge_hub.ratelimit import RateLimiter
 from knowledge_hub.settings import Settings
 
 
@@ -88,6 +89,7 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
         forgejo=forgejo,
         verifier=verifier,
         worker=worker,
+        ratelimiter=RateLimiter(settings.rate_limit_per_min),
     )
 
 

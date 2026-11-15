@@ -11,9 +11,11 @@ from starlette.responses import Response
 
 from knowledge_hub.auth.webhook_hmac import verify_forgejo_signature
 from knowledge_hub.mcp.server import Deps
+from knowledge_hub.metrics import METRICS
 
 
-def _empty(status: int) -> Response:
+def _empty(status: int, result: str) -> Response:
+    METRICS.webhook_event(result)
     return Response(status_code=status)
 
 
@@ -53,21 +55,21 @@ def make_webhook_endpoint(deps: Deps):
     async def forgejo_webhook(request: Request) -> Response:
         body = await _read_capped(request, deps.settings.max_body_bytes)
         if body is None:
-            return _empty(413)
+            return _empty(413, "too_large")
         secret = _secret(deps)
         if secret is None or not verify_forgejo_signature(
             body, request.headers.get("x-forgejo-signature"), secret
         ):
-            return _empty(401)
+            return _empty(401, "bad_signature")
         try:
             payload = json.loads(body)
         except ValueError:
-            return _empty(400)
+            return _empty(400, "bad_request")
         if not isinstance(payload, dict):
-            return _empty(400)
+            return _empty(400, "bad_request")
         repo = _repo_name(payload, deps.settings.forgejo_org)
         if repo is None or repo not in deps.config.repos:
-            return _empty(202)
+            return _empty(202, "ignored")
         event = request.headers.get("x-forgejo-event") or request.headers.get("x-gitea-event") or ""
         kind: str | None = None
         job_payload: dict[str, Any] = {}
@@ -81,12 +83,12 @@ def make_webhook_endpoint(deps: Deps):
                 number = pull.get("number") if isinstance(pull, dict) else None
             job_payload = {"repo": repo, "action": payload.get("action"), "number": number}
         if kind is None:
-            return _empty(202)
+            return _empty(202, "ignored")
         async with deps.indexer_pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES (%s, %s, %s)",
                 (kind, repo, Jsonb(job_payload)),
             )
-        return _empty(202)
+        return _empty(202, "queued")
 
     return forgejo_webhook

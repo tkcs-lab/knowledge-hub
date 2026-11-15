@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from psycopg import AsyncConnection
 
 from knowledge_hub.auth.claims import Call, Caller
 from knowledge_hub.db.caller_tx import caller_tx
+from knowledge_hub.metrics import METRICS
 
 if TYPE_CHECKING:
     from knowledge_hub.mcp.server import Deps
@@ -60,6 +62,7 @@ DUPLICATE = "an identical proposal is already open: {id} (PR #{n})"
 LIMIT = "daily promotion limit for domain {d} in {repo} reached ({n}); try again after {time} UTC"
 BAD_CANDIDATE = "candidate_id must name one of your own failed proposals"
 PR_FAILED = "could not open the pull request; call propose_change again with candidate_id={id} to retry"
+RATE_LIMIT = "rate limit exceeded; retry in {n} seconds"
 
 
 class KhError(Exception):
@@ -135,17 +138,30 @@ def tool_guard(name: str, deps: Deps) -> Callable[[_Tool], _Tool]:
             expected = {**defaults, **call.arguments}
             if not _same(kwargs, expected):
                 raise _refuse("arguments differ from the hashed call")
+            limiter = deps.ratelimiter
+            if limiter is not None:
+                allowed, retry = limiter.allow(caller.sub, time.monotonic())
+                if not allowed:
+                    METRICS.tool_call(name, "rate_limited", 0.0)
+                    raise ToolError(RATE_LIMIT.format(n=retry))
+            started = time.monotonic()
+            outcome = "ok"
             try:
                 async with caller_tx(deps.app_pool, caller) as conn:
                     return await fn(ToolCall(conn, caller, deps), **kwargs)
             except KhError as exc:
+                outcome = "error"
                 raise ToolError(exc.text) from None
             except ToolError:
+                outcome = "error"
                 raise
             except Exception:
+                outcome = "internal"
                 ref = uuid.uuid4()
                 log.exception("tool %s failed ref=%s", name, ref)
                 raise ToolError(INTERNAL.format(ref=ref)) from None
+            finally:
+                METRICS.tool_call(name, outcome, time.monotonic() - started)
 
         wrapper.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             [
