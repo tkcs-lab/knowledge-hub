@@ -98,7 +98,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11a2-sync-write
 
-- pending
+- worker: Choices left open: after taking the advisory lock sync_repo reloads repo_state and the existing documents and re-plans if they changed; changed documents get a temporary path before upsert so renames and swaps cannot hit UNIQUE (repo, path); a refused plan writes only its alerts; alerts are deduped on (repo, path, message); superseded_by is resolved in a second pass after the upserts.
+- review: Known risk: if Forgejo submitted_at carries fractional seconds or a non-Z offset, the planner compares it as a raw string and may mark a document changed on every sync; the fix belongs in sync_plan.py. The # fmt: skip hits in the diff are formatter hints, not skipped tests. Orchestrator ran ruff and the full suite (471 passed).
 
 ## p11b-sync-chunks
 
