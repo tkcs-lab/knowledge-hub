@@ -103,7 +103,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11b-sync-chunks
 
-- pending
+- scope: scope: tests/integration/test_sync.py
+- review: One line changed in test_sync.py because sync_repo now takes a required embedder; accepted. The worker also reformatted unrelated files by mistake and reverted them; the commit touches only the four listed files.
+- worker: Choices left open: plan_chunks takes chunker_version as a keyword because Config does not carry KH_CHUNKER_VERSION, and sync_repo has a matching chunker_version keyword defaulting to 1; unchanged chunks are matched by content_sha, not ordinal, so ids survive an inserted section; a chunk is also rewritten when the embedding model changes or its embedded state flips; if sync_repo re-plans after taking the lock, the chunk plan is recomputed inside the transaction so embedding runs while the lock is
+- review: Callers of sync_repo (rebuild, worker) must pass an embedder and chunker_version=settings.chunker_version. Orchestrator ran ruff and the full suite (477 passed).
 
 ## p12-webhook-worker
 
