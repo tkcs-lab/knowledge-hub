@@ -1,8 +1,12 @@
-"""In-memory fake of the read methods of ``ForgejoClient`` (no HTTP).
+"""In-memory fake of ``ForgejoClient`` (no HTTP): reads and the promotion write side.
 
 A repo is described by commits, oldest first. Each commit lists the file changes it makes relative to
 its first parent (``None`` deletes a file); the tree at a commit is the first-parent chain applied in
 order. PRs and reviews are given in Forgejo's JSON shapes (see ``indexer/trust.py``).
+
+Writes (``create_branch``, ``put_file``, ``open_pull``) mutate ``branches``, ``files`` and ``opened``
+and append every ref they touch to ``written_refs``, so a test can assert nothing reached ``main``.
+The fake does not guard: the guard lives in the real client and is tested there.
 """
 
 from __future__ import annotations
@@ -55,6 +59,11 @@ class ForgejoFake:
     def __init__(self, repos: dict[str, FakeRepo]) -> None:
         self.repos = repos
         self.calls: list[str] = []
+        self.branches: dict[tuple[str, str], str] = {}
+        self.files: dict[tuple[str, str, str], str] = {}
+        self.labels: dict[str, set[str]] = {}
+        self.opened: list[dict[str, Any]] = []
+        self.written_refs: list[str] = []
 
     def _repo(self, repo: str) -> FakeRepo:
         try:
@@ -141,3 +150,60 @@ class ForgejoFake:
         self.calls.append("changed_files")
         a, b = self._snapshot(repo, base), self._snapshot(repo, head)
         return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
+
+    # -- write side ----------------------------------------------------------------------------
+
+    def _tree_at(self, repo: str, ref: str) -> dict[str, str]:
+        if (repo, ref) in self.branches:
+            tree = self._snapshot(repo, self.branches[(repo, ref)])
+            tree.update({p: t for (r, b, p), t in self.files.items() if r == repo and b == ref})
+            return tree
+        if ref == "main":
+            return self._snapshot(repo, self._repo(repo).commits[-1].sha)
+        return self._snapshot(repo, ref)
+
+    async def path_exists(self, repo: str, path: str, ref: str) -> bool:
+        self.calls.append("path_exists")
+        return path in self._tree_at(repo, ref)
+
+    async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
+        self.calls.append("create_branch")
+        self.written_refs.append(name)
+        self._commit(repo, from_sha)
+        if (repo, name) in self.branches:
+            raise ForgejoError("POST branches failed: HTTP 409")
+        self.branches[(repo, name)] = from_sha
+
+    async def put_file(self, repo: str, branch: str, path: str, content: str, message: str) -> None:
+        self.calls.append("put_file")
+        self.written_refs.append(branch)
+        if (repo, branch) not in self.branches:
+            raise ForgejoError("PUT contents failed: HTTP 404")
+        self.files[(repo, branch, path)] = content
+
+    async def open_pull(
+        self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
+    ) -> dict[str, Any]:
+        self.calls.append("open_pull")
+        self.written_refs.append(head)
+        if (repo, head) not in self.branches:
+            raise ForgejoError("POST pulls failed: HTTP 404")
+        known = self.labels.get(repo)
+        if known is not None and (missing := [n for n in labels if n not in known]):
+            raise ForgejoError("label not found: " + ", ".join(missing))
+        repo_obj = self._repo(repo)
+        number = max([p["number"] for p in repo_obj.pulls] + [0]) + 1
+        pull = {
+            "number": number,
+            "html_url": f"https://forgejo.test/kh/{repo}/pulls/{number}",
+            "merged": False,
+            "user": {"login": "kh-hub-bot"},
+            "base": {"ref": base},
+            "head": {"ref": head},
+            "title": title,
+            "body": body,
+            "labels": [{"name": n} for n in labels],
+        }
+        repo_obj.pulls.append(pull)
+        self.opened.append(pull)
+        return pull
