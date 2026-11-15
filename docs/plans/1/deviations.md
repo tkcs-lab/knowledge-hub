@@ -5,7 +5,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-skeleton
 
-- pending
+- worker: No deviation in the code; the worker could not run tld guards, dod or role checks because its container has no tld toolkit.
+- review: Owner chose to waive worker-side tld steps and role reviews; orchestrator ran profile validation, ruff and unit and integration tests after the merge.
+- worker: config.py checks unknown audiences in audiences, raw_audience_map and entities but has no domain check, since section 3.1 does not place domains.
+- retry: Phase marked blocked once for the missing toolkit, then merged after the owner waived the toolkit steps.
 
 ## p2-claims
 
