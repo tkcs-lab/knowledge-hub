@@ -12,7 +12,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-claims
 
-- pending
+- scope: scope: src/knowledge_hub/auth/ruff.toml
+- review: Added auth/ruff.toml, a small file that only excludes the vendored verifier from linting; accepted. Vendored file sha256 matches VENDORED.md. Worker tld steps and roles waived by the owner; orchestrator ran ruff, unit and integration tests.
 
 ## p3a-runner-fixture
 
