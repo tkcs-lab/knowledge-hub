@@ -121,7 +121,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p13a-wiring
 
-- pending
+- worker: Choices left open: the Worker is built only when KH_FORGEJO_URL is set, so deps.worker is None without Forgejo; ForgejoClient uses KH_FORGEJO_INDEXER_TOKEN_FILE and build_deps raises ValueError if the URL is set without it; the production ClaimVerifier gets replay_cache None because ClaimMiddleware already applies PgReplayCache; build_deps opens both pools and close_deps closes them; build_deps raises ValueError for a partial S3 setting; mcp/server.py is unchanged and Deps.indexer_pool stays typ
+- review: Gaps for the final review: starting and stopping the worker in the app lifespan and uvicorn startup in kh serve are not covered by tests; with a dev identity and no KH_PF_* settings deps.verifier is None, so a request that carries a claim header would fail inside ClaimMiddleware instead of being refused cleanly. Orchestrator ran ruff and the full suite (494 passed).
 
 ## p13b-rebuild-check
 
