@@ -2,11 +2,12 @@
 
 Reads return Forgejo's JSON shapes as plain dicts and lists (the shapes ``indexer/trust.py`` consumes).
 Errors carry a fixed text with the method, path and status only: never the token, never the body.
-Every write added later must call ``_guard_ref`` on its target ref before sending anything.
+Every write calls ``_guard_ref`` on its target ref before sending anything.
 """
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 from urllib.parse import quote
 
@@ -173,3 +174,97 @@ class ForgejoClient:
         """Paths changed between ``base`` and ``head`` (compare endpoint)."""
         data = await self._get_json(f"{self._repo(repo)}/compare/{_q(base)}...{_q(head)}")
         return [f["filename"] for f in data.get("files") or []]
+
+    async def path_exists(self, repo: str, path: str, ref: str) -> bool:
+        """Whether ``path`` exists at ``ref`` (a read: not guarded). HTTP 404 means no."""
+        url = f"{self._repo(repo)}/contents/{quote(path, safe='/')}"
+        try:
+            resp = await self._http.get(url, params={"ref": ref})
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code == 404:
+            return False
+        if resp.status_code != 200:
+            raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+        return True
+
+    # -- writes: every one calls ``_guard_ref`` on the branch it writes before sending ---------
+
+    async def _send(self, method: str, path: str, body: dict[str, Any]) -> Any:
+        try:
+            resp = await self._http.request(method, path, json=body)
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"{method} {path} failed: {type(exc).__name__}") from None
+        if resp.status_code not in (200, 201):
+            raise ForgejoError(f"{method} {path} failed: HTTP {resp.status_code}")
+        try:
+            return resp.json()
+        except ValueError:
+            raise ForgejoError(f"{method} {path} failed: invalid JSON") from None
+
+    async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
+        _guard_ref(name)
+        await self._send(
+            "POST", f"{self._repo(repo)}/branches", {"new_branch_name": name, "old_ref_name": from_sha}
+        )
+
+    async def put_file(self, repo: str, branch: str, path: str, content: str, message: str) -> None:
+        """Create ``path`` on ``branch`` or, when it exists there, replace it."""
+        _guard_ref(branch)
+        url = f"{self._repo(repo)}/contents/{quote(path, safe='/')}"
+        body: dict[str, Any] = {
+            "branch": branch,
+            "message": message,
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        }
+        existing = await self._existing_blob_sha(url, branch)
+        if existing is None:
+            await self._send("POST", url, body)
+        else:
+            await self._send("PUT", url, {**body, "sha": existing})
+
+    async def _existing_blob_sha(self, url: str, branch: str) -> str | None:
+        try:
+            resp = await self._http.get(url, params={"ref": branch})
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+        try:
+            return resp.json()["sha"]
+        except (ValueError, KeyError, TypeError):
+            raise ForgejoError(f"GET {url} failed: invalid JSON") from None
+
+    async def _label_ids(self, repo: str, names: list[str]) -> list[int]:
+        ids: dict[str, int] = {}
+        for path in (f"{self._repo(repo)}/labels", f"/orgs/{_q(self.org)}/labels"):
+            for page in range(1, _MAX_PAGES + 1):
+                try:
+                    batch = await self._get_json(path, {"page": page, "limit": _PAGE})
+                except ForgejoError:
+                    if path.startswith("/orgs/"):
+                        break  # labels not readable at org level: repo labels only
+                    raise
+                for label in batch:
+                    ids.setdefault(label["name"], label["id"])
+                if len(batch) < _PAGE:
+                    break
+        missing = [n for n in names if n not in ids]
+        if missing:
+            raise ForgejoError("label not found: " + ", ".join(missing))
+        return [ids[n] for n in names]
+
+    async def open_pull(
+        self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
+    ) -> dict[str, Any]:
+        _guard_ref(head)
+        if base != "main":
+            raise ForgejoRefused("write refused: pull request base must be main")
+        label_ids = await self._label_ids(repo, labels) if labels else []
+        return await self._send(
+            "POST",
+            f"{self._repo(repo)}/pulls",
+            {"head": head, "base": base, "title": title, "body": body, "labels": label_ids},
+        )
