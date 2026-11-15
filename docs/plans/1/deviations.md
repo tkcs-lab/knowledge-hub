@@ -54,7 +54,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6a-search-core
 
-- pending
+- worker: decode_cursor has an extra keyword-only max_offset defaulting to 100 (the settings default) and callers must pass settings.search_max_offset; an offset above it raises CURSOR_FOREIGN. Token layout: 32-byte HMAC then an 8-byte big-endian offset, MAC over sub, hash of sorted audiences, hash of query and offset; the key is bytes; may_embed takes visibility typed as object.
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full suite (372 passed).
 
 ## p6b-search-tool
 
