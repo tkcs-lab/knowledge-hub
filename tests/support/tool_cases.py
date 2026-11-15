@@ -153,3 +153,29 @@ TOOL_CASES: list[ToolCase] = [
     INGEST_RAW,
     WRITE_DERIVED,
 ]
+
+
+def _propose_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "domain": "technical",
+        "title": "Matrix",
+        "content": f"matrix {uuid.uuid4()}",
+        "rationale": "matrix",
+        "source_ids": [f"doc:{ids['documents'][case]}" if case else f"doc:{uuid.uuid4()}"],
+        "new_path": f"technical/matrix-{uuid.uuid4().hex[:8]}.md",
+    }
+
+
+# propose_change creates a new row and cites none back (``cases=()``); the matrix calls it once per
+# principal with a source that does not exist. The per-case comparison is in ``test_propose_change``.
+PROPOSE_CHANGE = ToolCase(
+    name="propose_change",
+    args_for_hidden=_propose_args,
+    args_for_visible=_propose_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: _propose_args(ids),
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+TOOL_CASES.append(PROPOSE_CHANGE)
