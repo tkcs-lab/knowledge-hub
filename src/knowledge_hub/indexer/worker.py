@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,6 +16,7 @@ log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
 BACKOFF_SECONDS = 30
+PROMOTE_PREFIX = "bot/promote/"
 
 _CLAIM = """
 UPDATE kh.index_jobs SET state = 'running', attempts = attempts + 1
@@ -116,7 +118,75 @@ class Worker:
             await self._embed_raw(payload)
         elif kind == "embed_derived":
             await self._embed_derived(payload)
-        # pr_event is recorded as done; a later phase handles it.
+        elif kind == "pr_event":
+            await self._pr_event(repo, payload)
+
+    async def _alert(self, conn: Any, repo: str, message: str) -> None:
+        await conn.execute(
+            """
+            INSERT INTO kh.index_alerts (repo, path, message)
+            SELECT %(repo)s, NULL, %(msg)s WHERE NOT EXISTS (
+                SELECT 1 FROM kh.index_alerts
+                WHERE repo = %(repo)s AND path IS NULL AND message = %(msg)s)
+            """,
+            {"repo": repo, "msg": message},
+        )
+
+    async def _pr_event(self, repo: str | None, payload: Any) -> None:
+        """Apply the outcome of a promotion pull request (plan 3.8, PR events).
+
+        The webhook payload is only a trigger: the PR is re-fetched from Forgejo and its head ref names the
+        candidate. Re-running the same event changes nothing.
+        """
+        number = payload.get("number") if isinstance(payload, dict) else None
+        if not repo or not isinstance(number, int) or isinstance(number, bool):
+            return
+        pull = await self.forgejo.pull(repo, number)
+        head = (pull.get("head") or {}).get("ref")
+        if not isinstance(head, str) or not head.startswith(PROMOTE_PREFIX):
+            return
+        try:
+            cid = uuid.UUID(head[len(PROMOTE_PREFIX) :])
+        except ValueError:
+            return
+        merged = bool(pull.get("merged"))
+        if not merged and pull.get("state") != "closed":
+            return  # still open (opened, edited, reopened, ...): nothing to decide
+        async with self.pool.connection() as conn, conn.transaction():
+            cur = await conn.execute(
+                "SELECT target_repo, pr_number FROM kh.candidates WHERE id = %s FOR UPDATE", (cid,)
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return
+            if row[0] != repo or row[1] != number:
+                await self._alert(conn, repo, f"pull request {repo}#{number} does not match candidate {cid}")
+                return
+            if merged:
+                # A reopened and then merged PR may follow a rejection; a promoted candidate stays promoted.
+                await conn.execute(
+                    "UPDATE kh.candidates SET state = 'promoted', decided_at = now()"
+                    " WHERE id = %s AND state IN ('pr_open', 'rejected')",
+                    (cid,),
+                )
+                await conn.execute(
+                    """
+                    UPDATE kh.conflicts SET state = 'closed', closed_at = now(), closed_by_pr = %s
+                    WHERE state = 'open'
+                      AND EXISTS (SELECT 1 FROM kh.candidates WHERE id = %s AND state = 'promoted')
+                      AND id IN (
+                        SELECT i.conflict_id FROM kh.conflict_items i
+                        JOIN kh.candidate_sources s
+                          ON s.candidate_id = %s AND s.source_kind = i.item_kind AND s.source_id = i.item_id)
+                    """,
+                    (f"{repo}#{number}", cid, cid),
+                )
+            else:
+                await conn.execute(
+                    "UPDATE kh.candidates SET state = 'rejected', decided_at = now()"
+                    " WHERE id = %s AND state = 'pr_open'",
+                    (cid,),
+                )
 
     async def run_once(self) -> bool:
         """Run one queued job; False when there was none."""
