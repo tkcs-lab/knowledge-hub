@@ -234,4 +234,35 @@ LIST_STALE = ToolCase(
     citation=lambda ids, case: "",
     cases=(),
 )
-TOOL_CASES.extend([FLAG_CONFLICT, LIST_CONFLICTS, LIST_STALE])
+
+
+def _entity_args(ids: Ids, case: str) -> dict[str, Any]:
+    return {"id": ids["entities_cache"][case]}
+
+
+def _entity_cited(res: ToolResult) -> set[str]:
+    if not res.data:
+        return set()
+    return {res.data["entity"]["id"]} | {d["citation_id"] for d in res.data["documents"]}
+
+
+GET_ENTITY = ToolCase(
+    name="get_entity",
+    args_for_hidden=_entity_args,
+    args_for_visible=_entity_args,
+    expect_hidden=_not_found,
+    args_for_missing=lambda ids: {"id": f"prd:missing-{uuid.uuid4()}"},
+    cited=_entity_cited,
+    citation=lambda ids, case: ids["entities_cache"][case],
+)
+LIST_ENTITIES = ToolCase(
+    name="list_entities",
+    args_for_hidden=lambda ids, case="": {"type": "prd", "limit": 50},
+    args_for_visible=lambda ids, case="": {"type": "prd", "limit": 50},
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: {"type": "prd", "limit": 50},
+    cited=_list_cited("entities", "id"),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+TOOL_CASES.extend([FLAG_CONFLICT, LIST_CONFLICTS, LIST_STALE, GET_ENTITY, LIST_ENTITIES])
