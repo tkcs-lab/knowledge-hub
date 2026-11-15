@@ -99,7 +99,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p14-blobs
 
-- pending
+- worker: make_s3_store_with_stubber() returns a (S3BlobStore, Stubber) tuple because tests need the stubber to queue responses; BlobNotFound subclasses KeyError; delete is idempotent for a missing key, matching S3.
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full suite (151 passed).
 
 ## p13a-wiring
 
