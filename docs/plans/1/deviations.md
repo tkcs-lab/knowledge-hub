@@ -162,7 +162,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p19b1-forgejo-write
 
-- pending
+- worker: The plan left the Forgejo wire format open: open_pull turns label names into label ids by reading repo labels then org labels and raises ForgejoError for an unknown name (an unreadable org label list is skipped); put_file looks for the file first and sends POST to create or PUT with the blob sha to update so a retry works; create_branch sends the sha as old_ref_name; the fake records refs but does not guard them. These wire formats are unverified against a live Forgejo (manual step ma3).
+- review: Guard tests try every bad ref against every write method and require ForgejoRefused with no request sent. Orchestrator ran ruff and the full suite (510 passed).
 
 ## p19b2-propose-change
 
