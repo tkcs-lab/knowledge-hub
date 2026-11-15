@@ -206,7 +206,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p23-hardening
 
-- pending
+- worker: Choices left open: metrics.py uses one module-level METRICS registry because claims.py and webhook.py have no Deps; the bucket uses time.monotonic and prunes idle buckets above 10000; retry_seconds is a whole number of at least 1 and the rate-limit check runs after dispatch and argument checks and before caller_tx, skipped when the limiter is None; kh_tool_calls_total outcomes are ok, error, internal and rate_limited and tool_guard refusals are not counted; claim rejection codes use a closed set
+- worker: /metrics re-reads its token file on every request so the token can be rotated; a missing or empty file, a non-Bearer scheme or a wrong token gives 401 using hmac.compare_digest; make_metrics_endpoint takes settings from build_app; kh_index_jobs is emitted for all four states when the indexer pool exists and omitted otherwise or when the query fails.
+- review: Worker ran 14 mutation checks; the empty-token mutation first survived because the endpoint read deps.settings, which the worker fixed so it now fails. The in-process rate limiter is per process only. Orchestrator ran ruff and the full suite (748 passed, 1 skipped).
 
 ## p24-deploy-backup
 
