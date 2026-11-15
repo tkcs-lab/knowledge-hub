@@ -145,7 +145,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p16b-write-derived
 
-- pending
+- worker: Choices left open: zero cited sources return DERIVED_SOURCES; citing the same source twice counts once and the same doc with two different @version values is refused with BAD_ID; an @version must match [0-9A-Za-z._-]{1,64}; an unknown domain raises a local KhError; claim source_ids must be non-empty and name cited sources with @version stripped; write_derived is not limited to workflow principals because the plan is silent.
+- worker: An empty allowed_emails (cited sources share no attendee) is refused with a local KhError coded derived_nobody and a fixed text because no catalogue entry fits; the tool runs SET CONSTRAINTS kh.derived_visibility_matches IMMEDIATE after inserting sources so a P0K04 becomes INTERNAL with the reason logged; the embed_raw handler became a shared _embed_owner in worker.py that also serves embed_derived (tier T2, NULL embedding when may_embed is false).
+- review: Worker ran 15 mutation checks; all but two equivalent mutants broke a test. The leak-matrix case for write_derived has no seed cases; one parametrization of the hidden-source test is skipped because that source is visible to its caller. Orchestrator ran ruff and the full suite (593 passed, 1 skipped).
 
 ## p17-recompute-requeue
 
