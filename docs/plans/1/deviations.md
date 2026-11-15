@@ -56,7 +56,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p8-frontmatter-chunker
 
-- pending
+- worker: Judgement calls the plan leaves open: a small piece merges into the previous one only if the result stays within 1200 characters; the 150 overlap characters are prepended after splitting and merging, so a piece can reach about 1352 characters; heading lines inside code fences are not headings; text before the first heading has an empty heading_path; the chunker version is passed in by the caller.
+- worker: Frontmatter: review_by accepts a YAML date or an ISO string; id may be an integer and is stored as a string; status defaults to current; impossible dates give Rejected with frontmatter: invalid YAML or date.
+- review: Diff matched touches exactly; worker tld steps and roles waived by the owner, orchestrator ran ruff, unit and integration tests.
 
 ## p9a-trust
 
