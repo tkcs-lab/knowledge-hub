@@ -6,7 +6,10 @@ import psycopg
 import pytest
 
 from knowledge_hub.db.migrate import migrate
+from knowledge_hub.db.pool import make_app_pool, make_indexer_pool
+from knowledge_hub.settings import Settings
 from tests.support.pg import FRESH_DB, TEMPLATE_DB, Cluster, bootstrap_roles
+from tests.support.seed import seed_rows
 
 
 @pytest.fixture(scope="session")
@@ -35,3 +38,34 @@ def fresh_db(migrated_db):
         conn.execute(f"DROP DATABASE IF EXISTS {FRESH_DB} WITH (FORCE)")
         conn.execute(f"CREATE DATABASE {FRESH_DB} TEMPLATE {TEMPLATE_DB} OWNER kh_migrator")
     return migrated_db
+
+
+@pytest.fixture
+def db_settings(fresh_db):
+    return Settings(db_host=str(fresh_db.sock), db_port=5432, db_name=FRESH_DB)
+
+
+@pytest.fixture
+async def app_pool(db_settings):
+    pool = make_app_pool(db_settings)
+    await pool.open(wait=True)
+    try:
+        yield pool
+    finally:
+        await pool.close()
+
+
+@pytest.fixture
+async def indexer_pool(db_settings):
+    pool = make_indexer_pool(db_settings)
+    await pool.open(wait=True)
+    try:
+        yield pool
+    finally:
+        await pool.close()
+
+
+@pytest.fixture
+def seeded_db(fresh_db):
+    """Fresh database plus the leak-test seed; returns ``{table: {case: id}}``."""
+    return seed_rows(fresh_db.admin_dsn(FRESH_DB))
