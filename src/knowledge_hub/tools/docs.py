@@ -6,6 +6,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from psycopg.rows import dict_row
 
+from knowledge_hub.blobs import BlobNotFound
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
@@ -21,7 +22,7 @@ SELECT d.id, d.repo, d.path, d.body AS text, d.tier, d.domain, d.owner, d.approv
  WHERE d.id = %s
 """
 _RAW_SQL = """
-SELECT r.id, r.excerpt AS text, r.domain, r.entities, r.ingested_at AS indexed_at, r.source_url
+SELECT r.id, r.excerpt AS text, r.blob_key, r.domain, r.entities, r.ingested_at AS indexed_at, r.source_url
   FROM kh.raw_records r WHERE r.id = %s
 """
 _DERIVED_SQL = """
@@ -62,6 +63,17 @@ async def _one(call: ToolCall, sql: str, key: uuid.UUID) -> dict[str, Any]:
     return row
 
 
+async def _raw_text(call: ToolCall, row: dict[str, Any]) -> str:
+    """The full body from the blob store; the excerpt when there is no store or no blob."""
+    blobs = call.deps.blobs
+    if blobs is None or not row["blob_key"]:
+        return row["text"]
+    try:
+        return (await blobs.get(row["blob_key"])).decode("utf-8", errors="replace")
+    except BlobNotFound:
+        return row["text"]
+
+
 async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
     parsed = parse_id(id)
     if parsed is None:
@@ -89,6 +101,8 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
         }
     else:
         row = await _one(call, _RAW_SQL if kind == "raw" else _DERIVED_SQL, key)
+        if kind == "raw":
+            row["text"] = await _raw_text(call, row)
         out = {
             "text": row["text"],
             "tier": "T3" if kind == "raw" else "T2",

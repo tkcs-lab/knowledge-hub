@@ -84,9 +84,39 @@ SEARCH = ToolCase(
     cases=_SEARCH_CASES,
 )
 
+def _ingest_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "source": "meet",
+        "source_ref": f"matrix-{uuid.uuid4()}",
+        "title": "Matrix",
+        "body": "matrix body",
+        "domain": "technical",
+        "occurred_at": "2026-01-02T03:04:05+00:00",
+        "participants": ["nobody@example.org"],
+    }
+
+
+def _ingest_not_a_leak(res: ToolResult) -> None:
+    assert res.status == 200, res
+
+
+# ingest_raw reads no stored row, so no seed case singles one out (``cases=()``); the matrix still
+# calls it once per principal with a fresh ingest and checks that it cites no hidden seed row.
+INGEST_RAW = ToolCase(
+    name="ingest_raw",
+    args_for_hidden=_ingest_args,
+    args_for_visible=_ingest_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=_ingest_args,
+    cited=lambda res: {res.data["citation_id"]} if res.data else set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+
 TOOL_CASES: list[ToolCase] = [
     SEARCH,
     _get_doc_case("documents", "doc"),
     _get_doc_case("raw_records", "raw"),
     _get_doc_case("derived_records", "derived"),
+    INGEST_RAW,
 ]
