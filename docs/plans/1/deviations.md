@@ -182,7 +182,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p20-conflicts-stale
 
-- pending
+- worker: Choices left open: keyset cursors are base64url(json position) plus an HMAC bound to sub, audiences, tool name and filters, with the helpers cursor_key, keyset_scope, encode_keyset, decode_keyset and MAX_LIST_LIMIT living in tools/docs.py because search/cursor.py is outside touches; any bad or foreign cursor gives CURSOR_FOREIGN.
+- worker: flag_conflict returns conflict_id, takes doc:, raw: or derived: ids (versioned, uppercase or malformed ids give NOT_FOUND), uses the domain of item a, allows flagging the same pair twice, and adds local fixed texts for a equal to b and for a bad note length. list_conflicts is newest first with equality filters on domain and status (an unknown value gives an empty page) and limit clamped to 1-50. list_stale orders by review_by ascending with NULLs last, then id, with equality filters on domain an
+- review: Gap: the P0K04 mapping to INTERNAL around SET CONSTRAINTS kh.conflict_visibility_matches IMMEDIATE is wired but no test forces that trigger to fail. Worker mutation checks all broke a test. Orchestrator ran ruff and the full suite (699 passed, 1 skipped).
 
 ## p21-pr-outcomes
 
