@@ -212,7 +212,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p24-deploy-backup
 
-- pending
+- worker: Choices left open: the Dockerfile build stage installs build with pip and builds the wheel, the final stage installs only the wheel; the kh user has no home directory and a nologin shell with WORKDIR /home/kh; the compose healthcheck uses python urllib against /healthz because the slim image has no curl; the compose example pins ollama/ollama:0.12.0 (a placeholder version) and knowledge-hub:0.1.0 and uses .invalid PrivacyFence URLs and in-stack hostnames; the backup script reads KH_DB_HOST, KH_D
+- review: Not verified here: the image build and the pg_dump behaviour for a FORCE-RLS owner (manual step ma5); the compose read_only root filesystem with a /tmp tmpfs may need more writable paths. The orchestrator ran ruff, bash -n on the backup script and the full suite (753 passed, 1 skipped).
 
 ## p25a-docs-design
 
