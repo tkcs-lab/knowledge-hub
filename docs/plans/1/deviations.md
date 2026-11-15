@@ -142,7 +142,12 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p19a-candidates-sql
 
-- pending
+- scope: scope: tests/integration/test_triggers.py
+- scope: scope: tests/integration/test_schema_tables.py
+- scope: scope: tests/integration/test_rls_policies.py
+- review: Three earlier test files changed because bare candidates and conflicts with no sources now fail at commit: seeds use replica role or disable user triggers, and the policy matrix gains four kh_provenance grants; accepted.
+- worker: Both triggers raise SQLSTATE P0K04 and compare as sets, as 0005. The brief omitted kh_provenance grants that the definer triggers need: column SELECT (id, required_audiences, allowed_emails) on candidates and conflicts, whole-table SELECT on candidate_sources and conflict_items, each with a USING true policy. Error texts: candidate has no sources, conflict has no sources, and <candidate|conflict> visibility does not match its sources.
+- review: Worker ran 7 mutation checks; 6 broke tests and one survived (a provenance branch in the SECURITY INVOKER function, which has no effect because the caller RLS already hides those rows).
 
 ## p19b1-forgejo-write
 
