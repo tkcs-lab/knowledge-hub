@@ -234,6 +234,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - final: Blocking finding 1: propose_change wrote to Forgejo with the indexer token because nothing read KH_FORGEJO_BOT_TOKEN_FILE; fix-1 builds a separate bot client used only for promotion writes.
 - final: Blocking finding 2: sync compared approved_at as a raw Forgejo string, so a committer date with a local offset or fractional seconds made every anchor-trusted document look changed on each sync; fix-2 normalises timestamps to UTC instants.
+- final: fix-2 merged: Forgejo timestamps are parsed to UTC instants in trust.py (Z, numeric offsets, fractional seconds truncated like _fmt_ts; a timestamp with no offset is unparsable); an unparsable review time makes the file disputed with the existing no-approved-merge-PR alert and an unparsable anchor commit date gives a disputed anchor with the fixed alert trust anchor <sha> of <repo> has no readable commit date; _doc_changed also compares instants. Sync twice and rebuild twice with +01:00 and frac
 
 ## Finishing
 
