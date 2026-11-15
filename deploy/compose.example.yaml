@@ -1,10 +1,15 @@
-# Example services for the compose stack. Networks `db` and `kh` are internal and defined by the stack.
+# Example services for the compose stack. The three networks at the bottom are the ones the stack defines;
+# they are repeated here so that `docker compose -f deploy/compose.example.yaml config` passes on its own.
+# `db` (Postgres) and `kh` (Forgejo, Garage, Grist, Ollama) have no internet access. `pf-kh` is a private
+# network shared only with PrivacyFence, which reaches the hub there at http://knowledge-hub:8080/mcp.
 # Secrets are files under /run/secrets; this file holds no secret value.
 services:
   knowledge-hub:
-    image: knowledge-hub:0.1.0   # the tag you gave `docker build -t`
+    # The release image (linux/arm64). Pin the digest in the stack:
+    #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.1.0
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0
     restart: unless-stopped
-    networks: [db, kh]
+    networks: [db, kh, pf-kh]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -12,9 +17,15 @@ services:
     environment:
       KH_ENV: prod
       KH_ALLOWED_HOSTS: "knowledge-hub:8080"
-      KH_PF_ISSUER: "https://privacyfence.example.invalid"
-      KH_PF_AUDIENCE: "knowledge-hub"
-      KH_PF_JWKS_URL: "https://privacyfence.example.invalid/.well-known/jwks.json"
+      # Production shape: KH_PF_ISSUER=https://pf.tkcs.name (the address PrivacyFence is served at; no path).
+      #   KH_PF_JWKS_URL=http://pf.tkcs.name:8765/upstream-mcp/jwks
+      # The JWKS URL reaches PrivacyFence over the private `pf-kh` network, where the PrivacyFence container
+      # has the network alias pf.tkcs.name. Its host must be the issuer's host name, or PrivacyFence's Host
+      # allowlist answers 400. 8765 is PrivacyFence's default port (PRIVACYFENCE_PORT). Why http is safe:
+      # docs/configuration.md, "Claim verification over the private network".
+      KH_PF_ISSUER: "https://pf.example.invalid"
+      KH_PF_AUDIENCE: "knowledge-hub"   # the `audience` of the upstream in privacyfence-upstream.example.yaml
+      KH_PF_JWKS_URL: "http://pf.example.invalid:8765/upstream-mcp/jwks"
       KH_DB_HOST: postgres
       KH_DB_NAME: kh
       KH_DB_MIGRATOR_PASSWORD_FILE: /run/secrets/pg_kh_migrator
@@ -57,17 +68,30 @@ services:
       retries: 3
       start_period: 20s
 
+  # Embeddings for bge-m3 on CPU. The `kh` network has no internet access, so `ollama pull` cannot run
+  # here: pull the model once with a short-lived container (docs/runbook.md, install step 5).
   ollama:
-    image: ollama/ollama:0.12.0
+    image: ollama/ollama:0.40.16   # multi-arch, includes linux/arm64
     restart: unless-stopped
     networks: [kh]
+    mem_limit: 3g   # bge-m3 (1.2 GB of weights) plus its context; check with `docker stats` on the first rebuild
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: "-1"   # keep the model loaded
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     volumes:
       - ollama-models:/root/.ollama
 
+networks:
+  db: {internal: true}
+  kh: {internal: true}
+  pf-kh: {internal: true}
+
 volumes:
   ollama-models:
+    name: kh-ollama-models   # a fixed name, so the one-off pull can mount the same volume
 
 secrets:
   pg_kh_migrator: {file: /etc/stack-secrets/pg_kh_migrator}
