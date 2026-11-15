@@ -54,7 +54,7 @@ def conn(fresh_db):
         # These tests exercise the table constraints with hand-written rows; the 0004 triggers
         # (tests/integration/test_triggers.py) would overwrite or reject them.
         for t in ("chunks", "raw_records", "derived_records", "documents", "derived_sources",
-                  "candidate_sources", "conflict_items"):
+                  "candidate_sources", "conflict_items", "candidates", "conflicts"):
             c.execute(f"ALTER TABLE kh.{t} DISABLE TRIGGER USER")
         yield c
 

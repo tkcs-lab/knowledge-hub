@@ -48,21 +48,26 @@ MATRIX: dict[str, dict[str, dict[str, object]]] = {
         "kh_indexer": {"select": "all", "update": SNAP},
         "kh_provenance": {"select": "all"},
     },
+    # kh_provenance reads the parent and snapshot columns for the 0006 constraint triggers.
     "candidates": {
         "kh_app": {"select": "visible", "insert": "check"},
         "kh_indexer": {"select": "all", "update": ("state", "decided_at") + VIS},
+        "kh_provenance": {"select": ("id", "required_audiences", "allowed_emails")},
     },
     "candidate_sources": {
         "kh_app": {"select": "parent", "insert": "check"},
         "kh_indexer": {"select": "all", "update": SNAP},
+        "kh_provenance": {"select": "all"},
     },
     "conflicts": {
         "kh_app": {"select": "visible", "insert": "check"},
         "kh_indexer": {"select": "all", "update": ("state", "closed_at", "closed_by_pr") + VIS},
+        "kh_provenance": {"select": ("id", "required_audiences", "allowed_emails")},
     },
     "conflict_items": {
         "kh_app": {"select": "parent", "insert": "check"},
         "kh_indexer": {"select": "all", "update": SNAP},
+        "kh_provenance": {"select": "all"},
     },
     "index_jobs": {"kh_indexer": ALL},
     "repo_state": {"kh_indexer": ALL},
@@ -146,8 +151,8 @@ def insert(conn: psycopg.Connection, table: str, cols: dict) -> int:
 
 def seed_mode(conn):
     """Seed rows verbatim: switch off the 0004 triggers (covered by test_triggers.py)."""
-    for t in ("chunks", "raw_records", "derived_records", "derived_sources", "candidate_sources",
-              "conflict_items"):
+    for t in ("chunks", "raw_records", "derived_records", "derived_sources", "candidates",
+              "candidate_sources", "conflicts", "conflict_items"):
         conn.execute(f"ALTER TABLE kh.{t} DISABLE TRIGGER USER")
 
 
