@@ -67,7 +67,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9b-forgejo-client
 
-- pending
+- review: Diff matched touches; worker tld steps and roles waived by the owner, orchestrator ran ruff and the full test suite (117 passed).
 
 ## p10-embed-providers
 
