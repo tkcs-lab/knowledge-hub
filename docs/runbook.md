@@ -7,12 +7,47 @@ Not run in the cloud, so yours to do and check by hand: the Dockerfile build, an
 ## Install order
 
 1. **Roles and database.** As the Postgres superuser create the database `kh` with the `vector` extension and the four roles: `kh_migrator`, `kh_app` and `kh_indexer` (LOGIN, NOBYPASSRLS, one password each) and `kh_provenance` (NOLOGIN). Also run `GRANT kh_provenance TO kh_migrator`. No role is a superuser and none has BYPASSRLS. The migrations only `GRANT`; they never create roles.
-2. **Secrets.** Put one file per secret under the secrets directory and name it in the matching `*_FILE` variable: the three database passwords, `kh_hub_bot_token`, `kh_indexer_token`, `kh_webhook_hmac`, the S3 access and secret key, `kh_cursor_key` and, if you want metrics, `kh_metrics_token`. Write `kh.yaml` (start from `deploy/kh.example.yaml`) and set a real `trust_anchor` for every T0 repo.
+2. **Secrets.** Put one file per secret under the secrets directory and name it in the matching `*_FILE` variable: the three database passwords, `kh_hub_bot_token`, `kh_indexer_token`, `kh_webhook_hmac`, the S3 access and secret key, `kh_cursor_key` and, if you want metrics, `kh_metrics_token`. Write `kh.yaml` (start from `deploy/kh.example.yaml`). Leave `trust_anchor: null` for every T0 repo for now: the anchors come after the seed pull requests are merged (see "Bootstrapping the trust anchor").
 3. **Migrate.** `kh migrate`. A changed, already applied migration file refuses the run.
 4. **Serve.** `kh serve` (the image does this). The worker starts only when `KH_FORGEJO_URL` is set. `/healthz` answers `ok`.
-5. **Ollama.** Start Ollama and pull the embedding model: `ollama pull bge-m3`. Until the model is available, embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards.
+5. **Ollama.** Start the `ollama` service of `deploy/compose.example.yaml` (pinned image, memory limit 3 GB, one model loaded, kept loaded). The `kh` network has no internet access, so `ollama pull` cannot run there: pull the model once with a short-lived container on the default bridge network, which has egress, writing to the same models volume `kh-ollama-models`. Use the image tag of the compose file:
+
+   ```bash
+   docker run --rm -v kh-ollama-models:/root/.ollama --entrypoint sh ollama/ollama:0.40.16 \
+     -c 'ollama serve >/dev/null 2>&1 & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull bge-m3'
+   ```
+
+   Check with `docker compose exec ollama ollama list`. Ollama's documentation shows no one-off pull; this is the usual way and is confirmed on the first deploy. Until the model is available, embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. Embedding runs on the CPU and no speed is measured yet. To measure it on the host: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second; a `kh rebuild` takes about the number of chunks (`SELECT count(*) FROM kh.chunks`) divided by that. Watch `docker stats` during the first rebuild to confirm the 3 GB limit.
 6. **Index and record the config.** Run `kh rebuild`, then `kh recompute-visibility` **once**. The audience-map loader does not recompute visibility when no `__config__` hash is stored, so until you run it `kh check` reports config drift. Then run `kh check` and expect exit 0.
 7. **Webhook.** In Forgejo set an organisation webhook to `http://knowledge-hub:8080/webhooks/forgejo` with the secret from `kh_webhook_hmac`, for push and pull request events.
+8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups).
+
+## Bootstrapping the trust anchor
+
+A fresh Forgejo has no reviewed history, so a T0 repo has no real `trust_anchor` yet. Until one is set, every commit including the root must be an approved pull request merge, so the seed content is indexed as `disputed`. That is expected on a fresh host; the alert is `file <path> on <repo>/main has no approved merge PR`.
+
+1. For each T0 repo put the seed documents on a branch and open a pull request. Someone other than its author approves it in Forgejo and merges it into `main` with a merge commit.
+2. Read the anchor from Forgejo: the merge commit of that first pull request, the oldest merge commit in the commit list of `main` (or in a clone: `git log --first-parent --merges --reverse --format=%H main | head -1`). It is the first reviewed commit on `main`. An initial commit made when the repo was created sits before it and is covered by the anchor.
+3. Write that 40-character sha as `trust_anchor` of the repo in `kh.yaml`, deploy the file and run `kh rebuild --repo <repo>`, `kh recompute-visibility` and `kh check` (exit 0). The seed documents are now normative; later changes still need approved pull requests.
+
+Setting an anchor trusts everything up to and including that commit: read the commit first.
+
+## PrivacyFence setup
+
+Copy `deploy/privacyfence-upstream.example.yaml` to the PrivacyFence host, set `PRIVACYFENCE_UPSTREAM_MCP_FILE` to it and restart PrivacyFence; the file and the hub's tool list are read at startup only. Its `audience` equals `KH_PF_AUDIENCE`. Then map Workspace groups to the hub's audiences in PrivacyFence's `admin_config.json` (re-read when it changes; edit it while nobody is saving on the Admin page):
+
+```json
+"upstream_mcp": {
+  "kh": {"groups": {
+    "everyone@company.example": ["all"],
+    "mgmt@company.example": ["mgmt"],
+    "hr@company.example": ["hr"],
+    "contracts@company.example": ["contracts"]
+  }}
+}
+```
+
+Audience names must exist in `audiences` of `kh.yaml`. Only `all` is added at once; the others wait for an administrator's approval in PrivacyFence (Admin, Group membership).
 
 ## Routine tasks
 
@@ -83,8 +118,14 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 
 ## PrivacyFence follow-ups
 
-- **Scoped tokens and gated tools.** Today a scoped token (what n8n uses) can only be given `auto`-gated upstream tools, and write tools must be `popup`. Live n8n writes (`ingest_raw`, `write_derived`) wait for PrivacyFence to allow a scoped token to call a gated tool. Until then the write tools are tested only with signed test claims. Do not work around this with a second auth path.
-- **Blessing email matching.** `allowed_emails` rows match the claim's `email`, which PrivacyFence's documentation calls audit-only. Ask PrivacyFence to bless `email` as a visibility input, to set it only for a verified person and to announce any change of it. The three asks are in [design](design.md). If PrivacyFence changes how `email` is filled, who sees attendee-only records changes.
+- **Create the n8n token.** Scoped tokens can call gated upstream tools through an administrator's tick (PrivacyFence ADR 0300, unreleased at the time of writing: the form shows the group "Upstream tools that change data or release results unseen" only in a PrivacyFence version that has it). An administrator opens PrivacyFence, Settings, Scoped tokens, New token, and:
+  1. names the token for the workflow and sets an expiry;
+  2. ticks `kh_ingest_raw` and `kh_write_derived` under "Upstream tools that change data or release results unseen", and `kh_propose_change` only if the workflow opens promotion pull requests; the read tools the workflow needs (`kh_search`, ...) are ticked as usual;
+  3. under "Audiences for Knowledge hub" ticks exactly the audiences that `raw_audience_map` gives the series and folders the workflow ingests (the token must hold every mapped audience, or `ingest_raw` is refused), and no others; a token never holds more than its creator, and one with none ticked sees no audience;
+  4. stores the secret in n8n's credential store, never in chat.
+
+  The tick is pinned to the declaration: changing a tool's gate, verb or effect, or the url, audience or claim mode, voids it, and the token is created again. Calls are audited as `upstream_forwarded` and `auto_accepted`.
+- **Blessing email matching.** `allowed_emails` rows match the claim's `email`, which PrivacyFence's documentation calls audit-only. Ask PrivacyFence to bless `email` as a visibility input, to set it only for a verified person and to announce any change of it. The three asks are in [design](design.md). If PrivacyFence changes how `email` is filled, who sees attendee-only records changes. PrivacyFence `main` (3563d25, 2026-11-15) has no opt-in declaration key for this yet; when it has one, set it in the declaration and close this item.
 
 ## Accepted risks
 
@@ -102,3 +143,5 @@ Releases follow the `/tld:release` skill. The version lives only in `src/knowled
 4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The workflow has no `skip_checks` input.
 5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.
 6. To roll the new version out, in the compose repo update the `images_track` entry for knowledge-hub to `X.Y.Z`, run `scripts/pin-images.sh` to pin the digest, and deploy as usual.
+
+The first release, 0.1.0, starts from the placeholder version 0.0.0: run `/tld:release 0.1.0`.

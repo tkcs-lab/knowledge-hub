@@ -1,0 +1,26 @@
+# PrivacyFence upstream declaration for the knowledge hub (docs/upstream-mcp.md in PrivacyFence).
+# Set PRIVACYFENCE_UPSTREAM_MCP_FILE on the PrivacyFence container to this file and restart it: the
+# declaration is read once at startup, and so is the hub's tool list. The tool names are the ones
+# `register_tools` registers (tests/unit/test_privacyfence_declaration.py checks that). Reads are `auto`,
+# writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
+# private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
+# voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
+version: 1
+upstreams:
+  - id: kh
+    label: Knowledge hub
+    url: http://knowledge-hub:8080/mcp
+    audience: knowledge-hub
+    identity_claim: required
+    allowed_principal_types: [claude_client, n8n_workflow]
+    tools:
+      search: {gate: auto, verb: search}
+      get_doc: {gate: auto, verb: read}
+      get_entity: {gate: auto, verb: read}
+      list_entities: {gate: auto, verb: read}
+      list_conflicts: {gate: auto, verb: read}
+      list_stale: {gate: auto, verb: read}
+      ingest_raw: {gate: popup, verb: add, effect: "Adds a raw record, such as a meeting transcript, to the knowledge hub."}
+      write_derived: {gate: popup, verb: add, effect: "Adds a derived record that cites its sources to the knowledge hub."}
+      propose_change: {gate: popup, verb: add, effect: "Opens a pull request that proposes a change to a canonical document."}
+      flag_conflict: {gate: popup, verb: add, effect: "Records a conflict between documents in the knowledge hub."}

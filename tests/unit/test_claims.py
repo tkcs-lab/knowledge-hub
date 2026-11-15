@@ -12,9 +12,17 @@ from knowledge_hub.auth.claims import (
     KhAuthError,
     caller_from_scope,
 )
-from knowledge_hub.auth.pf_claim_verify import CLAIM_HEADER, request_hash
+from knowledge_hub.auth.pf_claim_verify import CLAIM_HEADER, ClaimVerifier, request_hash
 from knowledge_hub.settings import DevIdentity, Settings
-from tests.support.claims import call_body, mint_claim, rpc_body, verifier_for_tests
+from tests.support.claims import (
+    AUDIENCE,
+    ISSUER,
+    call_body,
+    mint_claim,
+    rpc_body,
+    static_jwks,
+    verifier_for_tests,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -214,3 +222,18 @@ def test_prod_refuses_dev_identity():
             Settings.model_construct(env="prod", dev_identity=IDENT, max_body_bytes=1000),
             None,
         )
+
+
+def test_http_jwks_url_with_other_host_than_issuer_is_accepted():
+    fetched: list[str] = []
+    url = "http://pf.internal.example:8765/upstream-mcp/jwks"
+
+    def fake(u):
+        fetched.append(u)
+        return json.dumps(static_jwks())
+
+    verifier = ClaimVerifier(issuer=ISSUER, audience=AUDIENCE, jwks_url=url, fetch=fake, replay_cache=None)
+    token = mint_claim("person", "claude_client", ["all"], tool="search", arguments=ARGS)
+    principal = verifier.verify(token, body=call_body("search", ARGS))
+    assert principal.sub == "person"
+    assert fetched == [url]

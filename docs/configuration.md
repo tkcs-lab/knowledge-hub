@@ -13,11 +13,17 @@ Unknown `KH_*` variables are ignored. `kh serve` and every other command exit 2 
 |---|---|---|
 | `KH_ENV` | `prod` | `dev`, `test` or `prod`. `prod` refuses `KH_DEV_IDENTITY` and the fake embedder. |
 | `KH_DEV_IDENTITY` | none | JSON `{"sub", "principal_type", "audiences", "email"?}` used for requests with no claim header. `principal_type` is `claude_client` or `n8n_workflow`. Refused when `KH_ENV=prod`. |
-| `KH_PF_ISSUER` | none | Issuer (`iss`) the verifier accepts for identity claims. |
+| `KH_PF_ISSUER` | none | Issuer (`iss`) the verifier accepts: the address PrivacyFence is served at, with no path, for example `https://pf.tkcs.name`. |
 | `KH_PF_AUDIENCE` | none | Audience (`aud`) the claim must carry. |
-| `KH_PF_JWKS_URL` | none | URL of PrivacyFence's signing keys. |
+| `KH_PF_JWKS_URL` | none | URL of PrivacyFence's signing keys, `<issuer>/upstream-mcp/jwks`. It may use another host address than the issuer: see below. |
 | `KH_ALLOWED_HOSTS` | empty | Comma list of `host:port` entries accepted in the `Host` header (DNS-rebinding protection), for example `knowledge-hub:8080`. A bare host gets HTTP 421. |
 | `KH_MAX_BODY_BYTES` | `1048576` | Largest `/mcp` request body; larger gets 413. |
+
+### Claim verification over the private network
+
+`KH_PF_ISSUER` is compared only with the `iss` claim and is never fetched. `KH_PF_JWKS_URL` is only where the signing keys are fetched, and the vendored verifier does not tie its host to `iss`: it accepts any `http://` or `https://` URL (`tests/unit/test_claims.py` pins this). In production the issuer is the public address `https://pf.tkcs.name`, and the JWKS URL is `http://pf.tkcs.name:8765/upstream-mcp/jwks`, reached over the private `pf-kh` Docker network where the PrivacyFence container has the network alias `pf.tkcs.name`. The host is the issuer's host name because PrivacyFence answers any other `Host` header with 400; the scheme is `http` because the hop never leaves the Docker network.
+
+Why that is safe: the keys are public, so nothing secret crosses the hop. What matters is that nobody else can answer at that address, and the network guarantees it: `pf-kh` is `internal` (no internet, no published port) and only the hub and PrivacyFence join it. Never attach another service to `pf-kh`. A claim is still Ed25519 signed, bound to one call, and checked for audience, issuer, expiry and replay.
 
 ### Database
 
@@ -114,7 +120,7 @@ Unknown keys are refused. Every error text starts with `config:`.
 | `audiences` | `[all, mgmt, hr, contracts]` | Audience names allowed in `required_audiences`. |
 | `participant_label` | `attendees` | Name shown for email-scoped raw records. It is not an audience. |
 | `domains` | `[portfolio, product, technical]` | Valid values of `domain` for documents, raw, derived and proposals. |
-| `repos` | see example | Map of Forgejo repo name to `{tier: T0 or T1, audience, trust_anchor}`. `audience` must be in `audiences`; at most one T0 repo per audience. `trust_anchor` is a commit sha on `main`, or null for none (set one for T0). |
+| `repos` | see example | Map of Forgejo repo name to `{tier: T0 or T1, audience, trust_anchor}`. `audience` must be in `audiences`; at most one T0 repo per audience. `trust_anchor` is a commit sha on `main`, or null for none (set one for T0 once its first reviewed pull request is merged; see the runbook, "Bootstrapping the trust anchor"). |
 | `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
