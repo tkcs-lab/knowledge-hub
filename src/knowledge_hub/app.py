@@ -1,5 +1,7 @@
 """The HTTP application: ``/mcp`` behind the claim middleware, ``/healthz``. Later phases add routes."""
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -52,8 +54,19 @@ def build_app(settings: Settings, deps: Deps, verifier: ClaimVerifier) -> Starle
         holder["middleware"] = ClaimMiddleware(
             mcp_handler, verifier, settings, PgReplayCache(deps.app_pool)
         )
-        async with mcp.session_manager.run():
-            yield
+        task = asyncio.create_task(deps.worker.run_forever()) if deps.worker is not None else None
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            if task is not None:
+                deps.worker.stop()
+                try:
+                    await asyncio.wait_for(task, 10)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
 
     return Starlette(
         routes=[
