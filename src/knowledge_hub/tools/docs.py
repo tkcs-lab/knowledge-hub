@@ -1,6 +1,13 @@
 """``get_doc``: one RLS query per id kind; a missing and a hidden row are indistinguishable."""
 
+import base64
+import datetime
+import hashlib
+import hmac
+import json
 import uuid
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -12,6 +19,7 @@ from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
 
 _KINDS = ("doc", "raw", "derived")
+MAX_LIST_LIMIT = 50
 
 _DOC_SQL = """
 SELECT d.id, d.repo, d.path, d.body AS text, d.tier, d.domain, d.owner, d.approved_by, d.approved_at,
@@ -156,7 +164,132 @@ async def _at_version(
     return out
 
 
+def cursor_key(deps: Deps) -> bytes:
+    path = deps.settings.cursor_key_file
+    if path is None:
+        raise RuntimeError("KH_CURSOR_KEY_FILE is not set")
+    return Path(path).read_bytes().strip()
+
+
+def keyset_scope(tool: str, *filters: str) -> str:
+    """What a keyset cursor is bound to: the tool and every filter that shapes its list."""
+    return hashlib.sha256("\x1f".join((tool, *filters)).encode()).hexdigest()
+
+
+def _keyset_mac(key: bytes, sub: str, audiences: Iterable[str], scope: str, payload: bytes) -> bytes:
+    aud = hashlib.sha256("\n".join(sorted(set(audiences))).encode()).hexdigest()
+    msg = b"|".join((sub.encode(), aud.encode(), scope.encode(), payload))
+    return hmac.new(key, msg, hashlib.sha256).digest()
+
+
+def encode_keyset(
+    key: bytes, sub: str, audiences: Iterable[str], scope: str, position: list[str | None]
+) -> str:
+    """``base64url(payload).base64url(HMAC(sub|audience-hash|scope|payload))`` for the last row's key."""
+    payload = json.dumps(position).encode()
+    mac = _keyset_mac(key, sub, audiences, scope, payload)
+    enc = base64.urlsafe_b64encode
+    return enc(payload).decode().rstrip("=") + "." + enc(mac).decode().rstrip("=")
+
+
+def decode_keyset(
+    key: bytes, sub: str, audiences: Iterable[str], scope: str, token: str, width: int
+) -> list[str | None]:
+    """The position a keyset cursor carries; a tampered or foreign cursor is ``CURSOR_FOREIGN``."""
+    foreign = errors.KhError("cursor_foreign", errors.CURSOR_FOREIGN)
+    head, sep, tail = token.partition(".")
+    if not sep:
+        raise foreign
+    try:
+        payload = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))
+        mac = base64.urlsafe_b64decode(tail + "=" * (-len(tail) % 4))
+        position = json.loads(payload)
+    except ValueError:
+        raise foreign from None
+    if not hmac.compare_digest(mac, _keyset_mac(key, sub, audiences, scope, payload)):
+        raise foreign
+    if not isinstance(position, list) or len(position) != width:
+        raise foreign
+    return position
+
+
+_STALE_SQL = """
+SELECT id, title, domain, tier, owner, review_by, stale, status
+  FROM kh.documents
+ WHERE (stale OR review_by < current_date)
+   AND (%(domain)s = '' OR domain = %(domain)s)
+   AND (%(owner)s = '' OR owner = %(owner)s)
+   AND (%(after_id)s::uuid IS NULL
+        OR (%(after_review)s::date IS NOT NULL
+            AND (review_by > %(after_review)s::date
+                 OR (review_by = %(after_review)s::date AND id > %(after_id)s::uuid)
+                 OR review_by IS NULL))
+        OR (%(after_review)s::date IS NULL AND review_by IS NULL AND id > %(after_id)s::uuid))
+ ORDER BY review_by ASC NULLS LAST, id ASC
+ LIMIT %(n)s
+"""
+
+
+async def list_stale(
+    call: ToolCall, domain: str = "", owner: str = "", limit: int = 50, cursor: str = ""
+) -> dict[str, Any]:
+    limit = max(1, min(MAX_LIST_LIMIT, limit))
+    caller, key = call.caller, cursor_key(call.deps)
+    scope = keyset_scope("list_stale", domain, owner)
+    after_review: str | None = None
+    after_id: str | None = None
+    if cursor:
+        after_review, after_id = decode_keyset(key, caller.sub, caller.audiences, scope, cursor, 2)
+        try:
+            if after_review is not None:
+                datetime.date.fromisoformat(after_review)
+            uuid.UUID(str(after_id))
+        except (ValueError, TypeError):
+            raise errors.KhError("cursor_foreign", errors.CURSOR_FOREIGN) from None
+    async with call.conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            _STALE_SQL,
+            {
+                "domain": domain,
+                "owner": owner,
+                "after_id": after_id,
+                "after_review": after_review,
+                "n": limit + 1,
+            },
+        )
+        rows = await cur.fetchall()
+    page = rows[:limit]
+    next_cursor = ""
+    if len(rows) > limit:
+        last = page[-1]
+        position = [_iso(last["review_by"]), str(last["id"])]
+        next_cursor = encode_keyset(key, caller.sub, caller.audiences, scope, position)
+    return {
+        "documents": [
+            {
+                "citation_id": f"doc:{r['id']}",
+                "title": r["title"],
+                "domain": r["domain"],
+                "tier": r["tier"],
+                "owner": r["owner"] or "",
+                "review_by": _iso(r["review_by"]),
+                "stale": r["stale"],
+                "status": r["status"],
+            }
+            for r in page
+        ],
+        "next_cursor": next_cursor,
+    }
+
+
 def register(server: MCPServer, deps: Deps) -> None:
+    server.tool(
+        name="list_stale",
+        description=(
+            "List documents you may see that are marked stale or are past their review date, "
+            "oldest review date first."
+        ),
+    )(tool_guard("list_stale", deps)(list_stale))
     server.tool(
         name="get_doc",
         description=(
