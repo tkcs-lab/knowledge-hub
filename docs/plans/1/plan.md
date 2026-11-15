@@ -10,7 +10,7 @@
 
 **Security:** Audience is enforced only by Postgres RLS under four roles with FORCE RLS and per-transaction settings, with every policy named in a matrix (3.3). Callers are verified per request, including the call hash (3.2). Errors are fixed texts. A token may cite raw records it ingested itself in `write_derived`, and the derived row still inherits the full restriction (3.7). Promotion paths are validated so the bot can never write workflow or governance files (3.8).
 
-**Performance:** Search uses exact vector scans with no ANN index, because ANN filtering under RLS loses recall on older pgvector. bge-m3 speed on the arm64 box is measured by the owner before implementation starts.
+**Performance:** Search uses exact vector scans with no ANN index, because ANN filtering under RLS loses recall on older pgvector. bge-m3 speed on the arm64 box is measured by the owner after the first deploy; swapping the model is a setting plus a re-embed.
 
 **Review focus:** the policy matrix and definer functions (3.3, 3.7); the claim middleware and call binding (3.2); the trust walk and anchor rules (3.6); promotion path validation and routing (3.8).
 
@@ -148,17 +148,18 @@ The image is published as `ghcr.io/tkcs-lab/knowledge-hub:<X.Y.Z>` (no `latest` 
 
 ## 5. Manual steps
 
-Manual steps happen once before implementation and after the last merge; every phase runs on a cloud worker with a throwaway Postgres, signed test claims, a fake Forgejo and a fake S3.
+Manual steps happen after the last merge; nothing manual is needed before implementation starts; every phase runs on a cloud worker with a throwaway Postgres, signed test claims, a fake Forgejo and a fake S3.
 
 ### Before implementation
 
-**mb1-embedding-benchmark (about 30 minutes).** `vector(1024)` is fixed in the first migration, so measure bge-m3 on the target box first.
-1. On the Hetzner CAX31 install Ollama and run `ollama pull bge-m3`.
-2. Run this loop: `time (for i in $(seq 1 50); do curl -s localhost:11434/api/embed -d '{"model":"bge-m3","input":["'"$(head -c 800 /dev/urandom | base64 -w0 | head -c 800)"'"]}' >/dev/null; done)`.
-3. Divide 50 by the elapsed seconds (chunks per second) and note the time of one call (query latency).
-Done when: at least 20 chunks per second and under 300 ms per single call. If not, tell the planner before implementation starts; the fallback is a 768-dimension model and a different `vector(N)`.
+None. Every phase runs on a cloud worker with a throwaway Postgres, signed test claims, a fake Forgejo and a fake S3.
 
 ### After implementation
+
+**ma8-embedding-benchmark (about 30 minutes).** Measures whether bge-m3 is fast enough on the target box; it blocks nothing, because the embedding model is a setting and a re-embed is cheap (see the follow-up below).
+1. On the Hetzner CAX31 install Ollama and run `ollama pull bge-m3`.
+2. Run `python scripts/bench_embed.py --count 200` (built in `p10`), or without the script this loop: `time (for i in $(seq 1 50); do curl -s localhost:11434/api/embed -d '{"model":"bge-m3","input":["'"$(head -c 800 /dev/urandom | base64 -w0 | head -c 800)"'"]}' >/dev/null; done)`, and divide 50 by the elapsed seconds.
+Report back: chunks per second and the time of one call. Accept at least 20 chunks per second and under 300 ms per call. If it is slower, the follow-up is small: a model with the same 1024 dimensions needs only `KH_EMBED_MODEL` changed, then `kh rebuild` (T0/T1, from git) and `kh requeue-embeddings` (T2/T3, from stored text); a model with another dimension, such as 768, needs one new migration that clears the embeddings and changes `vector(1024)` to `vector(<N>)`, then the same two commands.
 
 **ma1-roles-and-secrets (about 30 minutes).** See the compose repo's [docs/knowledge-hub.md](https://github.com/andras-tkcs/tkcs-work-compose/blob/main/docs/knowledge-hub.md).
 1. In the compose repo's Postgres role template add roles `kh_migrator`, `kh_app`, `kh_indexer` (LOGIN, NOSUPERUSER, NOBYPASSRLS) and `kh_provenance` (NOLOGIN), a database `kh` owned by `kh_migrator`, `CREATE EXTENSION vector` in it, and `GRANT kh_provenance TO kh_migrator`.
@@ -188,7 +189,7 @@ Report back: the dry run is green and the real run published `ghcr.io/tkcs-lab/k
 - Owner decision 2 uses the claim's `email` for visibility, but PrivacyFence's contract calls `email` audit-only. Follow-up for the owner: ask PrivacyFence to bless email matching in `docs/identity-claim.md`; the runbook documents the deviation.
 - An n8n token chooses `series_id`, `folder_id` and `participants`. The hub binds writes to the token's own audiences (a mapped series needs its audiences held by the token) but cannot stop a token from naming arbitrary participants on an unmapped record.
 - The SDK may not pass `scope["state"]` to tools in stateless mode (the ContextVar fallback is named in 3.2); if the verified caller cannot reach the tool at all, `p5` stops with `status=blocked`. Research for the owner if needed: whether a `mcp==2.3.0` tool handler can read the raw `params.arguments`.
-- `bge-m3` may be too slow on the arm64 box (mb1); the fallback changes `vector(1024)`, so it is a migration plus a full re-embed.
+- `bge-m3` may be too slow on the arm64 box (ma8). That only makes indexing and queries slower; a different model is a setting plus `kh rebuild` and `kh requeue-embeddings`, and a model with another dimension also needs one migration that changes `vector(1024)`, so nothing blocks implementation.
 - Exact vector scans may be slow at the real corpus size. Research r-20261115-2 (2026-11-15, [pgvector changelog](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md), Docker Hub tags): the image `pgvector/pgvector:pg17` ships pgvector 0.8.7 (released 2026-10-01) with arm64 builds, and `hnsw.iterative_scan` exists since 0.8.0; whether iterative scans recover recall when RLS filters rows after the index scan is unconfirmed and capped by `hnsw.max_scan_tuples`, so exact scans stay until a measurement says otherwise. The cloud test cluster has pgvector 0.6.0 and production has 0.8.x, which is safe because the plan uses only exact `<=>` ordering.
 - Forgejo API: research r-20261115-1 (2026-11-15) confirms that `PullReview` has `official`, `dismissed`, `commit_id` and `submitted_at`, `PullRequest` has `merge_commit_sha` and `head.sha`, `BranchProtection` has `dismiss_stale_approvals`, and `GET .../commits/{sha}/pull` matches merge commits, all read from the development branch. Still unverified on the owner's release: that a review's `commit_id` equals the head at merge time, that stale approvals get `dismissed`, and how rebase or squash merges affect `merge_commit_sha`; ma3 checks them on the live instance.
 - Three login roles plus one NOLOGIN role replace the one-role-per-app pattern of the compose repo; if that is refused, the fallback is a single login role that `SET ROLE`s into the others, which is weaker.
@@ -206,12 +207,11 @@ plan_slug: knowledge-hub-service
 feature_branch: feature/knowledge-hub-service
 tracking_issue: 1
 max_parallel: 2
-manual_before:
-  - id: mb1-embedding-benchmark
-    title: "Measure bge-m3 on the CAX31"
-    why: "vector(1024) is fixed in migration 0002; CPU speed on the arm64 box cannot be measured in the cloud environment"
-    done_when: "At least 20 chunks per second and under 300 ms per single embedding call are reported"
+manual_before: []
 manual_after:
+  - id: ma8-embedding-benchmark
+    title: "Measure bge-m3 on the CAX31"
+    why: "CPU speed on the arm64 box cannot be measured in the cloud environment; the result only decides whether to switch models"
   - id: ma1-roles-and-secrets
     title: "Create the kh database roles and secret files, then run kh migrate"
     why: "The phases test with a throwaway cluster, so only the real box proves the role split and grants"
