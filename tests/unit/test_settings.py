@@ -75,6 +75,7 @@ def test_cli_serve_exits_2_on_settings_error(monkeypatch, capsys):
     assert "refusing to start" in capsys.readouterr().err
 
 
-def test_cli_stub_exits_3(capsys):
-    assert cli.main(["daily"]) == 3
-    assert "not implemented yet" in capsys.readouterr().out
+def test_cli_daily_exits_2_without_grist_url(monkeypatch, capsys):
+    monkeypatch.delenv("KH_GRIST_URL", raising=False)
+    assert cli.main(["daily"]) == 2
+    assert capsys.readouterr().err.strip()
