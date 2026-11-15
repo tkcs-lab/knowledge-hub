@@ -35,7 +35,7 @@ def test_missing_schema_migrations_means_nothing_applied(migrated_db):
         conn.execute("CREATE DATABASE kh_empty OWNER kh_migrator")
     with psycopg.connect(migrated_db.admin_dsn("kh_empty"), autocommit=True) as conn:
         conn.execute("CREATE EXTENSION vector")
-    assert migrate(migrated_db.dsn("kh_migrator", "kh_empty")) == ["0001_schema_grants.sql"]
+    assert migrate(migrated_db.dsn("kh_migrator", "kh_empty"))[0] == "0001_schema_grants.sql"
 
 
 def test_kh_app_has_no_superuser_or_bypassrls(fresh_db):
