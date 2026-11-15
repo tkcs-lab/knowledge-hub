@@ -151,7 +151,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p17-recompute-requeue
 
-- pending
+- worker: Design change: when no __config__ hash is stored (new install or restore) load_audience_map only loads the map and neither recomputes nor records a hash, because recomputing rewrote the visibility that about 43 existing tests insert directly; kh check keeps reporting config drift until the operator runs kh recompute-visibility. The brief said recompute when the stored hash differs.
+- worker: Choices left open: recompute_visibility rewrites kh.raw_audience_map from config first so the command works standalone, taking LOCK TABLE ACCESS EXCLUSIVE on it so no raw row is stored under the old map after the recompute; raw rows with neither mapping nor participants keep their visibility; documents in repos not in config.repos are untouched; citation cycles raise ValueError and roll back; requeue_embeddings skips records with a queued or running job and returns the number inserted; both new 
+- review: Open items: config_hash covers config.entities but no step recomputes entities_cache visibility, so the recorded hash covers entity visibility that is not recomputed (a later phase owning entities_cache should add that); the runbook must tell the operator to run kh recompute-visibility once after install. Worker ran 10 mutation checks, each broke a test except one equivalent mutant. Orchestrator ran ruff and the full suite (620 passed, 1 skipped).
 
 ## p18-routing
 
