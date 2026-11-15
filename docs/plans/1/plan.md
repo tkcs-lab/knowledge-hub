@@ -4,9 +4,9 @@
 
 ## Summary
 
-**Use it:** Agents reach the hub through PrivacyFence, which exposes it as the upstream `kh` (tools appear as `kh_search`, `kh_get_doc`, `kh_propose_change` and so on). Every hit shows its tier, domain, owner, approvals and freshness, and only what the caller's audiences allow is returned. Operators run `kh migrate`, `kh serve`, `kh rebuild`, `kh check`, `kh daily`, `kh recompute-visibility` and `kh requeue-embeddings`; Forgejo pushes to `/webhooks/forgejo` keep the T0/T1 index current.
+**Use it:** Agents reach the hub through PrivacyFence, which exposes it as the upstream `kh` (tools appear as `kh_search`, `kh_get_doc`, `kh_propose_change` and so on). Every hit shows its tier, domain, owner, approvals and freshness, and only what the caller's audiences allow is returned. Operators run `kh migrate`, `kh serve`, `kh rebuild`, `kh check`, `kh daily`, `kh recompute-visibility` and `kh requeue-embeddings`; Forgejo pushes to `/webhooks/forgejo` keep the T0/T1 index current. `/tld:release` cuts a version and publishes the arm64 image to GHCR after you approve the publish job.
 
-**Scope:** A new Python service in this repo: schema and row-level security, claim verification with PrivacyFence's vendored verifier, the MCP tools, the Forgejo indexer with a trust walk, T3 ingest into S3-compatible storage, T2 derivation, promotion pull requests, conflicts, staleness, the Grist entity cache and daily job, rate limits, metrics, an arm64 image, backup script and a runbook. It does not change PrivacyFence, Forgejo or the compose repo; those are owner steps.
+**Scope:** A new Python service in this repo: schema and row-level security, claim verification with PrivacyFence's vendored verifier, the MCP tools, the Forgejo indexer with a trust walk, T3 ingest into S3-compatible storage, T2 derivation, promotion pull requests, conflicts, staleness, the Grist entity cache and daily job, rate limits, metrics, an arm64 image with its release workflow, a backup script and a runbook. It does not change PrivacyFence, Forgejo or the compose repo; those are owner steps.
 
 **Security:** Audience is enforced only by Postgres RLS under four roles with FORCE RLS and per-transaction settings, with every policy named in a matrix (3.3). Callers are verified per request, including the call hash (3.2). Errors are fixed texts. A token may cite raw records it ingested itself in `write_derived`, and the derived row still inherits the full restriction (3.7). Promotion paths are validated so the bot can never write workflow or governance files (3.8).
 
@@ -140,6 +140,12 @@ SQLAlchemy and Alembic (raw policies, triggers and the fusion query dominate; `p
 
 `jobs/daily.py` runs `kh daily`: sets `documents.stale` where `review_by < today` (chunks follow by trigger), upserts `entities_cache` from the four Grist tables (kind from the key prefix; visibility from `config.entities`, so `Customers` rows are `{contracts}` by default), deletes cache rows no longer in Grist, and deletes expired `claim_jti` rows. `get_entity(id)` returns the cache row plus the visible documents that list the entity.
 
+### 3.13 Release
+
+The image is published as `ghcr.io/tkcs-lab/knowledge-hub:<X.Y.Z>` (no `latest` tag; the compose repo pins by digest with its `scripts/pin-images.sh`). The version lives in `knowledge_hub.__version__` (`src/knowledge_hub/__init__.py`), and `pyproject.toml` reads it dynamically (`[tool.setuptools.dynamic] version = {attr = "knowledge_hub.__version__"}`), so there is one version file. `CHANGELOG.md` has a `## [Unreleased]` section; the profile gets `docs.changelog.file: CHANGELOG.md`, `docs.changelog.section: "## [Unreleased]"`, `release.workflow: release.yml` and `release.version_files: [{path: src/knowledge_hub/__init__.py, pattern: '^__version__ = "(\d+\.\d+\.\d+)"$'}]`. The flow is the release skill's: it prepares a `chore/release-<X-Y-Z>` pull request (changelog heading and version line), you merge it, the skill asks once and dispatches `.github/workflows/release.yml` on `main` with `dry_run` false, and you approve the `publish` job in GitHub. The workflow never takes `skip_checks`.
+
+`release.yml` (`workflow_dispatch`, input `dry_run` boolean default `true`, top-level `permissions: contents: read`, `concurrency: group: release`): job `build` runs on `ubuntu-24.04-arm` (a native arm64 runner, no QEMU) only when `github.ref` is `refs/heads/main`; it reads the version from `__init__.py`, fails unless `CHANGELOG.md` has a heading `## [<version>] - <date>`, fails when the commit's checks are not all green (as in the `tld-release.yml` template), builds the image with buildx, runs `docker run --rm <image> --help` as a smoke test, and when `dry_run` is false pushes the image to GHCR by digest only (`packages: write` on this job) and outputs the digest. Job `publish` needs `build`, runs only when `dry_run` is false, uses `environment: release` (you approve), and adds the tag `<version>` to the digest with `docker buildx imagetools create`, creates the annotated git tag `v<version>` and a GitHub release whose notes are the changelog section, using the environment secret `TLD_RELEASE_TOKEN` through the Git data API exactly as `tld-release.yml` does. Actions are referenced by major version tag (`actions/checkout@v4`, `docker/setup-buildx-action@v3`, `docker/login-action@v3`, `docker/build-push-action@v6`); pinning them to commit SHAs is a follow-up for the owner (Dependabot can do it).
+
 ## 5. Manual steps
 
 Manual steps happen once before implementation and after the last merge; every phase runs on a cloud worker with a throwaway Postgres, signed test claims, a fake Forgejo and a fake S3.
@@ -168,6 +174,13 @@ Report back: `kh migrate` runs against the `kh` database without error (pass/fai
 
 **ma5-deploy-image (about 30 minutes).** On the CAX31 build the image (`docker build -t knowledge-hub .`, the sandbox has no Docker daemon, so this is the first real build), add the service and an Ollama service to the compose stack from `deploy/compose.example.yaml`, then run `kh migrate`, `kh rebuild`, `kh daily`. Also run `deploy/backup-kh.sh` once and confirm it prints `backup ok` (the pg_dump behaviour for a FORCE-RLS owner with a permissive policy is unverified). Report back: `/healthz` answers `ok`, `kh check` exits 0 and the backup ran (pass/fail). The runbook is [docs/runbook.md](https://github.com/tkcs-lab/knowledge-hub/blob/feature/knowledge-hub-service/docs/runbook.md).
 
+**ma7-release-setup (about 20 minutes).** Needed once before the first `/tld:release`.
+1. In the GitHub repository open **Settings → Environments → New environment**, name it `release`, tick **Required reviewers** and add yourself ([GitHub docs on environments](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment), not verified from the planning environment).
+2. In that environment add the secret `TLD_RELEASE_TOKEN`: a fine-grained personal access token of an owner with **Contents: read and write** on this repository only (the workflow uses it to create the tag and the GitHub release; never paste it in chat).
+3. Run `/tld:release`, choose `dry-run` first: it builds the arm64 image on a GitHub arm64 runner and publishes nothing. Then run it again and choose `real`, and approve the `publish` job in GitHub.
+4. After the first push open the package page under the repository's **Packages** and set its visibility and the repository link ([GitHub docs on package access](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)); in the compose repo add `knowledge_hub: ghcr.io/tkcs-lab/knowledge-hub:0.1.0` to `images_track` and run `scripts/pin-images.sh`.
+Report back: the dry run is green and the real run published `ghcr.io/tkcs-lab/knowledge-hub:0.1.0` and the tag `v0.1.0` (pass/fail).
+
 **ma6-live-smoke (about 30 minutes).** From a person's client run one `kh_search` and one `kh_propose_change`; confirm the pull request appears in the right canonical repo with labels `promotion` and `domain/<d>` and that its branch is `bot/promote/<candidate-id>`. Report back pass/fail. Live n8n writes need the PrivacyFence change that lets scoped tokens call gated tools; they are not part of this plan.
 
 ## 6. Risks and open questions
@@ -183,6 +196,7 @@ Report back: `kh migrate` runs against the `kh` database without error (pass/fai
 - `INGEST_AUDIENCE` tells a token that a series maps to an audience it lacks; that reveals the shape of the audience map, not any content, and is accepted.
 - Backup and restore of FORCE-RLS tables: research r-20261115-3 (2026-11-15, [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)) says `pg_dump` defaults to `row_security=off` and errors for a role that cannot bypass RLS, `--enable-row-security` avoids that, its output should be INSERT format because `COPY FROM` does not support row security, and `pg_restore --disable-triggers` needs a superuser. The plan therefore dumps with `--enable-row-security --inserts` as `kh_migrator` and restores as the Postgres superuser; the exact pg_dump behaviour for an owner with a `USING (true)` policy was not run and is checked by the owner in ma5.
 - `service` principals cannot call tools through PrivacyFence, so `ingest_raw` accepts `n8n_workflow` only.
+- The release workflow runs only on GitHub, so `p26` can test the file's content but not a real run; ma7 is its first run. GitHub Actions are referenced by major version tag and should be pinned to commit SHAs by the owner.
 - If a phase finds that a name, schema or text in this plan contradicts the code it meets, it stops with `status=blocked` and does not improvise.
 
 ## Implementation manifest
@@ -213,6 +227,9 @@ manual_after:
   - id: ma5-deploy-image
     title: "Build the arm64 image and deploy it with Ollama"
     why: "The sandbox has no Docker daemon, so the image is never built before the box"
+  - id: ma7-release-setup
+    title: "Create the release environment and secret, then run the first dry-run and real release"
+    why: "Only GitHub can build the arm64 image natively and publish it to GHCR after your approval"
   - id: ma6-live-smoke
     title: "Run a live search and a live propose_change"
     why: "Verifies the whole path with real repositories and a real pull request"
@@ -933,5 +950,30 @@ phases:
     acceptance:
       - ".venv/bin/python -m pytest tests/unit/test_docs_links.py -q passes"
       - "grep -c 'kh rebuild' docs/runbook.md prints a number of at least 1"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p26-release-workflow
+    title: "Release workflow, changelog, version file and release profile keys"
+    depends_on: [p24-deploy-backup, p25b-docs-ops]
+    complexity: M
+    touches:
+      - .github/workflows/release.yml
+      - CHANGELOG.md
+      - pyproject.toml
+      - .tld/toolkit.yaml
+      - docs/runbook.md
+      - tests/unit/test_release_files.py
+    brief: |
+      Context: section 3.13. Run `tld guard allow-profile` before editing `.tld/toolkit.yaml`.
+      1. `pyproject.toml`: replace the static `version` with `dynamic = ["version"]` and add `[tool.setuptools.dynamic]` with `version = {attr = "knowledge_hub.__version__"}`; reinstall with `.venv/bin/python -m pip install -e ".[dev]"` and confirm `.venv/bin/python -c "import importlib.metadata as m; print(m.version('knowledge-hub'))"` prints `0.1.0`.
+      2. `CHANGELOG.md`: a title, a one-line description and one section `## [Unreleased]` listing the user-visible capabilities of the service under `### Added` (one line each: MCP tools, indexer and `kh` commands, RLS audience enforcement, image); no version heading (the release skill writes it).
+      3. `.github/workflows/release.yml` exactly as section 3.13 describes: `name: release`, `workflow_dispatch` with the boolean input `dry_run` (default `true`) and no other input, top-level `permissions: contents: read`, `concurrency: group: release, cancel-in-progress: false`; job `build` (`runs-on: ubuntu-24.04-arm`, `if: github.ref == 'refs/heads/main'`, job-level `permissions: contents: read, packages: write, checks: read, statuses: read`) with steps checkout, read the version with `python3 -c` from `src/knowledge_hub/__init__.py` (`__version__ = "x.y.z"`), changelog heading check (`grep -q "^## \[$VERSION\] - " CHANGELOG.md`), the green-checks gate copied in intent from the `tld-release.yml` template (all check runs other than this workflow's own completed with `success`, `skipped` or `neutral`), `docker/setup-buildx-action@v3`, a build with `docker/build-push-action@v6` (`platforms: linux/arm64`, `load: true`, `push: false`), the smoke test `docker run --rm <image> --help`, then, only when `inputs.dry_run == false`, `docker/login-action@v3` to `ghcr.io` with `github.actor` and `secrets.GITHUB_TOKEN` and a push by digest (`outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true`), writing the digest to the job output `digest`; job `publish` (`needs: build`, `if: inputs.dry_run == false`, `runs-on: ubuntu-24.04-arm`, `environment: release`, `permissions: contents: read, packages: write`) that logs in, runs `docker buildx imagetools create -t ghcr.io/${{ github.repository }}:$VERSION ghcr.io/${{ github.repository }}@$DIGEST`, then creates the annotated tag `v$VERSION` and the GitHub release (notes = the changelog section for `$VERSION`, extracted with `awk`) through the Git data API with `secrets.TLD_RELEASE_TOKEN` (as the `tld-release.yml` template does: `gh api -X POST repos/$REPO/git/tags`, `.../git/refs`, then `gh release create --verify-tag --notes-file`). No input named `skip_checks`, no `latest` tag, every `run:` step starts with `set -euo pipefail`, and secrets only appear in `env:` blocks of the step that needs them.
+      4. `.tld/toolkit.yaml`: add `docs.changelog: {file: CHANGELOG.md, section: "## [Unreleased]"}` and `release: {workflow: release.yml, version_files: [{path: src/knowledge_hub/__init__.py, pattern: '^__version__ = "(\d+\.\d+\.\d+)"$'}]}`.
+      5. `docs/runbook.md`: add a section `## Releasing` (at most 25 lines): run `/tld:release`, the dry run first, what the publish approval is, where the image lands, and how to bump the compose repo (`images_track` entry and `scripts/pin-images.sh`).
+      6. `tests/unit/test_release_files.py` (unit): `release.yml` parses with `yaml.safe_load`; its `on` has `workflow_dispatch` with exactly the input `dry_run`; top-level `permissions` is `contents: read`; jobs are exactly `build` and `publish`; `build` runs on `ubuntu-24.04-arm`; `publish` has `environment: release` and `needs: build`; the file contains no `skip_checks` and no `:latest`; every `run:` step begins with `set -euo pipefail`; `TLD_RELEASE_TOKEN` appears only in `publish`.
+      Stop: if `tld profile validate` rejects the release keys, stop with status=blocked and show its message; do not edit the profile schema.
+    acceptance:
+      - "`tld profile validate .tld/toolkit.yaml --resolved` exits 0"
+      - "`tld ops release-prepare --profile .tld/toolkit.yaml` exits 0 and prints JSON containing \"current\": \"0.1.0\""
+      - ".venv/bin/python -m pytest tests/unit/test_release_files.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
 ```
