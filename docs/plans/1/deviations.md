@@ -217,7 +217,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p25a-docs-design
 
-- pending
+- worker: Choices left open: design.md is 113 lines; the three asks for PrivacyFence (bless the email claim for visibility, promise it is set only for a verified person, announce any change to it) are the worker wording; configuration.md adds a commands table and a restricted_audiences_imply_all section; the kh.yaml example uses placeholder anchor shas and forgejo.example.invalid. Built behaviours that differ from the plan text are documented as built.
+- review: Docs only; the PrivacyFence asks in design.md are for the owner to confirm before sending. Orchestrator ran ruff and the full suite (753 passed, 1 skipped).
 
 ## p25b-docs-ops
 
