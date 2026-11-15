@@ -1,16 +1,28 @@
 tld:
   version: ">=1.0,<2"
 project:
-  name: REPO
+  name: knowledge-hub
 docs:
   must_read:
     - README.md
+  changelog:
+    file: CHANGELOG.md
+    section: "## [Unreleased]"
 git:
   main_branch: main
   branch_pattern: "<type>/<kebab-case>"
 verify:
   fast:
-    - echo "replace with your lint + quick tests"
+    - .venv/bin/python -m ruff check .
+    - .venv/bin/python -m pytest -q -m unit
   dod:
-    - echo "replace with your full gate"
-stacks: []
+    - .venv/bin/python -m ruff check .
+    - .venv/bin/python -m pytest -q
+  after_merge_allow:
+    - .venv/bin/python -m pytest
+stacks: [python]
+release:
+  workflow: release.yml
+  version_files:
+    - path: src/knowledge_hub/__init__.py
+      pattern: '^__version__ = "(\d+\.\d+\.\d+)"$'

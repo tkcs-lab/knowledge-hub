@@ -1,0 +1,36 @@
+{
+  "scenario": "new_root_null_anchor",
+  "repo": "kh/canonical-all",
+  "anchor": null,
+  "bot_logins": [
+    "kh-hub-bot"
+  ],
+  "commits": [
+    {
+      "sha": "dddddddddddddddddddddddddddddddddddddddd",
+      "parents": [],
+      "commit": {
+        "message": "m",
+        "committer": {
+          "name": "x",
+          "date": "2026-11-05T09:00:00Z"
+        }
+      },
+      "created": "2026-11-05T09:00:00Z"
+    }
+  ],
+  "pulls": [],
+  "reviews": {},
+  "compare": {
+    "dddddddddddddddddddddddddddddddddddddddd": {
+      "total_commits": 1,
+      "commits": [],
+      "files": [
+        {
+          "filename": "a.md",
+          "status": "modified"
+        }
+      ]
+    }
+  }
+}

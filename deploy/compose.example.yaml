@@ -1,0 +1,83 @@
+# Example services for the compose stack. Networks `db` and `kh` are internal and defined by the stack.
+# Secrets are files under /run/secrets; this file holds no secret value.
+services:
+  knowledge-hub:
+    image: knowledge-hub:0.1.0   # the tag you gave `docker build -t`
+    restart: unless-stopped
+    networks: [db, kh]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      KH_ENV: prod
+      KH_ALLOWED_HOSTS: "knowledge-hub:8080"
+      KH_PF_ISSUER: "https://privacyfence.example.invalid"
+      KH_PF_AUDIENCE: "knowledge-hub"
+      KH_PF_JWKS_URL: "https://privacyfence.example.invalid/.well-known/jwks.json"
+      KH_DB_HOST: postgres
+      KH_DB_NAME: kh
+      KH_DB_MIGRATOR_PASSWORD_FILE: /run/secrets/pg_kh_migrator
+      KH_DB_APP_PASSWORD_FILE: /run/secrets/pg_kh_app
+      KH_DB_INDEXER_PASSWORD_FILE: /run/secrets/pg_kh_indexer
+      KH_CONFIG_FILE: /etc/kh/kh.yaml
+      KH_FORGEJO_URL: "http://forgejo:3000"
+      KH_FORGEJO_BOT_TOKEN_FILE: /run/secrets/kh_hub_bot_token
+      KH_FORGEJO_INDEXER_TOKEN_FILE: /run/secrets/kh_indexer_token
+      KH_WEBHOOK_HMAC_FILE: /run/secrets/kh_webhook_hmac
+      KH_EMBED_PROVIDER: ollama
+      KH_OLLAMA_URL: "http://ollama:11434"
+      KH_S3_ENDPOINT: "http://garage:3900"
+      KH_S3_BUCKET: kh-blobs
+      KH_S3_ACCESS_KEY_FILE: /run/secrets/kh_s3_access_key
+      KH_S3_SECRET_KEY_FILE: /run/secrets/kh_s3_secret_key
+      KH_CURSOR_KEY_FILE: /run/secrets/kh_cursor_key
+      KH_METRICS_TOKEN_FILE: /run/secrets/kh_metrics_token
+      KH_GRIST_URL: "http://grist:8484"
+      KH_GRIST_DOC_ID: kh-entities
+      KH_GRIST_KEY_FILE: /run/secrets/kh_grist_key
+    secrets:
+      - pg_kh_migrator
+      - pg_kh_app
+      - pg_kh_indexer
+      - kh_hub_bot_token
+      - kh_indexer_token
+      - kh_webhook_hmac
+      - kh_s3_access_key
+      - kh_s3_secret_key
+      - kh_cursor_key
+      - kh_metrics_token
+      - kh_grist_key
+    volumes:
+      - ./kh.yaml:/etc/kh/kh.yaml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read().strip()==b'ok' else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ollama:
+    image: ollama/ollama:0.12.0
+    restart: unless-stopped
+    networks: [kh]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:
+
+secrets:
+  pg_kh_migrator: {file: /etc/stack-secrets/pg_kh_migrator}
+  pg_kh_app: {file: /etc/stack-secrets/pg_kh_app}
+  pg_kh_indexer: {file: /etc/stack-secrets/pg_kh_indexer}
+  kh_hub_bot_token: {file: /etc/stack-secrets/kh_hub_bot_token}
+  kh_indexer_token: {file: /etc/stack-secrets/kh_indexer_token}
+  kh_webhook_hmac: {file: /etc/stack-secrets/kh_webhook_hmac}
+  kh_s3_access_key: {file: /etc/stack-secrets/kh_s3_access_key}
+  kh_s3_secret_key: {file: /etc/stack-secrets/kh_s3_secret_key}
+  kh_cursor_key: {file: /etc/stack-secrets/kh_cursor_key}
+  kh_metrics_token: {file: /etc/stack-secrets/kh_metrics_token}
+  kh_grist_key: {file: /etc/stack-secrets/kh_grist_key}

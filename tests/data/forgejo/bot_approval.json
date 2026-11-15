@@ -1,0 +1,156 @@
+{
+  "scenario": "bot_approval",
+  "repo": "kh/canonical-all",
+  "anchor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "bot_logins": [
+    "kh-hub-bot"
+  ],
+  "commits": [
+    {
+      "sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "parents": [
+        {
+          "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "sha": "2222222222222222222222222222222222222222"
+        }
+      ],
+      "commit": {
+        "message": "m",
+        "committer": {
+          "name": "x",
+          "date": "2026-11-03T11:00:00Z"
+        }
+      },
+      "created": "2026-11-03T11:00:00Z"
+    },
+    {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "parents": [
+        {
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "sha": "1111111111111111111111111111111111111111"
+        }
+      ],
+      "commit": {
+        "message": "m",
+        "committer": {
+          "name": "x",
+          "date": "2026-11-02T11:00:00Z"
+        }
+      },
+      "created": "2026-11-02T11:00:00Z"
+    },
+    {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "parents": [],
+      "commit": {
+        "message": "m",
+        "committer": {
+          "name": "x",
+          "date": "2026-11-01T09:00:00Z"
+        }
+      },
+      "created": "2026-11-01T09:00:00Z"
+    }
+  ],
+  "pulls": [
+    {
+      "number": 1,
+      "html_url": "https://forgejo.example/kh/canonical-all/pulls/1",
+      "state": "closed",
+      "merged": true,
+      "merge_commit_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "user": {
+        "login": "alice"
+      },
+      "base": {
+        "ref": "main"
+      },
+      "head": {
+        "ref": "feat",
+        "sha": "1111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "number": 2,
+      "html_url": "https://forgejo.example/kh/canonical-all/pulls/2",
+      "state": "closed",
+      "merged": true,
+      "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "user": {
+        "login": "alice"
+      },
+      "base": {
+        "ref": "main"
+      },
+      "head": {
+        "ref": "feat",
+        "sha": "2222222222222222222222222222222222222222"
+      }
+    }
+  ],
+  "reviews": {
+    "1": [
+      {
+        "id": 1,
+        "user": {
+          "login": "bob"
+        },
+        "state": "APPROVED",
+        "official": true,
+        "dismissed": false,
+        "commit_id": "1111111111111111111111111111111111111111",
+        "submitted_at": "2026-11-02T10:00:00Z"
+      }
+    ],
+    "2": [
+      {
+        "id": 1,
+        "user": {
+          "login": "kh-hub-bot"
+        },
+        "state": "APPROVED",
+        "official": true,
+        "dismissed": false,
+        "commit_id": "2222222222222222222222222222222222222222",
+        "submitted_at": "2026-11-02T10:00:00Z"
+      }
+    ]
+  },
+  "compare": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "total_commits": 1,
+      "commits": [],
+      "files": [
+        {
+          "filename": "old.md",
+          "status": "modified"
+        }
+      ]
+    },
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      "total_commits": 1,
+      "commits": [],
+      "files": [
+        {
+          "filename": "a.md",
+          "status": "modified"
+        }
+      ]
+    },
+    "cccccccccccccccccccccccccccccccccccccccc": {
+      "total_commits": 1,
+      "commits": [],
+      "files": [
+        {
+          "filename": "b.md",
+          "status": "modified"
+        }
+      ]
+    }
+  }
+}
