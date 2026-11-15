@@ -84,7 +84,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-embed-providers
 
-- pending
+- worker: EmbeddingError did not exist and base.py is outside touches, so it is defined in embed/ollama.py with a shared check_vectors helper and BATCH_SIZE; embed/http.py imports from there and it may move to base.py later. The factory raises ValueError when a provider URL or token file setting is missing and splits the http allowed audiences on commas; both providers batch by 32 and take an optional transport argument; bench_embed.py builds its embedder from Settings and --url overrides ollama_url.
+- review: Diff matched touches; the benchmark ran only with the fake provider, not against a real Ollama (manual step ma8). Orchestrator ran ruff and the full suite (432 passed).
 
 ## p11a1-sync-plan
 
