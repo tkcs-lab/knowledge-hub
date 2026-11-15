@@ -113,10 +113,43 @@ INGEST_RAW = ToolCase(
     cases=(),
 )
 
+def _derive_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "kind": "summary",
+        "title": "Matrix",
+        "body": "matrix summary",
+        "domain": "technical",
+        "claims_json": "[]",
+        "derived_from": [f"doc:{ids['documents'][case]}" if case else f"doc:{uuid.uuid4()}"],
+        "pipeline": "p",
+        "model": "m",
+        "pipeline_version": "1",
+    }
+
+
+def _derive_missing(ids: Ids) -> dict[str, Any]:
+    return _derive_args(ids)
+
+
+# write_derived creates a new row, so no seed row is cited back (``cases=()``); the matrix calls it
+# once per principal with a source that does not exist and checks the response cites no hidden row.
+# The hidden-versus-missing comparison for each seed case is in ``test_write_derived``.
+WRITE_DERIVED = ToolCase(
+    name="write_derived",
+    args_for_hidden=_derive_args,
+    args_for_visible=_derive_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=_derive_missing,
+    cited=lambda res: {res.data["citation_id"]} if res.data else set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+
 TOOL_CASES: list[ToolCase] = [
     SEARCH,
     _get_doc_case("documents", "doc"),
     _get_doc_case("raw_records", "raw"),
     _get_doc_case("derived_records", "derived"),
     INGEST_RAW,
+    WRITE_DERIVED,
 ]

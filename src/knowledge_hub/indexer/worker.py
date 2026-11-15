@@ -55,22 +55,27 @@ class Worker:
             cur = await conn.execute(_CLAIM, (MAX_ATTEMPTS,))
             return await cur.fetchone()
 
-    async def _embed_raw(self, payload: Any) -> None:
-        """Chunk and embed the blob of one raw record; chunk visibility is inherited by the trigger."""
-        if self.blobs is None:
-            raise RuntimeError("no blob store configured")
-        raw_id = payload["id"]
+    async def _embed_owner(self, column: str, table: str, tier: str, text_column: str, payload: Any) -> None:
+        """Chunk and embed one raw or derived record; chunk visibility is inherited by the trigger.
+
+        Existing chunks are deleted before the new ones are inserted, in one transaction, so a retry is safe.
+        """
+        owner_id = payload["id"]
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT blob_key, required_audiences, allowed_emails FROM kh.raw_records WHERE id = %s",
-                (raw_id,),
+                f"SELECT {text_column}, required_audiences, allowed_emails FROM kh.{table} WHERE id = %s",
+                (owner_id,),
             )
             row = await cur.fetchone()
         if row is None:
             return  # the record is gone; nothing to index
-        blob_key, audiences, emails = row
-        text = (await self.blobs.get(blob_key)).decode("utf-8", errors="replace")
-        chunks = chunk_markdown(text, str(self.chunker_version))
+        source, audiences, emails = row
+        if column == "raw_id":
+            if self.blobs is None:
+                raise RuntimeError("no blob store configured")
+            source = await self.blobs.get(source)
+            source = source.decode("utf-8", errors="replace")
+        chunks = chunk_markdown(source, str(self.chunker_version))
         visibility = SimpleNamespace(required_audiences=audiences, allowed_emails=emails)
         embeddable = bool(self.embedder.may_embed(visibility))
         vectors: list[list[float] | None] = [None] * len(chunks)
@@ -79,15 +84,21 @@ class Worker:
             vectors = list(await self.embedder.embed(texts))
         model = self.embedder.model if embeddable else None
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute("DELETE FROM kh.chunks WHERE raw_id = %s", (raw_id,))
+            await conn.execute(f"DELETE FROM kh.chunks WHERE {column} = %s", (owner_id,))
             for c, vec in zip(chunks, vectors, strict=True):
                 literal = None if vec is None else "[" + ",".join(repr(float(x)) for x in vec) + "]"
                 await conn.execute(
-                    "INSERT INTO kh.chunks (id, raw_id, ordinal, heading_path, text, content_sha,"
+                    f"INSERT INTO kh.chunks (id, {column}, ordinal, heading_path, text, content_sha,"
                     " embedding, embedding_model, owner_key, tier, required_audiences)"
-                    " VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s::vector, %s, '', 'T3', '{}')",
-                    (raw_id, c.ordinal, c.heading_path, c.text, c.content_sha, literal, model),
+                    " VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s::vector, %s, '', %s, '{}')",
+                    (owner_id, c.ordinal, c.heading_path, c.text, c.content_sha, literal, model, tier),
                 )
+
+    async def _embed_raw(self, payload: Any) -> None:
+        await self._embed_owner("raw_id", "raw_records", "T3", "blob_key", payload)
+
+    async def _embed_derived(self, payload: Any) -> None:
+        await self._embed_owner("derived_id", "derived_records", "T2", "body", payload)
 
     async def _run(self, kind: str, repo: str | None, payload: Any = None) -> None:
         if kind == "git_push":
@@ -103,7 +114,9 @@ class Worker:
             )
         elif kind == "embed_raw":
             await self._embed_raw(payload)
-        # pr_event and embed_derived are recorded as done; later phases handle them.
+        elif kind == "embed_derived":
+            await self._embed_derived(payload)
+        # pr_event is recorded as done; a later phase handles it.
 
     async def run_once(self) -> bool:
         """Run one queued job; False when there was none."""
