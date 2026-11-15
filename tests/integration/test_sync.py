@@ -5,6 +5,7 @@ from __future__ import annotations
 import psycopg
 
 from knowledge_hub.config import parse_config
+from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.indexer.sync import sync_repo
 from tests.support.forgejo_fake import FakeCommit, FakeRepo, ForgejoFake
 from tests.unit.test_sync_plan import doc, merged, repo_of
@@ -19,7 +20,9 @@ def rows(fresh_db, sql, *args):
 
 
 async def sync(pool, repo_obj):
-    return await sync_repo(pool, ForgejoFake({"canonical-all": repo_obj}), CFG, "canonical-all")
+    return await sync_repo(
+        pool, ForgejoFake({"canonical-all": repo_obj}), CFG, "canonical-all", FakeEmbedder()
+    )
 
 
 async def test_approval_fields_and_repo_state(fresh_db, indexer_pool):

@@ -1,6 +1,7 @@
 """Write one repo sync plan to the database in a single transaction (plan section 3.6).
 
-Chunks are written by the next phase; this writes documents, versions, alerts and ``repo_state``.
+Writes documents, versions, alerts, ``repo_state`` and chunks. Chunks are embedded before the transaction
+opens (``plan_chunks``) and written inside it (``apply_chunks``).
 """
 
 from __future__ import annotations
@@ -12,6 +13,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from knowledge_hub.config import Config
+from knowledge_hub.indexer.sync_chunks import (
+    ChunkDoc,
+    ChunkPlan,
+    apply_chunks,
+    load_stored_chunks,
+    plan_chunks,
+)
 from knowledge_hub.indexer.sync_plan import SyncPlan, build_sync_plan
 
 _ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
@@ -135,19 +143,53 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
         )
 
 
-async def sync_repo(indexer_pool: Any, forgejo: Any, config: Config, repo: str) -> SyncPlan:
+async def _chunk_plan(
+    embedder: Any, config: Config, plan: SyncPlan, stored: dict, chunker_version: int
+) -> ChunkPlan:
+    rows = [ChunkDoc(u, stored.get(u.doc_key, [])) for u in plan.upserts]
+    cp = await plan_chunks(embedder, config, rows, chunker_version=chunker_version)
+    cp.repo = plan.repo
+    return cp
+
+
+async def sync_repo(
+    indexer_pool: Any,
+    forgejo: Any,
+    config: Config,
+    repo: str,
+    embedder: Any,
+    *,
+    chunker_version: int = 1,
+) -> SyncPlan:
     """Plan and write one repo sync; returns the plan that was written."""
     async with indexer_pool.connection() as conn:
         state, existing = await _load(conn, repo)
+        stored = await load_stored_chunks(conn, repo)
     plan = await build_sync_plan(forgejo, config, repo, state, existing)
+    chunks = None if plan.refused else await _chunk_plan(embedder, config, plan, stored, chunker_version)
     async with indexer_pool.connection() as conn, conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (repo,))
         # Documents may have changed between the read and the lock; re-plan against the locked view.
         locked_state, locked_existing = await _load(conn, repo)
+        locked_stored = await load_stored_chunks(conn, repo)
         if (locked_state or {}).get("last_indexed_sha") != (state or {}).get("last_indexed_sha") or {
             k: r["commit_sha"] for k, r in locked_existing.items()
         } != {k: r["commit_sha"] for k, r in existing.items()}:
             plan = await build_sync_plan(forgejo, config, repo, locked_state, locked_existing)
             existing = locked_existing
+            chunks = (
+                None
+                if plan.refused
+                else await _chunk_plan(embedder, config, plan, locked_stored, chunker_version)
+            )
+        elif chunks is not None and _ids(locked_stored) != _ids(stored):
+            # Chunks were written by someone else meanwhile: diff again (embedding is deterministic per text).
+            chunks = await _chunk_plan(embedder, config, plan, locked_stored, chunker_version)
         await _write(conn, plan, {k: r["id"] for k, r in existing.items()})
+        if chunks is not None:
+            await apply_chunks(conn, chunks)
     return plan
+
+
+def _ids(stored: dict) -> dict:
+    return {k: sorted(str(c.id) for c in v) for k, v in stored.items()}
