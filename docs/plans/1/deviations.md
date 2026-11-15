@@ -201,7 +201,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p22b-entities-tools
 
-- pending
+- worker: Choices left open: list_entities returns entities (id, kind, name, owner_team, status, attrs, synced_at) and next_cursor; get_entity returns the entity and its visible documents ordered by id; a malformed or unknown id gives NOT_FOUND like a hidden one; the bad-type text is a local constant BAD_TYPE raised as KhError bad_type; the keyset cursor has width 1 and its scope covers type, status and owner_team; limit is clamped to 1-50 and the type check runs before limit and cursor handling; GET_ENTI
+- review: Worker ran 6 mutation checks; each broke a test. Orchestrator ran ruff and the full suite (731 passed, 1 skipped).
 
 ## p23-hardening
 
