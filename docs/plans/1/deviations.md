@@ -59,7 +59,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6b-search-tool
 
-- pending
+- worker: Open choices: lower_tier_hits comes from a second pair of vector and full-text lists over the lower tiers; newest_at is one value across visible T2 and T3 owners; NORMATIVE fires when min_tier is T0 or T1, no non-disputed T0 or T1 owner is in the fused set and T2 plus T3 is above zero; the cursor binds the query plus domains, min_tier and entities; limit is clamped to 1-50; result shape is hits, lower_tier_hits, next_cursor; search fails with INTERNAL if cursor_key_file is unset; build_search_qu
+- worker: Test seeding: the indexer role has no INSERT on raw_records or derived_records, so raw and derived rows are inserted as wf_token through the app pool and then the indexer sets visibility.
+- review: Behaviour risk for the owner: lower_tier_hits has no relevance cutoff on the vector side, so a T0 or T1 query with no current T0/T1 hit will almost always return NORMATIVE when any lower-tier content is visible. A similarity threshold would fix it but the plan specifies none.
 
 ## p7-http-e2e
 
