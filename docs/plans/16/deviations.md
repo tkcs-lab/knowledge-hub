@@ -48,7 +48,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11-search-marking
 
-- pending
+- worker: tests/integration/test_any_of_migration.py changed (outside touches): calls migrate(dsn) before the drift check, since the check now reads chunks.agent_written from 0007_proposals.
+- retry: First report blocked on that test; orchestrator approved the one-line edit.
+- scope: tests/integration/test_any_of_migration.py accepted as out of scope (see worker entry).
 
 ## p12-register-tools
 
