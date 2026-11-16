@@ -268,3 +268,95 @@ LIST_ENTITIES = ToolCase(
     cases=(),
 )
 TOOL_CASES.extend([FLAG_CONFLICT, LIST_CONFLICTS, LIST_STALE, GET_ENTITY, LIST_ENTITIES])
+
+
+def _write_note_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "audience": "all",
+        "id": f"matrix-{uuid.uuid4().hex[:8]}",
+        "title": "Matrix",
+        "domain": "technical",
+        "review_by": "2999-01-01",
+        "body": "matrix body",
+        "entities": [f"doc:{uuid.uuid4()}"] if not case else [f"doc:{ids['documents'][case]}"],
+    }
+
+
+def _propose_doc_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "audience": "all",
+        "domain": "technical",
+        "product": "matrix",
+        "kind": "guides",
+        "id": f"matrix-{uuid.uuid4().hex[:8]}",
+        "title": "Matrix",
+        "review_by": "2999-01-01",
+        "body": "matrix body",
+        "rationale": "matrix",
+    }
+
+
+def _propose_edit_args(ids: Ids, case: str = "") -> dict[str, Any]:
+    return {
+        "target_id": f"doc:{ids['documents'][case]}" if case else f"doc:{uuid.uuid4()}",
+        "title": "Matrix",
+        "review_by": "2999-01-01",
+        "body": "matrix body",
+        "rationale": "matrix",
+    }
+
+
+# The three write tools create rows and cite none back (``cases=()``); with the flags off every
+# principal gets the same refusal, and the matrix checks that it cites no hidden seed row.
+WRITE_NOTE = ToolCase(
+    name="write_note",
+    args_for_hidden=_write_note_args,
+    args_for_visible=_write_note_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: _write_note_args(ids),
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+PROPOSE_DOC = ToolCase(
+    name="propose_doc",
+    args_for_hidden=_propose_doc_args,
+    args_for_visible=_propose_doc_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: _propose_doc_args(ids),
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+PROPOSE_EDIT = ToolCase(
+    name="propose_edit",
+    args_for_hidden=_propose_edit_args,
+    args_for_visible=_propose_edit_args,
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: _propose_edit_args(ids),
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+# pr_status of a random uuid is ``not found`` for everyone; list_my_proposals lists only the caller's rows.
+PR_STATUS = ToolCase(
+    name="pr_status",
+    args_for_hidden=lambda ids, case="": {"proposal_id": str(uuid.uuid4())},
+    args_for_visible=lambda ids, case="": {"proposal_id": str(uuid.uuid4())},
+    expect_hidden=_not_found,
+    args_for_missing=lambda ids: {"proposal_id": str(uuid.uuid4())},
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+LIST_MY_PROPOSALS = ToolCase(
+    name="list_my_proposals",
+    args_for_hidden=lambda ids, case="": {},
+    args_for_visible=lambda ids, case="": {},
+    expect_hidden=_ingest_not_a_leak,
+    args_for_missing=lambda ids: {},
+    cited=lambda res: set(),
+    citation=lambda ids, case: "",
+    cases=(),
+)
+TOOL_CASES.extend([WRITE_NOTE, PROPOSE_DOC, PROPOSE_EDIT, PR_STATUS, LIST_MY_PROPOSALS])
