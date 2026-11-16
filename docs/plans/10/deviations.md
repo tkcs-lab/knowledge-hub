@@ -11,7 +11,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-config-owners
 
-- pending
+- worker: none
+- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; full pytest -q not runnable here (no pgvector), unit tests and ruff pass
 
 ## p4-forgejo-client
 
