@@ -10,8 +10,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- None.
 
 ## Finishing
 
-- pending
+- scope: No out-of-scope paths. Workflow files are delivered as protected-change pull requests 22 (ci.yml) and 23 (release.yml), approved by the owner on the board.
