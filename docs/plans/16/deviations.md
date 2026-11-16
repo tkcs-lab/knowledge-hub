@@ -36,7 +36,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p8-governance
 
-- pending
+- None.
 
 ## p9-status-tools
 
