@@ -18,6 +18,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - worker: none
 - review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; worker doorbell never arrived (no doorbell), found by timer
+- worker: none
+- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; no doorbell arrived, found by the timer
+- conflict: CHANGELOG.md: both sides added entries under Unreleased; kept both
 
 ## p9-privacyfence-docs
 
