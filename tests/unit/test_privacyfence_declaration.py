@@ -15,8 +15,14 @@ from knowledge_hub.settings import Settings
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-READ_TOOLS = {"search", "get_doc", "get_entity", "list_entities", "list_conflicts", "list_stale"}
-WRITE_TOOLS = {"ingest_raw", "write_derived", "propose_change", "flag_conflict"}
+READ_TOOLS = {
+    "search", "get_doc", "get_entity", "list_entities", "list_conflicts", "list_stale",
+    "pr_status", "list_my_proposals",
+}
+WRITE_TOOLS = {
+    "ingest_raw", "write_derived", "propose_change", "flag_conflict",
+    "write_note", "propose_doc", "propose_edit",
+}
 READ_VERBS = {"read", "download", "search"}
 VERBS = READ_VERBS | {"add", "update", "restructure", "move", "send", "delete"}
 

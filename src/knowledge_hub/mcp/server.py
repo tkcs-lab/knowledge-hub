@@ -31,7 +31,19 @@ class Deps:
 
 def register_tools(server: MCPServer, deps: Deps) -> None:
     """Register every tool. Later phases add their modules here."""
-    from knowledge_hub.tools import conflicts, derived, docs, entities, promote, raw, search
+    from knowledge_hub.tools import (
+        agent_edit,
+        agent_notes,
+        agent_proposals,
+        agent_status,
+        conflicts,
+        derived,
+        docs,
+        entities,
+        promote,
+        raw,
+        search,
+    )
 
     docs.register(server, deps)
     search.register(server, deps)
@@ -40,6 +52,10 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
     promote.register(server, deps)
     conflicts.register(server, deps)
     entities.register(server, deps)
+    agent_notes.register(server, deps)
+    agent_proposals.register(server, deps)
+    agent_edit.register(server, deps)
+    agent_status.register(server, deps)
 
 
 def build_mcp(deps: Deps) -> MCPServer:

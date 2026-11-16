@@ -27,3 +27,8 @@ upstreams:
       write_derived: {gate: popup, verb: add, effect: "Adds a derived record that cites its sources to the knowledge hub."}
       propose_change: {gate: popup, verb: add, effect: "Opens a pull request that proposes a change to a canonical document."}
       flag_conflict: {gate: popup, verb: add, effect: "Records a conflict between documents in the knowledge hub."}
+      write_note: {gate: popup, verb: update, effect: "Writes or updates an unreviewed agent note in a knowledge hub notes repository."}
+      propose_doc: {gate: popup, verb: add, effect: "Opens a pull request that proposes a new canonical document for review."}
+      propose_edit: {gate: popup, verb: update, effect: "Opens a pull request that proposes an edit to a canonical document."}
+      pr_status: {gate: auto, verb: read}
+      list_my_proposals: {gate: auto, verb: read}
