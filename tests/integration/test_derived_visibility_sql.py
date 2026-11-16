@@ -104,6 +104,46 @@ def test_union_of_mgmt_and_hr_needs_a_caller_holding_both(fresh_db, admin):
     assert dv(fresh_db, carol_hr, ids) == (1, ["hr"], None, [None, "c1"])
 
 
+def readable_ids(cluster, who: Caller, table: str) -> set[str]:
+    with app_conn(cluster, who) as conn:
+        return {str(r[0]) for r in conn.execute(f"SELECT id FROM kh.{table}")}
+
+
+def test_mgmt_and_finance_sources_are_hidden_from_mgmt_only(fresh_db, admin):
+    ids = [f"doc:{doc(admin, ('mgmt',))}", f"doc:{doc(admin, ('finance',))}"]
+    mgmt_only, both = caller(("mgmt",)), caller(("finance", "mgmt"))
+    assert dv(fresh_db, both, ids)[:3] == (2, ["finance", "mgmt"], None)
+    assert dv(fresh_db, mgmt_only, ids)[:3] == (1, ["mgmt"], None)
+    did = uid()
+
+    def body():
+        derived_row(admin, ("finance", "mgmt"), None, did=did)
+        for sid in ids:
+            source(admin, did, "doc", sid.split(":")[1])
+
+    assert commit_error(admin, body) is None
+    assert did not in readable_ids(fresh_db, mgmt_only, "derived_records")
+    assert did in readable_ids(fresh_db, both, "derived_records")
+
+
+def test_any_of_source_and_hr_source_need_one_of_each(fresh_db, admin):
+    ids = [f"doc:{doc(admin, ('finance|mgmt',))}", f"doc:{doc(admin, ('hr',))}"]
+    mgmt_hr, mgmt_only = caller(("hr", "mgmt")), caller(("mgmt",))
+    assert dv(fresh_db, mgmt_hr, ids)[:3] == (2, ["finance|mgmt", "hr"], None)
+    assert dv(fresh_db, mgmt_only, ids)[:3] == (1, ["finance|mgmt"], None)
+    did = uid()
+
+    def body():
+        derived_row(admin, ("finance|mgmt", "hr"), None, did=did)
+        for sid in ids:
+            source(admin, did, "doc", sid.split(":")[1])
+
+    assert commit_error(admin, body) is None
+    assert did in readable_ids(fresh_db, mgmt_hr, "derived_records")
+    assert did not in readable_ids(fresh_db, mgmt_only, "derived_records")
+    assert did not in readable_ids(fresh_db, caller(("finance", "mgmt")), "derived_records")
+
+
 def test_intersection_of_email_lists(fresh_db, admin):
     who = caller(("all",), "dave@example.org")
     a = doc(admin, (), ["a@example.org", "dave@example.org"])

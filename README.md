@@ -13,7 +13,7 @@ The trusted core of the company knowledge layer: one MCP interface over canonica
 
 ## Audience model
 
-PrivacyFence signs an identity claim for every request, and the hub verifies it with PrivacyFence's vendored verifier. The claim lists the caller's audiences (`all`, `mgmt`, `hr`, `contracts`, ...), which an operator maps from Workspace groups. A row is visible when its `required_audiences` are all held by the caller. Rows may also list `allowed_emails`, which must then match the verified email of a person (meeting attendees, for example). A derived record inherits the union of its sources' audiences, so it can never be wider than its sources. Postgres enforces all of this with four roles under forced row-level security.
+PrivacyFence signs an identity claim for every request, and the hub verifies it with PrivacyFence's vendored verifier. The claim lists the caller's audiences (`all`, `mgmt`, `hr`, `contracts`, ...), which an operator maps from Workspace groups. A row's `required_audiences` is a set of clauses, each one audience or an any-of list, and the row is visible when the caller holds at least one audience of every clause. Rows may also list `allowed_emails`, which must then match the verified email of a person (meeting attendees, for example). A derived record inherits the clauses of all its sources, so it needs every source and can never be wider than its sources. Postgres enforces all of this with four roles under forced row-level security.
 
 ## Quick start
 

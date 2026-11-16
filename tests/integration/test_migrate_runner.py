@@ -44,3 +44,15 @@ def test_kh_app_has_no_superuser_or_bypassrls(fresh_db):
             "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
         ).fetchone()
     assert row == (False, False)
+
+
+def test_stop_after_applies_only_files_up_to_it(migrated_db):
+    with psycopg.connect(migrated_db.admin_dsn(), autocommit=True) as conn:
+        conn.execute("DROP DATABASE IF EXISTS kh_stop WITH (FORCE)")
+        conn.execute("CREATE DATABASE kh_stop OWNER kh_migrator")
+    with psycopg.connect(migrated_db.admin_dsn("kh_stop"), autocommit=True) as conn:
+        conn.execute("CREATE EXTENSION vector")
+    dsn = migrated_db.dsn("kh_migrator", "kh_stop")
+    done = migrate(dsn, stop_after="0006_strict_visibility.sql")
+    assert [n[:4] for n in done] == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert migrate(dsn)[0].startswith("0007")

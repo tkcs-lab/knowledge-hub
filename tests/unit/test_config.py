@@ -129,3 +129,9 @@ def test_governance_validation():
         parse_config({"governance": {"owner_teams": {"zzz": ["a"]}}})
     with pytest.raises(ConfigError, match="not a valid team name"):
         parse_config({"governance": {"owner_teams": {"hr": ["Bad Team"]}}})
+
+
+def test_audience_names_are_validated():
+    with pytest.raises(ConfigError) as e:
+        parse_config({"audiences": ["all", "mgmt", "hr", "contracts", "a|b"]})
+    assert str(e.value) == "config: audience 'a|b' is not a valid audience name (audiences)"

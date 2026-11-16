@@ -31,7 +31,8 @@ class HttpEmbedder:
         audiences = getattr(visibility, "required_audiences", None)
         if not audiences or getattr(visibility, "allowed_emails", None) is not None:
             return False
-        return set(audiences) <= self.allowed_audiences
+        members = {a for c in audiences for a in c.split("|")}
+        return members <= self.allowed_audiences
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []

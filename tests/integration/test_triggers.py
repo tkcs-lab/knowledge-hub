@@ -205,15 +205,33 @@ def test_mapped_series_gives_mapped_audiences_and_null_emails(fresh_db, admin):
     admin.execute("INSERT INTO kh.raw_audience_map VALUES ('series', 's1', '{mgmt,all}')")
     with app_conn(fresh_db, audiences="all,mgmt,hr") as conn:
         rid = ingest(conn, series="s1", participants=["a@example.org"])
-    assert vis(admin, rid) == (["all", "mgmt"], None)
+    assert vis(admin, rid) == (["all|mgmt"], None)
 
 
-def test_mapped_series_and_folder_give_the_union(fresh_db, admin):
+def test_mapped_series_and_folder_give_one_clause_each(fresh_db, admin):
     admin.execute("INSERT INTO kh.raw_audience_map VALUES ('series', 's1', '{all}'),"
                   " ('folder', 'f1', '{hr}')")
     with app_conn(fresh_db, audiences="all,hr") as conn:
         rid = ingest(conn, series="s1", folder="f1")
     assert vis(admin, rid) == (["all", "hr"], None)
+
+
+def test_multi_audience_entry_gives_one_clause(fresh_db, admin):
+    admin.execute("INSERT INTO kh.raw_audience_map VALUES ('series', 's1', '{mgmt,finance}'),"
+                  " ('folder', 'f1', '{hr}')")
+    with app_conn(fresh_db, audiences="mgmt,finance,hr") as conn:
+        both = ingest(conn, series="s1")
+        two = ingest(conn, series="s1", folder="f1")
+    assert vis(admin, both) == (["finance|mgmt"], None)
+    assert vis(admin, two) == (["finance|mgmt", "hr"], None)
+
+
+def test_token_missing_one_mapped_audience_raises_p0k02(fresh_db, admin):
+    admin.execute("INSERT INTO kh.raw_audience_map VALUES ('series', 's1', '{mgmt,finance}')")
+    with app_conn(fresh_db, audiences="mgmt") as conn, pytest.raises(psycopg.Error) as exc:
+        ingest(conn, series="s1", participants=["a@example.org"])
+    assert exc.value.sqlstate == "P0K02"
+    assert admin.execute("SELECT count(*) FROM kh.raw_records").fetchone() == (0,)
 
 
 def test_unmapped_gives_empty_audiences_and_lowercased_participants(fresh_db, admin):

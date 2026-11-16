@@ -152,6 +152,15 @@ def test_no_open_rows(conn, table, make):
     assert exc.value.diag.constraint_name == "kh_no_open_rows"
 
 
+@pytest.mark.parametrize("bad", [[""], ["mgmt|finance"], ["MGMT"], ["a||b"], ["mgmt", ""]])
+def test_audience_clauses_check(conn, bad):
+    insert(conn, "entities_cache", id=u(), required_audiences=["finance|mgmt"], allowed_emails=None)
+    insert(conn, "entities_cache", id=u(), required_audiences=["all", "hr"], allowed_emails=None)
+    with pytest.raises(psycopg.errors.CheckViolation) as exc:
+        insert(conn, "entities_cache", id=u(), required_audiences=bad, allowed_emails=None)
+    assert exc.value.diag.constraint_name == "kh_audience_clauses"
+
+
 def test_chunk_open_row_names_constraint(conn):
     d = doc()
     insert(conn, "documents", **d)

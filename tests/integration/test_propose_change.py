@@ -395,6 +395,17 @@ async def test_visibility_stores_the_full_union(admin, mcp_client):
     ).fetchone() == (["mgmt"],)
 
 
+async def test_any_of_source_with_two_repos_is_ambiguous(admin, mcp_client):
+    # {all|mgmt} is readable by holders of all or of mgmt: both canonical-all and canonical-mgmt fit.
+    d = make_doc(admin, ("all|mgmt",))
+    err(
+        await mcp_client.call(bob_mgmt, "propose_change", args([d])),
+        "cannot propose: the sources fit both canonical-all and canonical-mgmt; "
+        "pass target_id of a document in the repository to use",
+    )
+    assert n_candidates(admin) == 0
+
+
 async def test_no_forgejo_connection_is_a_fixed_text(admin, mcp_client, deps):
     deps.forgejo = None
     deps.forgejo_bot = None

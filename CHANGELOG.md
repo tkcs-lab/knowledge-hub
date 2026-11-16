@@ -15,6 +15,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- An audience list in `entities.<kind>.audiences` or `raw_audience_map` now means any one of the audiences may read the rows; derived records, candidates and conflicts still need every source. Check multi-audience lists before upgrading (migration 0007).
 - `generated_by` and `derived_from` are forbidden frontmatter keys, like the other keys the server writes.
 - The indexer skips paths with a dot-prefixed segment, so `.forgejo/pull_request_template.md` raises no alert.
 - The PrivacyFence declaration example sets `email_for_visibility: true`.
