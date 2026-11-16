@@ -39,7 +39,7 @@ def test_superseded_status_ok():
 @pytest.mark.parametrize(
     "key",
     ["tier", "audience", "audiences", "required_audiences", "allowed_emails", "visibility",
-     "approved_by", "approved_at", "generated_by", "derived_from"],
+     "approved_by", "approved_at", "generated_by", "derived_from", "stamp"],
 )
 def test_forbidden_keys(key):
     r = parse_document(doc(f"{key}: x\n"), "p.md", DOMAINS)
