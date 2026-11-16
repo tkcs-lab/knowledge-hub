@@ -21,6 +21,7 @@ from knowledge_hub.indexer.sync_chunks import (
     plan_chunks,
 )
 from knowledge_hub.indexer.sync_plan import SyncPlan, build_sync_plan
+from knowledge_hub.indexer.trust import Verdict
 
 _ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -35,7 +36,7 @@ def _fmt_ts(value: datetime | None) -> str | None:
     return None if value is None else value.astimezone(UTC).strftime(_ISO_Z)
 
 
-async def _load(conn: Any, repo: str) -> tuple[dict | None, dict[str, dict]]:
+async def _load(conn: Any, repo: str) -> tuple[dict | None, dict[str, dict], dict[str, Verdict]]:
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute("SELECT * FROM kh.repo_state WHERE repo = %s", (repo,))
         state = await cur.fetchone()
@@ -46,15 +47,35 @@ async def _load(conn: Any, repo: str) -> tuple[dict | None, dict[str, dict]]:
             (repo,),
         )
         rows = await cur.fetchall()
+        await cur.execute(
+            "SELECT merge_sha, status, stamp, reason, approved_by, approved_at, pr_number, pr_url"
+            " FROM kh.merge_verdicts WHERE repo = %s",
+            (repo,),
+        )
+        verdict_rows = await cur.fetchall()
     existing = {}
     for r in rows:
         r["approved_at"] = _fmt_ts(r["approved_at"])
         existing[r["doc_key"]] = r
-    return state, existing
+    verdicts = {
+        v["merge_sha"]: Verdict(
+            status=v["status"],
+            approved_by=tuple(v["approved_by"]),
+            approved_at=_fmt_ts(v["approved_at"]),
+            merge_pr=v["pr_number"],
+            pr_url=v["pr_url"],
+            reason=v["reason"],
+            stamp=v["stamp"],
+        )
+        for v in verdict_rows
+    }
+    return state, existing, verdicts
 
 
 async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
     repo = plan.repo
+    if plan.rejudge and not plan.refused:
+        await conn.execute("DELETE FROM kh.merge_verdicts WHERE repo = %s", (repo,))
     gone = [*plan.removals, *plan.deletions]
     if gone:
         await conn.execute("DELETE FROM kh.documents WHERE repo = %s AND doc_key = ANY(%s)", (repo, gone))
@@ -119,6 +140,34 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
                 _parse_ts(v.approved_at), v.stamp, repo, v.doc_key,
             ),
         )  # fmt: skip
+    for sha, v in plan.verdicts.items():
+        # Versions are insert-once; a re-judged merge must change what get_doc(version=...) serves.
+        disputed = v.status == "disputed"
+        await conn.execute(
+            """
+            UPDATE kh.document_versions v SET stamp = %s, approved_by = %s, approved_at = %s,
+                status = CASE WHEN %s THEN 'disputed' ELSE v.status END
+            FROM kh.documents d
+            WHERE d.id = v.document_id AND d.repo = %s AND v.commit_sha = %s
+            """,
+            (
+                None if disputed else v.stamp, [] if disputed else list(v.approved_by),
+                None if disputed else _parse_ts(v.approved_at), disputed, repo, sha,
+            ),
+        )  # fmt: skip
+    for sha, v in plan.verdicts.items():
+        await conn.execute(
+            """
+            INSERT INTO kh.merge_verdicts
+                (repo, merge_sha, pr_number, status, stamp, reason, approved_by, approved_at, pr_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (repo, merge_sha) DO NOTHING
+            """,
+            (
+                repo, sha, v.merge_pr, v.status, v.stamp, v.reason, list(v.approved_by),
+                _parse_ts(v.approved_at), v.pr_url,
+            ),
+        )  # fmt: skip
     for a in dict.fromkeys((a.repo, a.path, a.message) for a in plan.alerts):
         await conn.execute(
             """
@@ -161,22 +210,33 @@ async def sync_repo(
     embedder: Any,
     *,
     chunker_version: int = 1,
+    rejudge: bool = False,
 ) -> SyncPlan:
     """Plan and write one repo sync; returns the plan that was written."""
     async with indexer_pool.connection() as conn:
-        state, existing = await _load(conn, repo)
+        state, existing, verdicts = await _load(conn, repo)
         stored = await load_stored_chunks(conn, repo)
-    plan = await build_sync_plan(forgejo, config, repo, state, existing)
+    plan = await build_sync_plan(
+        forgejo, config, repo, state, existing, stored_verdicts=None if rejudge else verdicts, rejudge=rejudge
+    )
     chunks = None if plan.refused else await _chunk_plan(embedder, config, plan, stored, chunker_version)
     async with indexer_pool.connection() as conn, conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (repo,))
         # Documents may have changed between the read and the lock; re-plan against the locked view.
-        locked_state, locked_existing = await _load(conn, repo)
+        locked_state, locked_existing, locked_verdicts = await _load(conn, repo)
         locked_stored = await load_stored_chunks(conn, repo)
         if (locked_state or {}).get("last_indexed_sha") != (state or {}).get("last_indexed_sha") or {
             k: r["commit_sha"] for k, r in locked_existing.items()
-        } != {k: r["commit_sha"] for k, r in existing.items()}:
-            plan = await build_sync_plan(forgejo, config, repo, locked_state, locked_existing)
+        } != {k: r["commit_sha"] for k, r in existing.items()} or locked_verdicts != verdicts:
+            plan = await build_sync_plan(
+                forgejo,
+                config,
+                repo,
+                locked_state,
+                locked_existing,
+                stored_verdicts=None if rejudge else locked_verdicts,
+                rejudge=rejudge,
+            )
             existing = locked_existing
             chunks = (
                 None
