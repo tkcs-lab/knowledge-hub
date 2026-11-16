@@ -22,6 +22,18 @@ A PR that moves content into a wider audience carries the label `widen-audience/
 
 A counted approval is the trust rule's: `APPROVED`, official, not dismissed, on the current head commit, not by the author or `kh-hub-bot`. A reviewer in two teams counts for both.
 
+## Agent proposals
+
+Pull requests from `propose_doc` and `propose_edit` come from `kh-hub-bot` on branches `bot/propose/<proposal-uuid>`, so the bot is the author and nothing in Forgejo excludes the person who asked. The hub records that person as a commit status.
+
+- **Requester status.** Context `kh/requested-by`, state `success`, description `<login> <proposal-uuid>`, posted by `kh-hub-bot` on the head commit.
+- **Binding.** The status counts only when it is on the current head sha, was created by `kh-hub-bot`, and its uuid equals the branch suffix. A commit pushed by a person moves the head, so the record is missing: close the PR and propose again.
+- **Effect.** The requester's approval is not a counted approval, in `kh domain-owners` and in the indexer's trust walk. A proposal PR with no valid record fails with the fixed line `agent proposal has no valid requester record from kh-hub-bot`, and its merged document is `disputed`. For other PRs a valid record naming an approver also excludes that approver; `propose_change` PRs have no record and are unchanged.
+- **Token rule.** The CI status token (`KH_CI_STATUS_TOKEN`) must never belong to `kh-hub-bot`, or any workflow author could forge the record. Give it to its own account.
+- **Authority.** The trust walk is the authoritative control; the `kh/domain-owners` status is advisory, because a person with write access can post any status context and Forgejo does not stop a requester approving a bot-authored PR. A requester who approves, posts a fake `kh/domain-owners: success` and merges leaves the document `disputed` in the index and raises `file <path> on <repo>/main has no approved merge PR`.
+
+The paths follow the layout below (`<domain>/<product>/[<component>/]<requirements|specs|guides>/<id>.md`); the hub fills `type` and `owner`, and sets the labels `promotion` and `domain/<domain>`.
+
 ## Layout and types
 
 | Path | `type` | `id` |

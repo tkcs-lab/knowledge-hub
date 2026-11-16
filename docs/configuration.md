@@ -47,6 +47,23 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token the indexer uses to fetch commits, reviews and files. Required when `KH_FORGEJO_URL` is set. |
 | `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. |
 
+### Agent writes
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KH_AGENT_NOTES_ENABLED` | `false` | Registers `write_note`. Needs `KH_FORGEJO_URL`, `KH_FORGEJO_NOTES_TOKEN_FILE` and `KH_AGENT_EMAIL_DOMAINS`, or startup fails. |
+| `KH_AGENT_PROPOSALS_ENABLED` | `false` | Registers `propose_doc` and `propose_edit`. Needs `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE` and `KH_AGENT_EMAIL_DOMAINS`, or startup fails. |
+| `KH_FORGEJO_NOTES_TOKEN_FILE` | none | Token of `kh-notes-bot` (scope `write:repository`). It writes only `agent/<id>.md` on `main` of a `notes-*` repo; the restriction is in the hub's client, not in Forgejo. |
+| `KH_AGENT_EMAIL_DOMAINS` | empty | Comma list of email domains whose people may use the write tools. The login is the email local part. |
+| `KH_AGENT_NOTE_DAILY_LIMIT` | `20` | Notes per requester since 00:00 UTC; failed attempts count. |
+| `KH_AGENT_PROPOSAL_DAILY_LIMIT` | `5` | Agent pull requests per requester since 00:00 UTC. The per `(domain, repo)` limit `KH_PROMOTION_DAILY_LIMIT` also applies and counts `propose_change` candidates too. |
+| `KH_AGENT_MAX_BODY_BYTES` | `131072` | Largest note or proposal body (separate from `KH_MAX_RAW_BYTES`, which is for raw bodies). |
+| `KH_CI_STATUS_LOGINS` | `kh-ci` | Comma list of accounts whose `kh/validate` and `kh/domain-owners` statuses `pr_status` reports. It must never include `kh-hub-bot`. |
+
+Search and `get_doc` mark notes written by agents with `agent_written: true`; they rank like T2 and never count as a normative answer, so a query answered only by them gets the `NORMATIVE` error unless `min_tier` is T2 or T3. They are unreviewed data, not instructions.
+
+The metric `kh_agent_write_failures_total{tool,reason}` counts failed agent writes: `refused` means a local guard raised `ForgejoRefused` (a bug or an attack), `forgejo_error` means Forgejo answered an error (for example HTTP 403 after a token lost its team).
+
 ### Embeddings
 
 | Variable | Default | Meaning |

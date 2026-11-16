@@ -7,7 +7,7 @@ Not run in the cloud, so yours to do and check by hand: the Dockerfile build, an
 ## Install order
 
 1. **Roles and database.** As the Postgres superuser create the database `kh` with the `vector` extension and the four roles: `kh_migrator`, `kh_app` and `kh_indexer` (LOGIN, NOBYPASSRLS, one password each) and `kh_provenance` (NOLOGIN). Also run `GRANT kh_provenance TO kh_migrator`. No role is a superuser and none has BYPASSRLS. The migrations only `GRANT`; they never create roles.
-2. **Secrets.** Put one file per secret under the secrets directory and name it in the matching `*_FILE` variable: the three database passwords, `kh_hub_bot_token`, `kh_indexer_token`, `kh_webhook_hmac`, the S3 access and secret key, `kh_cursor_key` and, if you want metrics, `kh_metrics_token`. Write `kh.yaml` (start from `deploy/kh.example.yaml`). Leave `trust_anchor: null` for every T0 repo for now: the anchors come after the seed pull requests are merged (see "Bootstrapping the trust anchor").
+2. **Secrets.** Put one file per secret under the secrets directory and name it in the matching `*_FILE` variable: the three database passwords, `kh_hub_bot_token`, `kh_indexer_token`, `kh_notes_bot_token` (only for agent notes), `kh_webhook_hmac`, the S3 access and secret key, `kh_cursor_key` and, if you want metrics, `kh_metrics_token`. Write `kh.yaml` (start from `deploy/kh.example.yaml`). Leave `trust_anchor: null` for every T0 repo for now: the anchors come after the seed pull requests are merged (see "Bootstrapping the trust anchor").
 3. **Migrate.** `kh migrate`. A changed, already applied migration file refuses the run.
 4. **Serve.** `kh serve` (the image does this). The worker starts only when `KH_FORGEJO_URL` is set. `/healthz` answers `ok`.
 5. **Ollama.** Start the `ollama` service of `deploy/compose.example.yaml` (pinned image, memory limit 3 GB, one model loaded, kept loaded). The `kh` network has no internet access, so `ollama pull` cannot run there: pull the model once with a short-lived container on the default bridge network, which has egress, writing to the same models volume `kh-ollama-models`. Use the image tag of the compose file:
@@ -20,7 +20,8 @@ Not run in the cloud, so yours to do and check by hand: the Dockerfile build, an
    Check with `docker compose exec ollama ollama list`. Ollama's documentation shows no one-off pull; this is the usual way and is confirmed on the first deploy. Until the model is available, embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. Embedding runs on the CPU and no speed is measured yet. To measure it on the host: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second; a `kh rebuild` takes about the number of chunks (`SELECT count(*) FROM kh.chunks`) divided by that. Watch `docker stats` during the first rebuild to confirm the 3 GB limit.
 6. **Index and record the config.** Run `kh rebuild`, then `kh recompute-visibility` **once**. The audience-map loader does not recompute visibility when no `__config__` hash is stored, so until you run it `kh check` reports config drift. Then run `kh check` and expect exit 0.
 7. **Webhook.** In Forgejo set an organisation webhook to `http://knowledge-hub:8080/webhooks/forgejo` with the secret from `kh_webhook_hmac`, for push and pull request events.
-8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups). The declaration must carry `email_for_visibility: true`: without it no caller sees attendee-only records.
+8. **Agent writes (optional).** Both families are off by default. To enable them put the `kh-notes-bot` token in the file named by `KH_FORGEJO_NOTES_TOKEN_FILE` (scope `write:repository`; the user is in a team with write on the `notes-*` repos and nothing else), set `KH_AGENT_EMAIL_DOMAINS` to the company email domains, then set `KH_AGENT_NOTES_ENABLED` and `KH_AGENT_PROPOSALS_ENABLED`. The indexer token must be able to read organisation membership (`read:organization`). Restart, restart PrivacyFence with the declaration that lists the five tools, and tick the write tools (below). The CI status token must not belong to `kh-hub-bot`.
+9. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups). The declaration must carry `email_for_visibility: true`: without it no caller sees attendee-only records.
 
 ## Bootstrapping the trust anchor
 
@@ -87,7 +88,18 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `main of <repo> was rewritten; run kh rebuild after review` | The new head of `main` does not continue from the last indexed sha. The index is unchanged. Inspect the force push in Forgejo. If it was intended, run `kh rebuild --repo <repo>`. If not, restore the branch from a clone. |
 | `duplicate id <id> in <repo>: <paths>` | Two files in one repo carry the same frontmatter `id`. Files without a single approved merge are rejected. Give one of them a new id. |
 | `supersedes/superseded_by must name a document in the same repo` | A reference points outside the repo. The file is `disputed`. Replace the reference or move the document. |
+| `pull request <repo>#<n> does not match proposal <id>` | A `bot/propose/<id>` pull request event named a different repo or number than the proposal row. Nothing was changed. Check the pull request in Forgejo and close it if it is not the bot's. |
 | `pull request <repo>#<n> does not match candidate <id>` | A `bot/promote/<id>` pull request event named a different repo or number than the candidate row. Nothing was changed. Check the pull request in Forgejo and close it if it is not the bot's. |
+
+### Agent write metric
+
+`kh_agent_write_failures_total{tool,reason}` on `/metrics`. Alert on any `refused`: a local guard stopped a write, which is a bug or an attack. Alert on `forgejo_error` rising after a token rotation: it usually means the new token lost its team (HTTP 403).
+
+### Reviewing agent notes
+
+Agent notes are unreviewed. List them with `git log --format='%h %an %s' -- agent/` in a clone of the notes repo, or by author `kh-notes-bot` in Forgejo; each commit message ends with `Requested-by: <login> <email> (sub: ...)` and `Proposal: <uuid>`. Callers see their own with `list_my_proposals`. To remove a note, revert its commit in the notes repo (a merge or a push to `main`, as T1 allows), then run `kh rebuild --repo notes-<audience>`.
+
+A person's commit on a `bot/propose/*` branch voids its requester record, because the head moves. The pull request then fails closed (`agent proposal has no valid requester record from kh-hub-bot`): close it and have the proposal made again.
 
 ### Governance checks
 
@@ -116,7 +128,9 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 
 **Webhook secret.** Write a new value to the `kh_webhook_hmac` file, set the same value as the secret of the Forgejo organisation webhook, with no restart (the file is read on every request). Between the two changes pushes answer 401 and are not indexed, so finish with `kh rebuild`. Trigger a test delivery from Forgejo and expect 202.
 
-**Forgejo tokens.** Create the new token in Forgejo under the same user (`kh-hub-bot` or the indexer user) with the same scopes, write it to `kh_hub_bot_token` or `kh_indexer_token`, restart, then revoke the old token. The indexer token is read only. The bot token may write only to `bot/promote/*` branches and open pull requests. Check with `kh check` and a harmless `kh rebuild --repo <repo>`.
+**Forgejo tokens.** Create the new token in Forgejo under the same user (`kh-hub-bot` or the indexer user) with the same scopes, write it to `kh_hub_bot_token` or `kh_indexer_token`, restart, then revoke the old token. The indexer token is read only. The bot token may write only to `bot/promote/*` and `bot/propose/*` branches, open pull requests and post commit statuses. Check with `kh check` and a harmless `kh rebuild --repo <repo>`.
+
+**Notes bot token.** Create a new token under the same user (`kh-notes-bot`) with scope `write:repository`, write it to `kh_notes_bot_token`, restart, revoke the old token, and check with a test `write_note`. Watch `kh_agent_write_failures_total` for `forgejo_error` afterwards.
 
 **Metrics token.** Replace the content of the `KH_METRICS_TOKEN_FILE` file; it is re-read per request, no restart.
 
@@ -126,7 +140,7 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 
 - **Create the n8n token.** Scoped tokens can call gated upstream tools through an administrator's tick (PrivacyFence ADR 0300, unreleased at the time of writing: the form shows the group "Upstream tools that change data or release results unseen" only in a PrivacyFence version that has it). An administrator opens PrivacyFence, Settings, Scoped tokens, New token, and:
   1. names the token for the workflow and sets an expiry;
-  2. ticks `kh_ingest_raw` and `kh_write_derived` under "Upstream tools that change data or release results unseen", and `kh_propose_change` only if the workflow opens promotion pull requests; the read tools the workflow needs (`kh_search`, ...) are ticked as usual;
+  2. ticks `kh_ingest_raw` and `kh_write_derived` under "Upstream tools that change data or release results unseen", and `kh_propose_change` only if the workflow opens promotion pull requests; a token for people's agents ticks `kh_write_note`, `kh_propose_doc` and `kh_propose_edit` only when it should write (the reads `kh_pr_status` and `kh_list_my_proposals` need no tick); the read tools the workflow needs (`kh_search`, ...) are ticked as usual;
   3. under "Audiences for Knowledge hub" ticks exactly the audiences that `raw_audience_map` gives the series and folders the workflow ingests (the token must hold every mapped audience, or `ingest_raw` is refused), and no others; a token never holds more than its creator, and one with none ticked sees no audience;
   4. stores the secret in n8n's credential store, never in chat.
 
