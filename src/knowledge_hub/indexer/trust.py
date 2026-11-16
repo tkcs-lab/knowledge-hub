@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from knowledge_hub.approvals import current_approvals
+
 TRUSTED = "trusted"
 DISPUTED = "disputed"
 TRUST_ANCHOR = "trust-anchor"
@@ -87,28 +89,6 @@ def _commit_date(commit: dict[str, Any]) -> datetime | None:
     return parse_forgejo_ts((inner.get("committer") or {}).get("date") or commit.get("created"))
 
 
-def _approvals(
-    pr: dict[str, Any], reviews: list[dict[str, Any]], bot_logins: set[str]
-) -> list[dict[str, Any]]:
-    head = (pr.get("head") or {}).get("sha")
-    author = (pr.get("user") or {}).get("login")
-    out = []
-    for r in reviews:
-        login = (r.get("user") or {}).get("login")
-        if (
-            r.get("state") == "APPROVED"
-            and r.get("official")
-            and not r.get("dismissed")
-            and head is not None
-            and r.get("commit_id") == head
-            and login is not None
-            and login != author
-            and login not in bot_logins
-        ):
-            out.append(r)
-    return out
-
-
 def _merge_verdict(
     sha: str,
     prs: list[dict[str, Any]],
@@ -127,7 +107,7 @@ def _merge_verdict(
     )
     if pr is None:
         return Verdict(DISPUTED, reason="no merged pull request for merge commit")
-    approvals = _approvals(pr, reviews.get(pr["number"], []), bot_logins)
+    approvals = current_approvals(pr, reviews.get(pr["number"], []), bot_logins)
     if not approvals:
         return Verdict(
             DISPUTED,

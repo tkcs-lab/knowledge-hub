@@ -198,3 +198,12 @@ def test_doc_changed_compares_instants_not_strings():
     assert not _doc_changed(row, same)
     assert _doc_changed(row, other)
     assert _doc_changed(row, SimpleNamespace(**base, approved_at=None))
+
+
+async def test_dot_path_markdown_is_skipped():
+    r = repo_of(
+        [merged("m1", "a0", {"a.md": doc("a"), ".forgejo/x.md": "# not a document\n"}, 1)]
+    )
+    p = await plan({"canonical-all": r})
+    assert [u.doc_key for u in p.upserts] == ["a"]
+    assert not any(a.path == ".forgejo/x.md" for a in p.alerts)

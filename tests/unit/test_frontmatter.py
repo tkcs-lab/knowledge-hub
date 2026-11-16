@@ -2,7 +2,14 @@ import datetime as dt
 
 import pytest
 
-from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
+from knowledge_hub.indexer.frontmatter import (
+    ALLOWED_KEYS,
+    FORBIDDEN_KEYS,
+    ParsedDoc,
+    Rejected,
+    parse_document,
+    raw_keys,
+)
 
 DOMAINS = ["portfolio", "product", "technical"]
 GOOD = "---\nid: doc-1\ntitle: Gateway\ndomain: product\nreview_by: 2027-01-31\n{extra}---\n# Hi\nbody\n"
@@ -32,11 +39,21 @@ def test_superseded_status_ok():
 @pytest.mark.parametrize(
     "key",
     ["tier", "audience", "audiences", "required_audiences", "allowed_emails", "visibility",
-     "approved_by", "approved_at"],
+     "approved_by", "approved_at", "generated_by", "derived_from"],
 )
 def test_forbidden_keys(key):
     r = parse_document(doc(f"{key}: x\n"), "p.md", DOMAINS)
     assert r == Rejected(f"frontmatter must not set {key}; the server decides tier and audience")
+
+
+def test_allowed_keys_exclude_forbidden():
+    assert not set(ALLOWED_KEYS) & set(FORBIDDEN_KEYS)
+
+
+def test_raw_keys():
+    assert raw_keys(doc("owner: t\n")) == ["id", "title", "domain", "review_by", "owner"]
+    assert raw_keys("no frontmatter\n") is None
+    assert raw_keys("---\n- a\n- b\n---\nbody\n") is None
 
 
 def test_disputed():
