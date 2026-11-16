@@ -146,6 +146,75 @@ def _governance(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_forgejo(url: str, token: str, org: str) -> Any:
+    from knowledge_hub.forgejo import ForgejoClient
+
+    return ForgejoClient(url, token, org)
+
+
+def _make_grist(url: str, doc_id: str, key: str) -> Any:
+    from knowledge_hub.grist.client import GristClient
+
+    return GristClient(url, doc_id, key)
+
+
+def _validate(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from knowledge_hub.forgejo import ForgejoError
+    from knowledge_hub.governance.ci import CiError, run_validate
+    from knowledge_hub.grist.client import GristError
+
+    def fail(message: str) -> int:
+        print(f"validate: {message}", file=sys.stderr)
+        return 2
+
+    try:
+        settings = load_settings()
+        config = load_config(args.config or settings.config_file)
+        url = args.forgejo_url or settings.forgejo_url
+        org = args.forgejo_org or settings.forgejo_org
+        grist_url = args.grist_url or settings.grist_url
+        grist_key_file = args.grist_key_file or settings.grist_key_file
+        grist_doc = args.grist_doc_id or settings.grist_doc_id
+        for name, value in (
+            ("--forgejo-url", url),
+            ("--token-file", args.token_file),
+            ("--grist-url", grist_url),
+            ("--grist-key-file", grist_key_file),
+            ("--grist-doc-id", grist_doc),
+        ):
+            if not value:
+                return fail(f"{name} is required")
+        token = Path(args.token_file).read_text().strip()
+        status_token = Path(args.status_token_file).read_text().strip() if args.status_token_file else None
+        grist_key = Path(grist_key_file).read_text().strip()
+    except (OSError, ValueError) as exc:
+        return fail(str(exc))
+
+    async def go() -> int:
+        read = _make_forgejo(url, token, org)
+        status = _make_forgejo(url, status_token, org) if status_token else read
+        grist = _make_grist(grist_url, grist_doc, grist_key)
+        try:
+            result = await run_validate(
+                read, status, grist, config, args.repo, args.base, args.head, post=not args.no_status
+            )
+        finally:
+            await grist.aclose()
+            if status is not read:
+                await status.aclose()
+            await read.aclose()
+        for line in result.lines:
+            print(line)
+        return 0 if result.ok else 1
+
+    try:
+        return asyncio.run(go())
+    except (ForgejoError, GristError, CiError, OSError, ValueError) as exc:
+        return fail(str(exc))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -166,7 +235,18 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--owner-team")
     render.add_argument("--admin-team", default="kh-admins")
     render.add_argument("--review-trigger", action="store_true")
+    val = sub.add_parser("validate")
+    for flag in ("--repo", "--base", "--head"):
+        val.add_argument(flag, required=True)
+    for flag in (
+        "--forgejo-url", "--forgejo-org", "--token-file", "--status-token-file",
+        "--grist-url", "--grist-key-file", "--grist-doc-id", "--config",
+    ):
+        val.add_argument(flag)
+    val.add_argument("--no-status", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "validate":
+        return _validate(args)
     if args.command == "governance":
         return _governance(args)
     if args.command == "serve":
