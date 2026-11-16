@@ -11,6 +11,7 @@ from typing import Any
 from knowledge_hub.config import Config
 from knowledge_hub.indexer.chunker import chunk_markdown
 from knowledge_hub.indexer.sync import sync_repo
+from knowledge_hub.proposals import PROPOSE_REF_PREFIX
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +144,9 @@ class Worker:
             return
         pull = await self.forgejo.pull(repo, number)
         head = (pull.get("head") or {}).get("ref")
+        if isinstance(head, str) and head.startswith(PROPOSE_REF_PREFIX):
+            await self._proposal_event(repo, number, pull, bool(pull.get("merged")))
+            return
         if not isinstance(head, str) or not head.startswith(PROMOTE_PREFIX):
             return
         try:
@@ -186,6 +190,41 @@ class Worker:
                     "UPDATE kh.candidates SET state = 'rejected', decided_at = now()"
                     " WHERE id = %s AND state = 'pr_open'",
                     (cid,),
+                )
+
+    async def _proposal_event(self, repo: str, number: int, pull: Any, merged: bool) -> None:
+        """Apply the outcome of an agent proposal pull request (plan 3.8, 3.12). Replays change nothing."""
+        head = (pull.get("head") or {}).get("ref")
+        try:
+            pid = uuid.UUID(head[len(PROPOSE_REF_PREFIX) :])
+        except ValueError:
+            return
+        async with self.pool.connection() as conn, conn.transaction():
+            cur = await conn.execute(
+                "SELECT repo, pr_number, branch FROM kh.proposals WHERE id = %s FOR UPDATE", (pid,)
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return
+            if row[1] is None and row[2] == head and row[0] == repo:
+                await conn.execute(
+                    "UPDATE kh.proposals SET pr_number = %s, pr_url = %s WHERE id = %s",
+                    (number, pull.get("html_url"), pid),
+                )
+            elif row[0] != repo or row[1] != number:
+                await self._alert(conn, repo, f"pull request {repo}#{number} does not match proposal {pid}")
+                return
+            if merged:
+                await conn.execute(
+                    "UPDATE kh.proposals SET state = 'merged', decided_at = now()"
+                    " WHERE id = %s AND state IN ('pending', 'pr_open', 'closed', 'failed')",
+                    (pid,),
+                )
+            elif pull.get("state") == "closed":
+                await conn.execute(
+                    "UPDATE kh.proposals SET state = 'closed', decided_at = now()"
+                    " WHERE id = %s AND state IN ('pending', 'pr_open')",
+                    (pid,),
                 )
 
     async def run_once(self) -> bool:
