@@ -41,6 +41,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Final review
 
 - final: Review 1 (changes, 1 blocking): the version-row UPDATE in sync.py ran on every sync and ignored per-file disputes (p4); fix-1 started.
+- final: Review 2 (changes, 1 blocking): fix-1 writes a trusted stamp onto old version rows that stay disputed when a rejudge turns their merge trusted (sync.py _rejudge_versions); the owner was asked how to proceed.
 
 ## Finishing
 
