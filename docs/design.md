@@ -52,6 +52,7 @@ This document records the decisions as built, the alternatives that were rejecte
 - A non-merge commit after the anchor, or an anchor not on the chain, marks the repo untrusted: every document is indexed `disputed` until an operator moves the anchor.
 - `trust_anchor: null` means no anchor, so every commit including the root must pass; in practice set an anchor.
 - A push that does not descend from `last_indexed_sha` (the sha must be on the first-parent chain of `main`) is refused with an alert and the index stays. After review, `kh rebuild` re-walks from the anchor; a refused sync during rebuild clears `last_indexed_sha` and syncs again.
+- `generated_by` and `derived_from` are also forbidden (the server writes provenance), and paths with a dot-prefixed segment (`.forgejo/...`) are not indexed. The CI gate is described in [governance](governance.md).
 - Frontmatter may not set `tier`, `audience`, `visibility`, `approved_by` and similar keys (the file is rejected), and may not set `status: disputed`. The server decides tier and audience from the repo.
 - `supersedes` and `superseded_by` resolve inside one repo only. Duplicate ids reject every file not last changed by an approved merge.
 - A T1 repo needs no approval but must be listed in config. T1 files are indexed from `last_indexed_sha` only.
@@ -88,15 +89,13 @@ One statement inside `caller_tx`: an exact vector order (no ANN index) fused by 
 - `kh recompute-visibility` rewrites `raw_audience_map` from config, then raw rows, document visibility, derived rows, candidates and conflicts in one transaction. It refreshes the source snapshots, so deleting a source never widens a row.
 - `kh daily` sets entity visibility from `config.entities` on every run; recompute does not touch `entities_cache`.
 
-## Deviation from the PrivacyFence contract
+## Deviation from the PrivacyFence contract (resolved)
 
 `docs/identity-claim.md` in PrivacyFence says only `sub`, `principal_type`, `audiences` and `req` may change what a query returns, and calls `email` audit-only. The hub uses `email` for visibility: `allowed_emails` rows (meeting attendees, for example) match the claim's lower-cased `email`, and only for `claude_client` callers. The owner decided this on 2026-11-15 because attendee-only records cannot be expressed with group audiences.
 
-Risks: the hub trusts `email` only because PrivacyFence signs the claim and sets it only for a verified person; a change in how PrivacyFence fills it changes who sees attendee-only rows. Ask PrivacyFence to:
+PrivacyFence 8.0.0a3 ships the opt-in key `email_for_visibility` (PrivacyFence ADR 0310). The declaration sets it, so PrivacyFence puts the verified email in the claim for this upstream.
 
-1. bless `email` as a visibility input for upstreams that opt in, and document it in `docs/identity-claim.md`;
-2. promise that `email` is present only for a verified person and never for `n8n_workflow` or `service`, and that it is lower-cased or stable in case;
-3. announce any change of `email` semantics before shipping it, and keep it in the signed payload.
+A change of how PrivacyFence fills `email` changes who sees attendee-only rows.
 
 ## Rejected alternatives
 

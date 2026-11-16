@@ -17,8 +17,12 @@ FORBIDDEN_KEYS = (
     "visibility",
     "approved_by",
     "approved_at",
+    "generated_by",
+    "derived_from",
 )
 REQUIRED_KEYS = ("id", "title", "domain", "review_by")
+OPTIONAL_KEYS = ("type", "owner", "status", "entities", "supersedes", "superseded_by")
+ALLOWED_KEYS = REQUIRED_KEYS + OPTIONAL_KEYS
 ALLOWED_STATUS = ("current", "superseded")
 
 
@@ -52,6 +56,18 @@ def _split(text: str) -> tuple[str, str] | None:
         if lines[i].strip() == "---":
             return "".join(lines[1:i]), "".join(lines[i + 1 :])
     return None
+
+
+def raw_keys(text: str) -> list[str] | None:
+    """The frontmatter keys as written, or None when the block is missing or not a mapping."""
+    split = _split(text)
+    if split is None:
+        return None
+    try:
+        data = yaml.safe_load(split[0])
+    except (yaml.YAMLError, ValueError):
+        return None
+    return list(data) if isinstance(data, dict) else None
 
 
 def _str_list(value: Any, key: str) -> list[str] | str:

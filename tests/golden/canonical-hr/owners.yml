@@ -1,0 +1,17 @@
+version: 1
+audience: hr
+domains:
+  portfolio: owners-hr
+  product: owners-hr
+  technical: owners-hr
+rules:
+- team: kh-admins
+  paths:
+  - .forgejo/**
+  - schema/**
+  - owners.yml
+  - CODEOWNERS
+  - glossary.md
+- team: owners-hr
+  paths:
+  - '**'

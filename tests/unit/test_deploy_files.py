@@ -117,3 +117,14 @@ def test_compose_example_config_passes():
         pytest.skip("docker compose is not available")
     result = subprocess.run(["docker", "compose", "-f", str(COMPOSE), "config", "-q"], cwd=ROOT)
     assert result.returncode == 0
+
+
+def test_example_entities_match_defaults():
+    from knowledge_hub.config import Config
+
+    ex = load_config(ROOT / "deploy" / "kh.example.yaml").entities
+    default = Config().entities
+    assert ex.keys() == default.keys()
+    for kind, spec in default.items():
+        for attr in ("table", "audiences", "label", "reference_audiences"):
+            assert getattr(ex[kind], attr) == getattr(spec, attr), (kind, attr)

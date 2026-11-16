@@ -1,0 +1,26 @@
+version: 1
+audience: all
+domains:
+  portfolio: owners-portfolio
+  product: owners-product
+  technical: owners-technical
+rules:
+- team: kh-admins
+  paths:
+  - .forgejo/**
+  - schema/**
+  - owners.yml
+  - CODEOWNERS
+  - glossary.md
+- team: owners-portfolio
+  paths:
+  - portfolio/**
+- team: owners-product
+  paths:
+  - product/**
+- team: owners-technical
+  paths:
+  - technical/**
+- team: kh-admins
+  paths:
+  - '**'

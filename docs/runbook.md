@@ -20,7 +20,7 @@ Not run in the cloud, so yours to do and check by hand: the Dockerfile build, an
    Check with `docker compose exec ollama ollama list`. Ollama's documentation shows no one-off pull; this is the usual way and is confirmed on the first deploy. Until the model is available, embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. Embedding runs on the CPU and no speed is measured yet. To measure it on the host: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second; a `kh rebuild` takes about the number of chunks (`SELECT count(*) FROM kh.chunks`) divided by that. Watch `docker stats` during the first rebuild to confirm the 3 GB limit.
 6. **Index and record the config.** Run `kh rebuild`, then `kh recompute-visibility` **once**. The audience-map loader does not recompute visibility when no `__config__` hash is stored, so until you run it `kh check` reports config drift. Then run `kh check` and expect exit 0.
 7. **Webhook.** In Forgejo set an organisation webhook to `http://knowledge-hub:8080/webhooks/forgejo` with the secret from `kh_webhook_hmac`, for push and pull request events.
-8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups).
+8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups). The example declaration already sets `email_for_visibility: true`.
 
 ## Bootstrapping the trust anchor
 
@@ -81,11 +81,15 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `file <path> on <repo>/main has no approved merge PR` | A file was last changed by a commit that was not an approved pull request merge. The document is indexed as `disputed` and is not a normative answer. Find the commit in Forgejo. If the change is good, open a pull request that touches the file, have someone other than the author approve it and merge. If it is not, revert it by a pull request. Then `kh rebuild --repo <repo>`. |
 | `trust anchor <sha> is not on main of <repo>` | The configured `trust_anchor` is not on the first-parent chain of `main`, so the whole repo is untrusted and every document is `disputed`. Check the sha in `kh.yaml` for a typo. If `main` was rewritten, review the history first, then set the anchor to a commit you have verified, deploy the config, run `kh rebuild --repo <repo>` and `kh recompute-visibility`. |
 | `non-merge commit <sha> on main of <repo>` | Someone pushed straight to `main`. The repo is marked untrusted and its documents are `disputed` until you review. Turn on branch protection in Forgejo. Review the commit. When the history is acceptable, move `trust_anchor` in `kh.yaml` to the newest verified commit, deploy and run `kh rebuild --repo <repo>`. |
-| `frontmatter must not set <key>; the server decides tier and audience` | A file set `tier`, `audience`, `audiences`, `required_audiences`, `allowed_emails`, `visibility`, `approved_by` or `approved_at`. The file is not indexed and an earlier row of it is removed. Remove the key by a pull request. Other `frontmatter: ...` alerts (missing key, unknown domain, bad `review_by`, `status` not `current` or `superseded`) are fixed the same way. |
+| `frontmatter must not set <key>; the server decides tier and audience` | A file set `tier`, `audience`, `audiences`, `required_audiences`, `allowed_emails`, `visibility`, `approved_by`, `approved_at`, `generated_by` or `derived_from`. The file is not indexed and an earlier row of it is removed. Remove the key by a pull request. Other `frontmatter: ...` alerts (missing key, unknown domain, bad `review_by`, `status` not `current` or `superseded`) are fixed the same way. |
 | `main of <repo> was rewritten; run kh rebuild after review` | The new head of `main` does not continue from the last indexed sha. The index is unchanged. Inspect the force push in Forgejo. If it was intended, run `kh rebuild --repo <repo>`. If not, restore the branch from a clone. |
 | `duplicate id <id> in <repo>: <paths>` | Two files in one repo carry the same frontmatter `id`. Files without a single approved merge are rejected. Give one of them a new id. |
 | `supersedes/superseded_by must name a document in the same repo` | A reference points outside the repo. The file is `disputed`. Replace the reference or move the document. |
 | `pull request <repo>#<n> does not match candidate <id>` | A `bot/promote/<id>` pull request event named a different repo or number than the candidate row. Nothing was changed. Check the pull request in Forgejo and close it if it is not the bot's. |
+
+### Governance checks
+
+The `kh validate` gate in each canonical repo's CI mirrors three of these alerts, so a pull request fails before they can appear: `frontmatter must not set <key>; the server decides tier and audience`, `duplicate id <id> in <repo>: <paths>` and `supersedes/superseded_by must name a document in the same repo`. If one shows up anyway, the file reached `main` without the gate (a repo seeded without the workflow, or the status was not required). Look at the `kh/validate` and `kh/domain-owners` statuses of the merged pull request; setup, tokens and triggers are in [governance](governance.md).
 
 ## Restore of T2 and T3
 
@@ -125,7 +129,6 @@ Garage keeps one version of each object, so the mirror is only as old as the las
   4. stores the secret in n8n's credential store, never in chat.
 
   The tick is pinned to the declaration: changing a tool's gate, verb or effect, or the url, audience or claim mode, voids it, and the token is created again. Calls are audited as `upstream_forwarded` and `auto_accepted`.
-- **Blessing email matching.** `allowed_emails` rows match the claim's `email`, which PrivacyFence's documentation calls audit-only. Ask PrivacyFence to bless `email` as a visibility input, to set it only for a verified person and to announce any change of it. The three asks are in [design](design.md). If PrivacyFence changes how `email` is filled, who sees attendee-only records changes. PrivacyFence `main` (3563d25, 2026-11-15) has no opt-in declaration key for this yet; when it has one, set it in the declaration and close this item.
 
 ## Accepted risks
 

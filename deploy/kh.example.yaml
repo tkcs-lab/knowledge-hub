@@ -19,5 +19,5 @@ entities:
   prd: {table: Products, audiences: [all], label: product}
   cmp: {table: Components, audiences: [all], label: component}
   ver: {table: Versions, audiences: [all], label: version}
-  cus: {table: Customers, audiences: [contracts], label: customer}
+  cus: {table: Customers, audiences: [contracts], label: customer, reference_audiences: [contracts, mgmt]}
 forgejo_web_url: null

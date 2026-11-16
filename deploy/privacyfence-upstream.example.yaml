@@ -5,6 +5,8 @@
 # writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
 # private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
 # voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
+# email_for_visibility lets PrivacyFence put the verified email in the claim for this upstream (PrivacyFence
+# 8.0.0a3, ADR 0310); without it, meetings that are not mapped to an audience are visible to nobody.
 version: 1
 upstreams:
   - id: kh
@@ -12,6 +14,7 @@ upstreams:
     url: http://knowledge-hub:8080/mcp
     audience: knowledge-hub
     identity_claim: required
+    email_for_visibility: true
     allowed_principal_types: [claude_client, n8n_workflow]
     tools:
       search: {gate: auto, verb: search}

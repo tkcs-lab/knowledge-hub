@@ -42,7 +42,7 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 |---|---|---|
 | `KH_CONFIG_FILE` | none | Path of `kh.yaml`. Without it the built-in defaults apply. |
 | `KH_FORGEJO_URL` | none | Forgejo base URL. The worker and promotion exist only when it is set. |
-| `KH_FORGEJO_ORG` | `kh` | Forgejo organisation that holds the repos. Webhook events from other owners are ignored. |
+| `KH_FORGEJO_ORG` | `kh` | Forgejo organisation that holds the repos. Webhook events from other owners are ignored. `kh validate` and `kh domain-owners` use it too. |
 | `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of `kh-hub-bot`, used only for promotion branches and pull requests. |
 | `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token the indexer uses to fetch commits, reviews and files. Required when `KH_FORGEJO_URL` is set. |
 | `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. |
@@ -108,6 +108,11 @@ A partial S3 setting is a startup error. With no S3 setting the raw-record tools
 | `kh recompute-visibility` | Rewrite visibility from the config. Run once after install or restore, and after any change to audiences, repos or `raw_audience_map`. |
 | `kh requeue-embeddings` | Queue embedding jobs for raw and derived records without chunks (after a restore). |
 | `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
+| `kh validate --repo R --base SHA --head SHA` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. Exit 0, 1 or 2. See [governance](governance.md). |
+| `kh domain-owners --repo R --pr N` | CI gate: owner-team approvals of a pull request. Exit 0, 1 or 2. See [governance](governance.md). |
+| `kh governance render --repo R --audience A --out DIR` | Write the schema, `owners.yml`, CODEOWNERS, PR template and workflow for a new canonical repo. |
+
+The CI runner needs `KH_CONFIG_FILE` in its environment when `kh.yaml` is not the default config.
 
 `kh check` reports config drift until `kh recompute-visibility` has recorded the first config hash.
 
@@ -124,7 +129,9 @@ Unknown keys are refused. Every error text starts with `config:`.
 | `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
-| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
+| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
+| `entities.<kind>.reference_audiences` | `[contracts, mgmt]` for `cus`, unset for the other default kinds | Repository audiences whose documents may cite the kind. Unset means any repository may cite it. Members must be in `audiences`, otherwise `config: entities <kind> has unknown reference audience ...`. Enforced by `kh validate`. See [entities](#entities). |
+| `governance.owner_teams` | `{}` | Map of audience to the Forgejo teams whose approval allows widening a PR into that audience (`kh domain-owners`). Keys must be in `audiences`; names match `^[a-z0-9][a-z0-9_-]{0,62}$`. Default: `owners-<audience>`, and the three domain teams for `all`. See [governance](governance.md). |
 | `forgejo_web_url` | null | Base URL for `source_link`; empty links when null. |
 
 Example (see `deploy/kh.example.yaml` for the defaults):
@@ -147,7 +154,7 @@ entities:
   prd: {table: Products, audiences: [all], label: product}
   cmp: {table: Components, audiences: [all], label: component}
   ver: {table: Versions, audiences: [all], label: version}
-  cus: {table: Customers, audiences: [contracts], label: customer}
+  cus: {table: Customers, audiences: [contracts], label: customer, reference_audiences: [contracts, mgmt]}
   # a home install might use only kinds such as this one
   # fam: {table: Family, audiences: [all], label: family member}
 forgejo_web_url: https://forgejo.example.invalid
@@ -161,6 +168,6 @@ A change to `audiences`, `repos`, `raw_audience_map` or the visibility of `entit
 
 ### entities
 
-A kind is the id prefix (`fam` in `fam:kid1`): 1-16 lowercase letters, digits, `_` or `-`, starting with a letter; `doc`, `raw` and `derived` are reserved. Each kind reads one Grist table (letters, digits or `_`, starting with a letter), and two kinds cannot share a table. The optional `label` is 1-40 characters without control characters and appears in the tool descriptions. At most 32 kinds are allowed.
+A kind is the id prefix (`fam` in `fam:kid1`): 1-16 lowercase letters, digits, `_` or `-`, starting with a letter; `doc`, `raw` and `derived` are reserved. Each kind reads one Grist table (letters, digits or `_`, starting with a letter), and two kinds cannot share a table. `entities.<kind>.reference_audiences` (optional) lists the repository audiences whose documents may cite the kind; `kh validate` enforces it (default for `cus`: `[contracts, mgmt]`; when unset, any repository may cite the kind). The optional `label` is 1-40 characters without control characters and appears in the tool descriptions. At most 32 kinds are allowed.
 
 The rows of a kind removed from the config are deleted at the next `kh daily`. Adding or removing a kind, or changing its audiences, changes the config hash (run `kh recompute-visibility`); a `table` or `label` change does not.
