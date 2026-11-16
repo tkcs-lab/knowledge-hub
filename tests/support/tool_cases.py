@@ -59,13 +59,15 @@ def _get_doc_case(table: str, prefix: str) -> ToolCase:
     )
 
 
-# The seed gives every chunk the text "chunk <case>"; websearch AND-s the words. "all" is a
-# stop word, so the "all" case cannot be singled out by text and is left to get_doc.
+# The seed gives every chunk the text "chunk <slug>", slug = the case name without underscores. One
+# token per case, so a query cannot match another case's chunk through shared words or ``or``;
+# websearch AND-s the words. "all" is a stop word, so the "all" case cannot be singled out by text
+# and is left to get_doc.
 _SEARCH_CASES = tuple(c for c in CASES if c != "all")
 
 
 def _search_args(ids: Ids, case: str) -> dict[str, Any]:
-    return {"query": f"chunk {case}", "min_tier": "T3", "limit": 50}
+    return {"query": f"chunk {case.replace('_', '')}", "min_tier": "T3", "limit": 50}
 
 
 def _search_empty(res: ToolResult) -> None:

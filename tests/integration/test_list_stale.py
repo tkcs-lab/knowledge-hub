@@ -80,6 +80,9 @@ async def test_each_principal_sees_only_visible_documents(admin, mcp_client):
         "dave_none": set(),
         "eve_nobody": set(),
         "wf_token": {a},
+        "mgmt_only": {m},
+        "finance_only": set(),
+        "mgmt_finance": {m},
     }
     for name, who in PRINCIPALS.items():
         page = await stale(mcp_client, who)

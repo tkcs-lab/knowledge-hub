@@ -28,13 +28,18 @@ def _applied(conn: psycopg.Connection) -> dict[str, str]:
     return {name: sha for name, sha in conn.execute("SELECT name, sha256 FROM kh.schema_migrations")}
 
 
-def migrate(dsn: str) -> list[str]:
-    """Apply pending migrations; return the names applied in this run."""
+def migrate(dsn: str, *, stop_after: str | None = None) -> list[str]:
+    """Apply pending migrations; return the names applied in this run.
+
+    ``stop_after`` (tests only) skips files whose name sorts after it.
+    """
     files = _migration_files()
     applied_now: list[str] = []
     with psycopg.connect(dsn, autocommit=True) as conn:
         applied = _applied(conn)
         for name, text in files:
+            if stop_after is not None and name > stop_after:
+                continue
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if name in applied:
                 if applied[name] != digest:

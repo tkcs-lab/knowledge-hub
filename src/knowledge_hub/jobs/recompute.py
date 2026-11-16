@@ -1,7 +1,9 @@
 """``kh recompute-visibility`` (plan 3.7): re-derive every stored audience from the configuration.
 
 Runs as ``kh_indexer`` in one transaction. The visibility functions of the request path are not
-executable by that role, so the union and intersection rules are plain SQL here. Recompute only
+executable by that role, so the union and intersection rules are plain SQL here. Audiences are
+clauses: a configured list is one clause (``finance|mgmt``, any member may read), and a derived row
+holds the union of its sources' clauses, so the caller must satisfy every source. Recompute only
 issues ``UPDATE``s, so the deferred constraint triggers (``INSERT`` only) do not fire.
 """
 
@@ -45,16 +47,18 @@ async def replace_audience_map(conn: Any, config: Config) -> None:
 
 
 async def _recompute_raw(conn: Any) -> None:
-    # Same rules as the raw_records_assign_visibility trigger; a row with neither a mapping nor
-    # participants keeps what it has.
+    # Same rules as the raw_records_assign_visibility trigger: one clause per matching map entry;
+    # a row with neither a mapping nor participants keeps what it has.
     await conn.execute(
         """
         WITH new AS (
             SELECT r.id,
-                   (SELECT array_agg(DISTINCT a ORDER BY a)
-                      FROM kh.raw_audience_map m, unnest(m.audiences) AS a
-                     WHERE (m.kind = 'series' AND m.key = r.series)
-                        OR (m.kind = 'folder' AND m.key = r.folder)) AS mapped,
+                   (SELECT array_agg(c ORDER BY c COLLATE "C")
+                      FROM (SELECT DISTINCT kh.audience_clause(m.audiences) AS c
+                              FROM kh.raw_audience_map m
+                             WHERE cardinality(m.audiences) > 0
+                               AND ((m.kind = 'series' AND m.key = r.series)
+                                 OR (m.kind = 'folder' AND m.key = r.folder))) s) AS mapped,
                    (SELECT array_agg(DISTINCT lower(p) ORDER BY lower(p))
                       FROM unnest(r.participants) AS p) AS people
               FROM kh.raw_records r
