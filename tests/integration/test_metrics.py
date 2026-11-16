@@ -125,3 +125,18 @@ def test_label_values_come_from_fixed_sets():
     text = METRICS.render()
     assert 'code="other"' in text and 'result="other"' in text and 'outcome="error"' in text
     assert "alice" not in text and "doc:" not in text
+
+
+async def test_agent_write_failure_counter_is_rendered(mcp_client):
+    from knowledge_hub.agent.guards import record_write_failure
+    from knowledge_hub.forgejo.client import ForgejoError, ForgejoRefused
+
+    record_write_failure("write_note", ForgejoRefused("no"))
+    record_write_failure("write_note", ForgejoError("boom"))
+    record_write_failure("write_note", ForgejoError("boom"))
+    text = (await scrape(mcp_client.http)).text
+    assert 'kh_agent_write_failures_total{tool="write_note",reason="refused"} 1' in text
+    assert 'kh_agent_write_failures_total{tool="write_note",reason="forgejo_error"} 2' in text
+    assert "# TYPE kh_agent_write_failures_total counter" in text
+    METRICS.reset()
+    assert "kh_agent_write_failures_total{" not in METRICS.render()
