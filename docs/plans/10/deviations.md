@@ -55,6 +55,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - final: p2-config-owners: deploy/kh.example.yaml and the docs/configuration.md example gave cus no reference_audiences, so an install from the example would lose the customer-reference restriction; fixed in a fix worker
 - final: p10-retire-docs: docs/configuration.md has no reference_audiences row in the config table (described in prose only); fixed in a fix worker
+- scope: scope: tests/unit/test_deploy_files.py
+- scope: scope: deploy/kh.example.yaml
+- scope: scope: docs/configuration.md
 
 ## Finishing
 
