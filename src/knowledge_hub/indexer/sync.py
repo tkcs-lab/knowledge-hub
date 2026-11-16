@@ -140,21 +140,8 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
                 _parse_ts(v.approved_at), v.stamp, repo, v.doc_key,
             ),
         )  # fmt: skip
-    for sha, v in plan.verdicts.items():
-        # Versions are insert-once; a re-judged merge must change what get_doc(version=...) serves.
-        disputed = v.status == "disputed"
-        await conn.execute(
-            """
-            UPDATE kh.document_versions v SET stamp = %s, approved_by = %s, approved_at = %s,
-                status = CASE WHEN %s THEN 'disputed' ELSE v.status END
-            FROM kh.documents d
-            WHERE d.id = v.document_id AND d.repo = %s AND v.commit_sha = %s
-            """,
-            (
-                None if disputed else v.stamp, [] if disputed else list(v.approved_by),
-                None if disputed else _parse_ts(v.approved_at), disputed, repo, sha,
-            ),
-        )  # fmt: skip
+    if plan.rejudge:
+        await _rejudge_versions(conn, plan)
     for sha, v in plan.verdicts.items():
         await conn.execute(
             """
@@ -191,6 +178,47 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
             """,
             rs,
         )
+
+
+_VERSION_UPDATE = """
+    UPDATE kh.document_versions v SET stamp = %s, approved_by = %s, approved_at = %s,
+        status = CASE WHEN %s THEN 'disputed' ELSE COALESCE(%s, v.status) END
+    FROM kh.documents d
+    WHERE d.id = v.document_id AND d.repo = %s AND v.commit_sha = %s {extra}
+"""
+
+
+async def _rejudge_versions(conn: Any, plan: SyncPlan) -> None:
+    """Versions are insert-once; a re-judged merge must change what get_doc(version=...) serves.
+
+    A version is trusted only when the verdict is trusted, the repo is still trusted and, for the
+    file at the current head, the plan itself kept it (stamp set); any dispute leaves no stamp.
+    """
+    repo = plan.repo
+    repo_trusted = plan.repo_state is None or bool(plan.repo_state.get("trusted"))
+    for sha, v in plan.verdicts.items():
+        ok = v.status == "trusted" and repo_trusted
+        await conn.execute(
+            _VERSION_UPDATE.format(extra=""),
+            (
+                v.stamp if ok else None, list(v.approved_by) if ok else [],
+                _parse_ts(v.approved_at) if ok else None, not ok, None, repo, sha,
+            ),
+        )  # fmt: skip
+    # Files at the current head: the plan's own per-file outcome wins (duplicate id, supersedes...).
+    for u in plan.upserts:
+        if u.commit_sha not in plan.verdicts:
+            continue
+        ok = u.stamp is not None and u.status != "disputed"
+        await conn.execute(
+            _VERSION_UPDATE.format(extra="AND d.doc_key = %s"),
+            (
+                u.stamp if ok else None, list(u.approved_by) if ok else [],
+                _parse_ts(u.approved_at) if ok else None, not ok, u.status if ok else None,
+                repo, u.commit_sha, u.doc_key,
+            ),
+        )  # fmt: skip
+
 
 
 async def _chunk_plan(

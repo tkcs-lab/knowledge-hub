@@ -181,3 +181,27 @@ async def test_sync_plans_once_when_verdicts_are_equal(fresh_db, indexer_pool, m
     plans = await _count_plans(monkeypatch, [lambda v: v, lambda v: dict(v)])
     await sync(indexer_pool, r)
     assert len(plans) == 1
+
+
+VERSION = "SELECT commit_sha, status, stamp, approved_by, approved_at FROM kh.document_versions"
+
+
+async def test_plain_sync_of_trusted_merge_leaves_version_as_inserted(fresh_db, indexer_pool):
+    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
+    await sync(indexer_pool, r)
+    first = rows(fresh_db, VERSION)
+    assert first[0][:4] == ("m1", "current", "reviewed", ["bob"])
+    await sync(indexer_pool, r)
+    assert rows(fresh_db, VERSION) == first
+
+
+async def test_plain_sync_in_untrusted_repo_leaves_version_unstamped(fresh_db, indexer_pool):
+    c, p, rv = merged("m1", "a0", {"a.md": doc("a")}, 1)
+    squash = FakeCommit("s1", ["m1"], {"b.md": doc("b")})
+    r = FakeRepo([FakeCommit("a0", []), c, squash], [p], {1: rv})
+    await sync(indexer_pool, r)
+    assert rows(fresh_db, "SELECT trusted FROM kh.repo_state") == [(False,)]
+    versions = rows(fresh_db, VERSION)
+    assert versions and all(v[1:] == ("disputed", None, [], None) for v in versions)
+    await sync(indexer_pool, r)
+    assert rows(fresh_db, VERSION) == versions
