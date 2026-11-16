@@ -15,11 +15,14 @@ from tests.support.seed import CASES, VISIBILITY_TABLES
 # verified person with no audience still matches rows listing their email.
 EXPECTED = {
     "alice_all": {"all"},
-    "bob_mgmt": {"all", "mgmt", "all_mgmt"},
+    "bob_mgmt": {"all", "mgmt", "all_mgmt", "mgmt_or_finance"},
     "carol_hr": {"all", "hr"},
     "dave_none": {"attendee"},
     "eve_nobody": set(),
     "wf_token": {"all"},
+    "mgmt_only": {"mgmt", "mgmt_or_finance"},
+    "finance_only": {"mgmt_or_finance"},
+    "mgmt_finance": {"mgmt", "mgmt_or_finance", "mgmt_and_finance"},
 }
 
 # child table -> (parent visibility table, child column naming the parent)
