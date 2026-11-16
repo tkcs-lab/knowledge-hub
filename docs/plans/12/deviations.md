@@ -39,7 +39,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: Review 1 (changes, 1 blocking): the version-row UPDATE in sync.py ran on every sync and ignored per-file disputes (p4); fix-1 started.
 
 ## Finishing
 
