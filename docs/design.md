@@ -52,6 +52,7 @@ This document records the decisions as built, the alternatives that were rejecte
 - A non-merge commit after the anchor, or an anchor not on the chain, marks the repo untrusted: every document is indexed `disputed` until an operator moves the anchor.
 - `trust_anchor: null` means no anchor, so every commit including the root must pass; in practice set an anchor.
 - A push that does not descend from `last_indexed_sha` (the sha must be on the first-parent chain of `main`) is refused with an alert and the index stays. After review, `kh rebuild` re-walks from the anchor; a refused sync during rebuild clears `last_indexed_sha` and syncs again.
+- `generated_by` and `derived_from` are also forbidden (the server writes provenance), and paths with a dot-prefixed segment (`.forgejo/...`) are not indexed. The CI gate is described in [governance](governance.md).
 - Frontmatter may not set `tier`, `audience`, `visibility`, `approved_by` and similar keys (the file is rejected), and may not set `status: disputed`. The server decides tier and audience from the repo.
 - `supersedes` and `superseded_by` resolve inside one repo only. Duplicate ids reject every file not last changed by an approved merge.
 - A T1 repo needs no approval but must be listed in config. T1 files are indexed from `last_indexed_sha` only.
