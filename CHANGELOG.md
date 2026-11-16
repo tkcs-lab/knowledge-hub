@@ -13,8 +13,15 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `kh governance render --runner-label` sets the runner label of the rendered workflow, so each audience can have its own runner (default `kh-validate:host`).
 - `kh domain-owners --repo R --pr N` checks that the teams named in `owners.yml` (and, for a `widen-audience/<audience>` label, the audience's owner teams) have approved the current head of a pull request, prints one line per missing approval and posts the `kh/domain-owners` commit status.
 
+- `self_merge_teams` in `kh.yaml`: a merged pull request is also trusted when its author, a member of a team that owns every touched path in `owners.yml`, merged it themselves. Such documents carry the new stamp `owner_merge`.
+- `stamp` (`reviewed`, `owner_merge`, `anchor` or empty) in `search` and `get_doc` results, next to `approved_by`; `stamp` is a forbidden frontmatter key.
+- Merge verdicts are stored in `kh.merge_verdicts` and reused by every sync and rebuild; `kh rebuild --rejudge` judges every merge afresh.
+- `bot_logins` in `kh.yaml` (default `[kh-hub-bot]`, which is always included): bots never self-merge and their approvals never count.
+- `kh domain-owners` passes a pull request whose author may self-merge as owner.
+
 ### Changed
 
+- `kh domain-owners` prints the approval or self-merge that applied when it passes.
 - `generated_by` and `derived_from` are forbidden frontmatter keys, like the other keys the server writes.
 - The indexer skips paths with a dot-prefixed segment, so `.forgejo/pull_request_template.md` raises no alert.
 - The PrivacyFence declaration example sets `email_for_visibility: true`.
