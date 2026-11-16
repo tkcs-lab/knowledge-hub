@@ -3,7 +3,14 @@ import json
 
 import pytest
 
-from knowledge_hub.config import Config, ConfigError, EntityKind, load_config, parse_config
+from knowledge_hub.config import (
+    Config,
+    ConfigError,
+    EntityKind,
+    load_config,
+    owner_teams_for,
+    parse_config,
+)
 from knowledge_hub.indexer.rebuild import config_hash
 
 pytestmark = pytest.mark.unit
@@ -92,3 +99,33 @@ def test_config_hash_unchanged_for_default_entities():
     lists = {"prd": ["all"], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]}
     legacy = parse_config({"entities": lists})
     assert old == config_hash(Config()) == config_hash(legacy)
+
+
+def test_cus_reference_audiences_default_and_legacy_list():
+    assert Config().entities["cus"].reference_audiences == ["contracts", "mgmt"]
+    assert Config().entities["prd"].reference_audiences is None
+    legacy = parse_config({"entities": {"prd": ["all"], "cus": ["contracts"]}})
+    assert legacy.entities["cus"].reference_audiences == ["contracts", "mgmt"]
+    assert legacy.entities["prd"].reference_audiences is None
+
+
+def test_unknown_reference_audience_rejected():
+    entities = {"x": {"table": "X", "audiences": ["all"], "reference_audiences": ["nope"]}}
+    with pytest.raises(ConfigError, match="entities x has unknown reference audience 'nope'"):
+        parse_config({"entities": entities})
+
+
+def test_owner_teams_for_defaults_and_override():
+    c = Config()
+    assert owner_teams_for(c, "all") == ["owners-portfolio", "owners-product", "owners-technical"]
+    assert owner_teams_for(c, "hr") == ["owners-hr"]
+    c = parse_config({"governance": {"owner_teams": {"hr": ["people-team"]}}})
+    assert owner_teams_for(c, "hr") == ["people-team"]
+    assert owner_teams_for(c, "mgmt") == ["owners-mgmt"]
+
+
+def test_governance_validation():
+    with pytest.raises(ConfigError, match="governance owner_teams has unknown audience 'zzz'"):
+        parse_config({"governance": {"owner_teams": {"zzz": ["a"]}}})
+    with pytest.raises(ConfigError, match="not a valid team name"):
+        parse_config({"governance": {"owner_teams": {"hr": ["Bad Team"]}}})
