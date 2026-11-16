@@ -149,3 +149,9 @@ def test_bots_property():
 
 def test_config_hash_ignores_self_merge_teams():
     assert config_hash(Config(self_merge_teams=["a"])) == config_hash(Config())
+
+
+def test_audience_names_are_validated():
+    with pytest.raises(ConfigError) as e:
+        parse_config({"audiences": ["all", "mgmt", "hr", "contracts", "a|b"]})
+    assert str(e.value) == "config: audience 'a|b' is not a valid audience name (audiences)"

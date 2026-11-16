@@ -67,6 +67,7 @@ def _default_entities() -> dict[str, EntityKind]:
 
 TEAM_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+AUDIENCE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 
 
 class GovernanceConfig(BaseModel):
@@ -126,6 +127,13 @@ class Config(BaseModel):
     @property
     def bots(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys((BOT_LOGINS[0], *self.bot_logins)))
+    @field_validator("audiences")
+    @classmethod
+    def _audience_names(cls, value: list[str]) -> list[str]:
+        for a in value:
+            if not AUDIENCE_RE.fullmatch(a):
+                raise ValueError(f"audience {a!r} is not a valid audience name")
+        return value
 
     @model_validator(mode="after")
     def _validate(self) -> Config:

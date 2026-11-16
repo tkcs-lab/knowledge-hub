@@ -11,6 +11,7 @@ from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.indexer.worker import Worker
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.tools import derived as derived_tool
+from knowledge_hub.visibility import Visibility, can_read
 from tests.integration.test_derived_visibility_sql import doc as make_doc
 from tests.integration.test_derived_visibility_sql import raw as make_raw
 from tests.support.blobs import MemoryBlobStore
@@ -82,7 +83,7 @@ def err(res, text) -> None:
 @pytest.mark.parametrize("hidden", sorted(c for c in CASES if c != "all"))
 async def test_hidden_source_reads_like_a_missing_one(admin, mcp_client, caller, hidden):
     audiences, emails = CASES[hidden]
-    if set(audiences) <= caller.audiences and (emails is None or caller.email in emails):
+    if can_read(Visibility(audiences, emails), caller.audiences, caller.email):
         pytest.skip("visible to this caller")
     d = make_doc(admin, audiences, emails)
     r = make_raw(admin, audiences, emails)
@@ -334,7 +335,7 @@ async def test_every_hidden_seed_row_reads_like_a_missing_one(seeded_db, mcp_cli
     caller = PRINCIPALS[principal]
     missing = await mcp_client.call(caller, "write_derived", args([f"doc:{uuid.uuid4()}"]))
     for case, (audiences, emails) in CASES.items():
-        if set(audiences) <= caller.audiences and (emails is None or caller.email in emails):
+        if can_read(Visibility(audiences, emails), caller.audiences, caller.email):
             continue
         for table, prefix in (("documents", "doc"), ("raw_records", "raw"), ("derived_records", "derived")):
             res = await mcp_client.call(caller, "write_derived", args([f"{prefix}:{seeded_db[table][case]}"]))

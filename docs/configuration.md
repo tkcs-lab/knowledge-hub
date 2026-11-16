@@ -57,7 +57,7 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_EMBED_DIM` | `1024` | Vector size; the provider refuses any other. The column is `vector(1024)`. |
 | `KH_EMBED_HTTP_URL` | none | Endpoint of the `http` provider; it must serve the same model as `KH_EMBED_MODEL`. |
 | `KH_EMBED_HTTP_TOKEN_FILE` | none | Token file for the `http` provider. |
-| `KH_EMBED_HTTP_ALLOWED_AUDIENCES` | `all` | Comma list. The `http` provider embeds only chunks whose audiences are a non-empty subset of it and that have no `allowed_emails`; others are found by full text only. |
+| `KH_EMBED_HTTP_ALLOWED_AUDIENCES` | `all` | Comma list. The `http` provider embeds only chunks whose every audience, including each member of a multi-audience list, is in it, and that have no `allowed_emails`; others are found by full text only. |
 
 ### Blob storage (S3-compatible)
 
@@ -122,16 +122,16 @@ Unknown keys are refused. Every error text starts with `config:`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `audiences` | `[all, mgmt, hr, contracts]` | Audience names allowed in `required_audiences`. |
+| `audiences` | `[all, mgmt, hr, contracts]` | Audience names allowed in `required_audiences`. Names are 1-63 characters of lowercase letters, digits, `_` or `-`, starting with a letter or digit; a name containing anything else is refused. |
 | `participant_label` | `attendees` | Name shown for email-scoped raw records. It is not an audience. |
 | `domains` | `[portfolio, product, technical]` | Valid values of `domain` for documents, raw, derived and proposals. |
 | `repos` | see example | Map of Forgejo repo name to `{tier: T0 or T1, audience, trust_anchor}`. `audience` must be in `audiences`; at most one T0 repo per audience. `trust_anchor` is a commit sha on `main`, or null for none (set one for T0 once its first reviewed pull request is merged; see the runbook, "Bootstrapping the trust anchor"). |
-| `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. Unknown audiences are refused. |
+| `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. A list means ANY of these audiences may read the rows (a wider audience, not a narrower one); the ingesting token must hold every listed audience. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
 | `self_merge_teams` | `[]` | Teams whose members may merge their own pull requests on the paths the team owns in `owners.yml`; the merge is then trusted with stamp `owner_merge`. Names match `^[a-z0-9][a-z0-9_-]*$`. Needs `read:organization` on the indexer token. Governance paths need `kh-admins`. |
 | `bot_logins` | `[kh-hub-bot]` | Logins that are bots. `kh-hub-bot` is always included. Bots never self-merge and their approvals never count. |
-| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
+| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows (a list means ANY of these audiences may read the rows: a wider audience, not a narrower one), an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
 | `entities.<kind>.reference_audiences` | `[contracts, mgmt]` for `cus`, unset for the other default kinds | Repository audiences whose documents may cite the kind. Unset means any repository may cite it. Members must be in `audiences`, otherwise `config: entities <kind> has unknown reference audience ...`. Enforced by `kh validate`. See [entities](#entities). |
 | `governance.owner_teams` | `{}` | Map of audience to the Forgejo teams whose approval allows widening a PR into that audience (`kh domain-owners`). Keys must be in `audiences`; names match `^[a-z0-9][a-z0-9_-]{0,62}$`. Default: `owners-<audience>`, and the three domain teams for `all`. See [governance](governance.md). |
 | `forgejo_web_url` | null | Base URL for `source_link`; empty links when null. |
@@ -166,7 +166,11 @@ forgejo_web_url: https://forgejo.example.invalid
 
 ### restricted_audiences_imply_all
 
-Documents of a restricted audience such as `hr` usually also cite `all` sources, so the union of source audiences is `{all, hr}`. With `restricted_audiences_imply_all: false` the router refuses that proposal (`SPAN`). With `true`, `all` is removed from the union when other audiences are present, and the proposal goes to the `hr` repo. The stored visibility of the candidate keeps the full union; only the routing changes. Leave it `false` unless people in a restricted audience always also hold `all`.
+Documents of a restricted audience such as `hr` usually also cite `all` sources, so the sources' clauses are `all` and `hr`. With `restricted_audiences_imply_all: false` the router refuses that proposal (`SPAN`). With `true`, every audience implies `all`: a clause that contains `all` counts as `all` alone, and `all` is dropped when another clause is present, so the proposal goes to the `hr` repo. When the remaining sources fit more than one canonical repo, the proposal fails with `ambiguous` and asks for a `target_id`. The stored visibility of the candidate keeps every clause; only the routing changes. Leave it `false` unless people in a restricted audience always also hold `all`.
+
+### Upgrading to ANY-of
+
+From 0007, multi-audience lists mean ANY-of; check them before upgrading. Every `entities.<kind>.audiences` and `raw_audience_map` list with two or more audiences becomes readable by each member on its own. Derived records, candidates and conflicts still need every source.
 
 A change to `audiences`, `repos`, `raw_audience_map` or the visibility of `entities` changes the config hash: run `kh recompute-visibility` after deploying it. Document visibility follows `repos`, raw and derived rows follow the map, entity rows follow `entities` at the next `kh daily`.
 

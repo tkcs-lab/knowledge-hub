@@ -21,7 +21,8 @@ This document records the decisions as built, the alternatives that were rejecte
 - Roles are created outside the migrations (tests: `tests/support/pg.py`; production: the compose repo). Migrations only `GRANT`.
 - Every table has `ENABLE` and `FORCE ROW LEVEL SECURITY`. FORCE also binds the owner, so `kh_migrator` has an explicit `USING (true)` policy on every table.
 - Per request `caller_tx` opens a transaction on the `kh_app` pool and sets `kh.audiences`, `kh.email`, `kh.principal_type` and `kh.sub` with `set_config(..., true)` plus `statement_timeout = 5s`.
-- `kh.visible(req, emails)` is `req <@ caller_audiences() AND (emails IS NULL OR caller_email() = ANY(emails))`.
+- `kh.visible(req, emails)` reads each element of `required_audiences` as a clause: audience names sorted and joined by `|`, so `[mgmt, finance]` is `finance|mgmt` and a plain name is a one-member clause. A row is visible when every clause shares at least one audience with the caller's audiences, and `emails IS NULL OR caller_email() = ANY(emails)`. A set of clauses is an AND of ORs. Rows of plain names keep the inlined subset test; only rows with a `|` clause call a helper.
+- The check `kh_audience_clauses` (and `kh_src_audience_clauses` on the three source tables) rejects any element that is not a valid sorted, de-duplicated clause of names matching `^[a-z0-9][a-z0-9_-]{0,62}$`.
 - Every visibility-bearing table has `required_audiences text[] NOT NULL`, `allowed_emails text[] NULL` and the check `kh_no_open_rows`: audiences non-empty or emails not null. `allowed_emails = '{}'` means nobody.
 - `kh_app` reads rows where `visible` holds. It inserts only its own rows: `raw_records` for `n8n_workflow` callers with `ingested_by_sub = caller_sub()`, and `derived_records`, `candidates`, `conflicts` with `created_by_sub = caller_sub()`. It has no grant on `index_jobs`, `repo_state`, `index_alerts` or `raw_audience_map`.
 - `kh_indexer` has ALL on the index tables and UPDATE on visibility, decision and closing columns of the record tables only (and on the two snapshot columns of the source tables).
@@ -77,16 +78,17 @@ This document records the decisions as built, the alternatives that were rejecte
 A workflow token that ingested a raw record can cite it in `write_derived` although it cannot read it back (the record may be restricted to attendees the token's person does not match).
 
 - `kh.derived_visibility(source_ids)` is `SECURITY DEFINER`, owned by `kh_provenance`. A source counts when `kh.visible` holds or, for raw records only, when `caller_type() = 'n8n_workflow'` and `ingested_by_sub = caller_sub()`.
-- It returns the union of audiences, the intersection of non-null email lists and the document versions, never content. Reads stay strict; the exception lives only in this function.
+- It returns the union of the sources' clauses, so the caller must satisfy every source, the intersection of non-null email lists and the document versions, never content. Reads stay strict; the exception lives only in this function.
 - The derived row inherits the full restriction. An empty email intersection (the sources share no attendee) is refused (`derived_nobody`).
 - A deferred constraint trigger recomputes the visibility at commit from the snapshot columns of `derived_sources` and raises (SQLSTATE `P0K04`) when it differs or there are no sources. The tool turns that into `internal error`.
 - Derived records cannot cite derived records the token cannot see: chained derivation is not covered.
-- Raw visibility is assigned by trigger `raw_records_assign_visibility` from `raw_audience_map` (`series:<id>` or `folder:<id>`), else from the participants, else the insert is refused. The token must hold every mapped audience.
+- Raw visibility is assigned by trigger `raw_records_assign_visibility` from `raw_audience_map` (`series:<id>` or `folder:<id>`), else from the participants, else the insert is refused. Each matching map entry gives one clause, and the token must hold every mapped audience: ANY-of changes who reads, not who may write.
 
 ## Promotion routing and path validation
 
 - Candidates and conflicts take their visibility from `kh.strict_visibility` (`SECURITY INVOKER`, no provenance branch) over their sources, and a deferred trigger checks it at commit. Identical sources give identical visibility, so a dedupe collision can only hit a row the caller could see.
-- `route_target_repo` is a pure function. Any source restricted to named people is refused. The union `U` of source audiences picks the canonical repo: empty means the `all` repo, one audience means that audience's repo, two or more are refused (`SPAN`). With `restricted_audiences_imply_all: true`, `all` is dropped from `U` when other audiences are present. With `target_id` the sources must fit inside the target repo's audience (`WIDER`). Widening is a human decision, never a bot's.
+- `route_target_repo` is a pure function. Any source restricted to named people is refused. Let `K` be the set of clauses of all sources. With `restricted_audiences_imply_all: true`, every clause containing `all` becomes `{all}`, and `{all}` is dropped when `K` has another clause. `R`, the audiences whose holders can read every source, is the intersection of the clauses of `K`.
+- With `target_id` the sources must fit the target repo: `K` empty, or the repo's audience in `R`, else `WIDER`. Without it: `K` empty means the `all` repo; `R` empty is refused (`SPAN`); otherwise the T0 repos whose audience is in `R` decide: none is `NO_REPO`, one is the target, two or more are refused as `ambiguous` and the caller passes a `target_id`. Widening is a human decision, never a bot's.
 - `new_path` must match `^(portfolio|product|technical)/[a-z0-9][a-z0-9/_-]*\.md$`, start with the domain folder, contain no `..` or `//`, and not exist at `main`. The bot therefore cannot write `.forgejo/`, `CODEOWNERS`, `schema/` or governance files.
 - The bot works only on branches `bot/promote/<candidate-id>`: `ForgejoClient` raises on any other ref and never pushes to `main`. `open_pull` requires base `main`.
 - The candidate row and every `candidate_mark` run in their own committed transaction, so a Forgejo failure keeps the `failed` row for a retry with `candidate_id`.
@@ -123,4 +125,5 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | Filesystem blob store | Owner declined; S3 from day one (`blobs/s3.py`, path-style, one object version, history from backups). |
 | A second auth path | Owner declined; one claim path, n8n tested with signed claims. |
 | Policy requiring a non-empty audience list | It would hide email-only rows from people in no group. |
+| Two visibility columns (any and all) | Lossy for derived rows; a set of OR-clauses in the existing column is exact. |
 | `get_doc` fetching from Forgejo | Slow and unfiltered; `get_doc` is an indexed lookup under RLS and Forgejo is read only for `version=`. |

@@ -16,6 +16,8 @@ CASES: dict[str, tuple[list[str], list[str] | None]] = {
     "all_mgmt": (["all", "mgmt"], None),
     "attendee": ([], ["dave@example.org"]),
     "empty_emails": ([], []),
+    "mgmt_or_finance": (["finance|mgmt"], None),
+    "mgmt_and_finance": (["finance", "mgmt"], None),
 }
 
 VISIBILITY_TABLES = (
@@ -132,7 +134,7 @@ def seed_rows(admin_dsn: str) -> dict[str, dict[str, str]]:
             # One chunk per case, owned by the document; inherited columns copied from it.
             _insert(cur, "chunks", dict(
                 id=ids["chunks"][case], document_id=doc, raw_id=None, derived_id=None, entities=["prd:a"],
-                ordinal=0, heading_path="H", text=f"chunk {case}", content_sha=f"cs-{case}",
+                ordinal=0, heading_path="H", text=f"chunk {case.replace('_', '')}", content_sha=f"cs-{case}",
                 embedding=None, embedding_model=None, owner_key=f"doc:{doc}", owner_created_at=WHEN,
                 tier="T0", domain="product", status="current", stale=False, superseded=False, **vis))
         cur.execute(DRIFT_SQL)

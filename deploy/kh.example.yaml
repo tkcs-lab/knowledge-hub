@@ -10,7 +10,7 @@ repos:
   notes-all: {tier: T1, audience: all, trust_anchor: null}
 # Map a raw-record series or folder to the audiences that may read it, for example:
 # raw_audience_map:
-#   "series:weekly-sync": [mgmt]
+#   "series:weekly-sync": [mgmt, finance]   # mgmt or finance may read
 raw_audience_map: {}
 ingest_principal_types: [n8n_workflow]
 restricted_audiences_imply_all: false

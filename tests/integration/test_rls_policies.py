@@ -422,6 +422,20 @@ VISIBLE_CASES = [
     ("", None, ["all"], None, False),
     ("", None, [], ["dave@example.org"], False),
     ("", None, [], [], False),
+    # any-of clauses (plan 3.3)
+    ("mgmt", None, ["finance|mgmt"], None, True),
+    ("finance", None, ["finance|mgmt"], None, True),
+    ("all", None, ["finance|mgmt"], None, False),
+    ("", None, ["finance|mgmt"], None, False),
+    ("mgmt", None, ["finance", "mgmt"], None, False),
+    ("mgmt,finance", None, ["finance", "mgmt"], None, True),
+    ("mgmt,finance", None, ["finance|mgmt"], None, True),
+    ("all", None, ["all|mgmt"], None, True),
+    ("mgmt", None, ["finance|mgmt", "hr"], None, False),
+    ("mgmt,hr", None, ["finance|mgmt", "hr"], None, True),
+    ("mgmt", "alice@example.org", ["finance|mgmt"], ["alice@example.org"], True),
+    ("mgmt", "alice@example.org", ["finance|mgmt"], ["bob@example.org"], False),
+    ("mgmt", None, ["finance|mgmt"], ["alice@example.org"], False),
 ]
 
 
@@ -438,6 +452,34 @@ def test_visible_truth_table(fresh_db):
         set_caller(conn, audiences="", email="", ptype="", sub="")
         assert conn.execute("SELECT kh.caller_audiences(), kh.caller_email(), kh.caller_type(),"
                             " kh.caller_sub()").fetchone() == ([], None, None, None)
+
+
+def test_any_of_rows_are_visible_to_each_listed_audience(fresh_db):
+    ids = {"raw_records": uid(), "entities_cache": f"prd:{uid()}"}
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        seed_mode(conn)
+        f = factories({})
+        for table, rid in ids.items():
+            row = f[table]()
+            row.update(id=rid, required_audiences=["finance|mgmt"], allowed_emails=None)
+            insert(conn, table, row)
+    callers = {"mgmt": ("mgmt", True), "finance": ("finance", True), "both": ("mgmt,finance", True),
+               "all": ("all", False), "nobody": ("", False)}
+    with psycopg.connect(fresh_db.dsn("kh_app", DB)) as conn:
+        for name, (aud, expected) in callers.items():
+            set_caller(conn, audiences=aud, email=None)
+            for table, rid in ids.items():
+                got = conn.execute(sql.SQL("SELECT count(*) FROM kh.{} WHERE id = %s").format(
+                    sql.Identifier(table)), (rid,)).fetchone()[0]
+                assert (got == 1) is expected, (name, table)
+
+
+def test_visible_stays_inlined(fresh_db):
+    with psycopg.connect(fresh_db.dsn("kh_app", DB)) as conn:
+        set_caller(conn, audiences="all,mgmt")
+        plan = "\n".join(r[0] for r in conn.execute("EXPLAIN (COSTS OFF) SELECT 1 FROM kh.chunks"))
+    assert "strpos" in plan
+    assert "kh.visible(" not in plan
 
 
 def test_no_audience_no_email_caller_sees_nothing_because_open_rows_cannot_exist(fresh_db):

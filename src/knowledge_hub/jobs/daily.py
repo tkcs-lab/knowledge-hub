@@ -8,6 +8,8 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from knowledge_hub.visibility import clause
+
 
 def _text(value: Any) -> str | None:
     return None if value is None or value == "" else str(value)
@@ -20,7 +22,7 @@ async def run_daily(indexer_pool: Any, grist: Any, config: Any, today: date) -> 
         auds = list(spec.audiences)
         if not auds:  # never an open row: refuse instead of storing empty audiences
             raise ValueError(f"config entities.{kind} has no audience; refusing to cache open entities")
-        audiences[kind] = auds
+        audiences[kind] = [clause(auds)]
 
     rows: dict[str, tuple] = {}
     skipped = 0

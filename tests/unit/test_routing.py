@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from knowledge_hub.config import Config
-from knowledge_hub.mcp.errors import EMAIL_SOURCES, NO_REPO, SPAN, WIDER, KhError
+from knowledge_hub.config import Config, RepoConfig, _default_repos
+from knowledge_hub.mcp.errors import AMBIGUOUS, EMAIL_SOURCES, NO_REPO, SPAN, WIDER, KhError
 from knowledge_hub.visibility import Visibility, route_target_repo
 
 
@@ -105,3 +105,74 @@ def test_explicit_unknown_repo_is_no_repo():
     with pytest.raises(KhError) as e:
         route_target_repo([v()], cfg(), "nope")
     assert e.value.text == NO_REPO.format(a="nope")
+
+
+AUDS = ["all", "mgmt", "hr", "contracts", "finance"]
+
+
+def fin_cfg(**kw) -> Config:
+    repos = {**_default_repos(), "canonical-finance": RepoConfig(tier="T0", audience="finance")}
+    return Config(audiences=AUDS, repos=repos, **kw)
+
+
+def mgmt_only_cfg() -> Config:
+    return Config(audiences=AUDS, repos={"canonical-mgmt": RepoConfig(tier="T0", audience="mgmt")})
+
+
+def test_any_of_clause_routes_to_the_only_matching_repo():
+    assert route_target_repo([v("finance|mgmt")], mgmt_only_cfg()) == "canonical-mgmt"
+
+
+def test_any_of_clause_fitting_two_repos_is_ambiguous():
+    with pytest.raises(KhError) as e:
+        route_target_repo([v("finance|mgmt")], fin_cfg())
+    assert e.value.code == "ambiguous"
+    assert e.value.text == AMBIGUOUS.format(repo_a="canonical-finance", repo_b="canonical-mgmt")
+
+
+def test_any_of_clause_accepts_explicit_repo_of_a_member():
+    assert route_target_repo([v("finance|mgmt")], fin_cfg(), "canonical-mgmt") == "canonical-mgmt"
+
+
+def test_any_of_clause_refuses_explicit_repo_outside_it():
+    with pytest.raises(KhError) as e:
+        route_target_repo([v("finance|mgmt")], fin_cfg(), "canonical-hr")
+    assert e.value.code == "wider"
+    assert e.value.text == WIDER.format(repo="canonical-hr", a="hr", u="finance|mgmt")
+
+
+def test_two_single_audience_sources_span():
+    with pytest.raises(KhError) as e:
+        route_target_repo([v("mgmt"), v("finance")], fin_cfg())
+    assert e.value.code == "span"
+    assert e.value.text == SPAN.format(a="finance", b="mgmt")
+
+
+def test_clause_and_plain_source_narrow_to_their_intersection():
+    assert route_target_repo([v("finance|mgmt"), v("mgmt")], fin_cfg()) == "canonical-mgmt"
+
+
+def test_all_or_mgmt_clause_without_flag_is_ambiguous_between_all_and_mgmt():
+    with pytest.raises(KhError) as e:
+        route_target_repo([v("all|mgmt")], fin_cfg())
+    assert e.value.code == "ambiguous"
+    assert e.value.text == AMBIGUOUS.format(repo_a="canonical-all", repo_b="canonical-mgmt")
+
+
+def test_all_or_mgmt_clause_with_mgmt_source_routes_to_mgmt_with_or_without_flag():
+    sources = [v("all|mgmt"), v("mgmt")]
+    assert route_target_repo(sources, fin_cfg()) == "canonical-mgmt"
+    assert route_target_repo(sources, fin_cfg(restricted_audiences_imply_all=True)) == "canonical-mgmt"
+
+
+def test_flag_turns_every_clause_with_all_into_all_then_drops_it():
+    cf = fin_cfg(restricted_audiences_imply_all=True)
+    assert route_target_repo([v("all|mgmt")], cf) == "canonical-all"
+    assert route_target_repo([v("all|mgmt"), v("hr")], cf) == "canonical-hr"
+
+
+def test_no_repo_for_the_common_audiences_names_them():
+    cf = Config(audiences=AUDS, repos={"canonical-all": RepoConfig(tier="T0", audience="all")})
+    with pytest.raises(KhError) as e:
+        route_target_repo([v("finance|mgmt")], cf)
+    assert e.value.text == NO_REPO.format(a="finance or mgmt")

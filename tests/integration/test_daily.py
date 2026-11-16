@@ -143,3 +143,15 @@ async def test_custom_kind_reads_its_table(deps, indexer_pool):  # noqa: F811
     res = await run_daily(indexer_pool, g, cfg, TODAY)
     assert await entity_ids(indexer_pool, alice_all) == ["fam:kid1"]
     assert res["entities_skipped"] == 1
+
+
+async def test_multi_audience_kind_is_stored_as_one_clause(deps, indexer_pool):  # noqa: F811
+    cfg = parse_config({
+        "audiences": ["all", "mgmt", "hr", "contracts", "finance"],
+        "entities": {"fam": {"table": "Family", "audiences": ["mgmt", "finance"]}},
+    })
+    await run_daily(indexer_pool, FakeGrist({"Family": [{"key": "fam:kid1", "name": "Kid 1"}]}), cfg, TODAY)
+    async with indexer_pool.connection() as conn:
+        rows = await (await conn.execute(
+            "SELECT required_audiences FROM kh.entities_cache WHERE kind = 'fam'")).fetchall()
+    assert rows == [(["finance|mgmt"],)]

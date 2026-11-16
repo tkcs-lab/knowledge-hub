@@ -9,6 +9,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from knowledge_hub.auth.claims import Call
 from knowledge_hub.mcp.errors import tool_guard
 from knowledge_hub.tools import docs
+from knowledge_hub.visibility import Visibility, can_read
 from tests.support.claims import mint_claim
 from tests.support.pg import FRESH_DB
 from tests.support.principals import PRINCIPALS, alice_all, bob_mgmt
@@ -18,8 +19,7 @@ NOT_FOUND = "not found"
 
 
 def _visible(caller, case: str) -> bool:
-    audiences, emails = CASES[case]
-    return set(audiences) <= caller.audiences and (emails is None or caller.email in emails)
+    return can_read(Visibility(*CASES[case]), caller.audiences, caller.email)
 
 
 KINDS = [("documents", "doc"), ("raw_records", "raw"), ("derived_records", "derived")]

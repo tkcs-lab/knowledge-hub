@@ -71,6 +71,9 @@ async def test_http_batches_auth_and_dimension():
         (["eng", "hr"], None, False),
         (["eng"], ["a@x.io"], False),
         (["eng"], [], False),
+        (["eng|all"], None, True),
+        (["eng|hr"], None, False),
+        (["eng|hr", "all"], None, False),
     ],
 )
 def test_http_may_embed_truth_table(aud, emails, expected):
