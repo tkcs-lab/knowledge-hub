@@ -101,6 +101,8 @@ def test_old_rows_are_converted_to_clauses(migrated_db):
         for table, key in (("derived_records", "derived"), ("candidates", "cand"),
                            ("conflicts", "conf")):
             assert req(table, i[key]) == ["finance|mgmt", "hr"], table
+        conn.commit()  # release the read locks so the migration can alter the tables
+        migrate(dsn)  # the remaining migrations (0007_proposals adds chunks.agent_written)
         assert conn.execute(DRIFT_SQL).fetchall() == []
         names = lambda cons: {r[0] for r in conn.execute(  # noqa: E731
             "SELECT conrelid::regclass::text FROM pg_constraint WHERE conname = %s", (cons,))}
