@@ -15,7 +15,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-leak-matrix
 
-- pending
+- worker: touched tests/support/tool_cases.py: per-case single-token search slugs (case name without underscores) in the seed chunk text and the search query
+- scope: scope: tests/support/tool_cases.py (outside touches, shared fixture)
+- retry: phase was blocked on search cases matching other cases through shared words; orchestrator sent the slug fix to the same worker
+- worker: worker had no tld CLI; orchestrator found no roles required and ran the verification
 
 ## p4-docs-retire
 
