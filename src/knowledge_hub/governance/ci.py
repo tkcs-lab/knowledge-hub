@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from knowledge_hub.config import Config
+from knowledge_hub.approvals import BOT_LOGINS, current_approvals
+from knowledge_hub.config import Config, owner_teams_for
 from knowledge_hub.forgejo.client import ForgejoClient, ForgejoError
 from knowledge_hub.governance.messages import (
     MAX_FILE_BYTES,
@@ -18,11 +20,16 @@ from knowledge_hub.governance.messages import (
     sort_findings,
 )
 from knowledge_hub.governance.owners import load_owners
+from knowledge_hub.governance.owners_check import check_owners
 from knowledge_hub.governance.rules import FileInput, id_from_path, parse_layout, validate_files
 from knowledge_hub.grist.client import GristClient
 from knowledge_hub.indexer.frontmatter import ParsedDoc, parse_document
 
 CONTEXT = "kh/validate"
+OWNERS_CONTEXT = "kh/domain-owners"
+WIDEN_PREFIX = "widen-audience/"
+WIDEN_LABEL_PROBLEM = "widen-audience needs a destination label widen-audience/<audience>"
+_REASON = re.compile(r"(?mi)^Reason for widening:[ \t]*(\S.*)$")
 READ_CONCURRENCY = 8
 
 
@@ -183,4 +190,100 @@ async def run_validate(
     return result
 
 
-__all__: Sequence[str] = ("CheckResult", "CiError", "build_id_index", "run_validate")
+def _widen(config: Config, labels: list[str]) -> tuple[tuple[str, list[str]] | None, str | None]:
+    """(audience and its owner teams, label problem) from the PR's label names."""
+    destinations = [n for n in labels if n.startswith(WIDEN_PREFIX)]
+    if len(destinations) == 1 and destinations[0][len(WIDEN_PREFIX) :] in config.audiences:
+        audience = destinations[0][len(WIDEN_PREFIX) :]
+        return (audience, owner_teams_for(config, audience)), None
+    if destinations or "widen-audience" in labels:
+        return None, WIDEN_LABEL_PROBLEM
+    return None, None
+
+
+def _reason_ok(body: Any) -> bool:
+    match = _REASON.search(body if isinstance(body, str) else "")
+    return match is not None and not match.group(1).startswith("<")
+
+
+async def _domain_owners(
+    read: ForgejoClient, config: Config, repo: str, pr: dict[str, Any], number: int
+) -> CheckResult:
+    base_sha = pr["base"]["sha"]
+    try:
+        owners = load_owners(await read.get_raw(repo, "owners.yml", base_sha))
+    except ForgejoError as exc:
+        if _is_404(exc):
+            raise CiError("owners.yml is missing at the base commit") from None
+        raise
+    changes = await read.compare_files(repo, pr.get("merge_base") or base_sha, pr["head"]["sha"])
+    paths: set[str] = set()
+    for change in changes:
+        paths.add(change["filename"])
+        if change.get("previous_filename"):
+            paths.add(change["previous_filename"])
+    reviews = await read.pull_reviews(repo, number)
+    counted = current_approvals(pr, reviews, BOT_LOGINS)
+    labels = [lab["name"] for lab in pr.get("labels") or [] if isinstance(lab.get("name"), str)]
+    widen, label_problem = _widen(config, labels)
+
+    teams: set[str] = set()
+    for path in paths:
+        rule = owners.rule_for(path)
+        if rule is not None:
+            teams.add(rule.team)
+    if widen is not None:
+        teams.update(widen[1])
+    logins = sorted(
+        {r["user"]["login"] for r in counted if isinstance(r.get("user"), dict) and r["user"].get("login")}
+    )
+    members: dict[str, set[str]] = {}
+    for team in sorted(teams):
+        tid = await read.team_id(team)
+        if tid is None:
+            raise CiError(f"team {team} does not exist in Forgejo")
+        members[team] = {login for login in logins if await read.is_team_member(tid, login)}
+
+    lines = check_owners(
+        owners=owners,
+        paths=sorted(paths),
+        counted=counted,
+        members=members,
+        widen=widen,
+        widen_reason_ok=_reason_ok(pr.get("body")),
+        widen_label_problem=label_problem,
+    )
+    return CheckResult(lines, not lines)
+
+
+async def run_domain_owners(
+    read: ForgejoClient,
+    status: ForgejoClient,
+    config: Config,
+    repo: str,
+    pr_number: int,
+    *,
+    post: bool = True,
+) -> CheckResult:
+    pr = await read.pull(repo, pr_number)
+    if pr.get("state") != "open":
+        return CheckResult(["pull request is not open"], True)
+    head = pr["head"]["sha"]
+    try:
+        result = await _domain_owners(read, config, repo, pr, pr_number)
+    except Exception:
+        if post:
+            try:
+                await status.post_status(repo, head, OWNERS_CONTEXT, "error", "check could not run")
+            except ForgejoError:
+                pass
+        raise
+    if post:
+        if result.ok:
+            await status.post_status(repo, head, OWNERS_CONTEXT, "success", "all checks passed")
+        else:
+            await status.post_status(repo, head, OWNERS_CONTEXT, "failure", f"{len(result.lines)} problems")
+    return result
+
+
+__all__: Sequence[str] = ("CheckResult", "CiError", "build_id_index", "run_domain_owners", "run_validate")

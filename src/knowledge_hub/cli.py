@@ -215,6 +215,50 @@ def _validate(args: argparse.Namespace) -> int:
         return fail(str(exc))
 
 
+def _domain_owners(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from knowledge_hub.forgejo import ForgejoError
+    from knowledge_hub.governance.ci import CiError, run_domain_owners
+
+    def fail(message: str) -> int:
+        print(f"domain-owners: {message}", file=sys.stderr)
+        return 2
+
+    try:
+        settings = load_settings()
+        config = load_config(args.config or settings.config_file)
+        url = args.forgejo_url or settings.forgejo_url
+        org = args.forgejo_org or settings.forgejo_org
+        for name, value in (("--forgejo-url", url), ("--token-file", args.token_file)):
+            if not value:
+                return fail(f"{name} is required")
+        token = Path(args.token_file).read_text().strip()
+        status_token = Path(args.status_token_file).read_text().strip() if args.status_token_file else None
+    except (OSError, ValueError) as exc:
+        return fail(str(exc))
+
+    async def go() -> int:
+        read = _make_forgejo(url, token, org)
+        status = _make_forgejo(url, status_token, org) if status_token else read
+        try:
+            result = await run_domain_owners(
+                read, status, config, args.repo, args.pr, post=not args.no_status
+            )
+        finally:
+            if status is not read:
+                await status.aclose()
+            await read.aclose()
+        for line in result.lines:
+            print(line)
+        return 0 if result.ok else 1
+
+    try:
+        return asyncio.run(go())
+    except (ForgejoError, CiError, OSError, ValueError, KeyError) as exc:
+        return fail(str(exc))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -244,9 +288,17 @@ def main(argv: list[str] | None = None) -> int:
     ):
         val.add_argument(flag)
     val.add_argument("--no-status", action="store_true")
+    own = sub.add_parser("domain-owners")
+    own.add_argument("--repo", required=True)
+    own.add_argument("--pr", required=True, type=int)
+    for flag in ("--forgejo-url", "--forgejo-org", "--token-file", "--status-token-file", "--config"):
+        own.add_argument(flag)
+    own.add_argument("--no-status", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "validate":
         return _validate(args)
+    if args.command == "domain-owners":
+        return _domain_owners(args)
     if args.command == "governance":
         return _governance(args)
     if args.command == "serve":

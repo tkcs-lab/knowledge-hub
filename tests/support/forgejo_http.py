@@ -17,10 +17,18 @@ class FakeForgejoHttp:
 
     Every request lands in ``requests``; every ``POST .../statuses/<sha>`` body in ``statuses``
     (its target in ``status_targets``). ``fail`` maps a path substring to an HTTP status to return.
+    A repo may also hold ``pulls`` (``{number: pull}``) and ``reviews`` (``{number: [review]}``).
+    ``teams`` maps a team name to its member logins; team ids are 1-based in insertion order.
     """
 
-    def __init__(self, repos: dict[str, dict[str, Any]], fail: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        repos: dict[str, dict[str, Any]],
+        fail: dict[str, int] | None = None,
+        teams: dict[str, list[str]] | None = None,
+    ) -> None:
         self.repos = repos
+        self.teams = teams or {}
         self.fail = fail or {}
         self.requests: list[httpx.Request] = []
         self.statuses: list[dict[str, Any]] = []
@@ -36,6 +44,16 @@ class FakeForgejoHttp:
         for needle, code in self.fail.items():
             if needle in path:
                 return httpx.Response(code, json={"message": "boom"})
+        if re.fullmatch(r"/api/v1/orgs/[^/]+/teams", path):
+            names = list(self.teams)
+            return httpx.Response(200, json=[{"id": i, "name": n} for i, n in enumerate(names, 1)])
+        if (tm := re.fullmatch(r"/api/v1/teams/(?P<id>\d+)/members/(?P<login>[^/]+)", path)) is not None:
+            names = list(self.teams)
+            idx = int(tm["id"]) - 1
+            if idx >= len(names):
+                return httpx.Response(404, json={})
+            member = unquote(tm["login"]) in self.teams[names[idx]]
+            return httpx.Response(204 if member else 404)
         m = re.fullmatch(_REPO + r"/(?P<rest>.*)", path)
         if m is None or m["repo"] not in self.repos:
             return httpx.Response(404, json={})
@@ -48,6 +66,14 @@ class FakeForgejoHttp:
             self.statuses.append(json.loads(request.content))
             self.status_targets.append((m["repo"], unquote(sm["sha"])))
             return httpx.Response(201, json={})
+        pm = re.fullmatch(r"pulls/(?P<n>\d+)(?P<reviews>/reviews)?", rest)
+        if pm is not None:
+            number = int(pm["n"])
+            if number not in world.get("pulls", {}):
+                return httpx.Response(404, json={})
+            if pm["reviews"]:
+                return httpx.Response(200, json=world.get("reviews", {}).get(number, []))
+            return httpx.Response(200, json=world["pulls"][number])
         if rest.startswith("branches/"):
             if unquote(rest[len("branches/") :]) != "main" or world.get("sha") is None:
                 return httpx.Response(404, json={})
