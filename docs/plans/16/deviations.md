@@ -20,7 +20,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-agent-store
 
-- pending
+- None.
 
 ## p5-write-note
 
