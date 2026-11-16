@@ -9,6 +9,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
+from knowledge_hub.approvals import BOT_LOGINS
+
 
 class ConfigError(ValueError):
     pass
@@ -64,6 +66,7 @@ def _default_entities() -> dict[str, EntityKind]:
 
 
 TEAM_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
 class GovernanceConfig(BaseModel):
@@ -92,6 +95,8 @@ class Config(BaseModel):
     entities: dict[str, EntityKind] = _default_entities()
     forgejo_web_url: str | None = None
     governance: GovernanceConfig = GovernanceConfig()
+    self_merge_teams: list[str] = []
+    bot_logins: list[str] = ["kh-hub-bot"]
 
     @field_validator("entities", mode="before")
     @classmethod
@@ -112,6 +117,15 @@ class Config(BaseModel):
                     spec["reference_audiences"] = ["contracts", "mgmt"]
             out[kind] = spec
         return out
+
+    @field_validator("self_merge_teams")
+    @classmethod
+    def _dedupe_self_merge_teams(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+    @property
+    def bots(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys((BOT_LOGINS[0], *self.bot_logins)))
 
     @model_validator(mode="after")
     def _validate(self) -> Config:
@@ -165,6 +179,12 @@ class Config(BaseModel):
         for a in self.governance.owner_teams:
             if a not in known:
                 raise ValueError(f"governance owner_teams has unknown audience {a!r}")
+        for t in self.self_merge_teams:
+            if not TEAM_RE.fullmatch(t):
+                raise ValueError(f"self_merge_teams team {t!r} is not a valid team name")
+        for b in self.bot_logins:
+            if not LOGIN_RE.fullmatch(b):
+                raise ValueError(f"bot_logins login {b!r} is not a valid login")
         for p in self.ingest_principal_types:
             if p != "n8n_workflow":
                 raise ValueError(f"ingest_principal_types value {p!r} is not allowed; only n8n_workflow")
