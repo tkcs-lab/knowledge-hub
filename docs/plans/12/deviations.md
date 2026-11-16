@@ -9,7 +9,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-schema-and-fake
 
-- pending
+- None.
 
 ## p2b-forbid-stamp
 
