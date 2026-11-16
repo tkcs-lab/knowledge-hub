@@ -19,9 +19,9 @@ def rows(fresh_db, sql, *args):
         return conn.execute(sql, args).fetchall()
 
 
-async def sync(pool, repo_obj):
+async def sync(pool, repo_obj, **kw):
     return await sync_repo(
-        pool, ForgejoFake({"canonical-all": repo_obj}), CFG, "canonical-all", FakeEmbedder()
+        pool, ForgejoFake({"canonical-all": repo_obj}), CFG, "canonical-all", FakeEmbedder(), **kw
     )
 
 
@@ -191,8 +191,12 @@ async def test_plain_sync_of_trusted_merge_leaves_version_as_inserted(fresh_db, 
     await sync(indexer_pool, r)
     first = rows(fresh_db, VERSION)
     assert first[0][:4] == ("m1", "current", "reviewed", ["bob"])
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute("UPDATE kh.document_versions SET approved_by = '{eve}'")
+    changed = rows(fresh_db, VERSION)
+    assert changed != first
     await sync(indexer_pool, r)
-    assert rows(fresh_db, VERSION) == first
+    assert rows(fresh_db, VERSION) == changed
 
 
 async def test_plain_sync_in_untrusted_repo_leaves_version_unstamped(fresh_db, indexer_pool):
@@ -205,3 +209,23 @@ async def test_plain_sync_in_untrusted_repo_leaves_version_unstamped(fresh_db, i
     assert versions and all(v[1:] == ("disputed", None, [], None) for v in versions)
     await sync(indexer_pool, r)
     assert rows(fresh_db, VERSION) == versions
+
+
+async def test_rejudge_keeps_older_disputed_version_disputed(fresh_db, indexer_pool):
+    m1 = merged("m1", "a0", {"a.md": doc("a")}, 1, approve=False)
+    m2 = merged("m2", "m1", {"a.md": doc("a", title="T2")}, 2)
+    await sync(indexer_pool, repo_of([m1]))
+    await sync(indexer_pool, repo_of([m1, m2]))
+    await sync(indexer_pool, repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1), m2]), rejudge=True)
+    by_sha = {v[0]: v for v in rows(fresh_db, VERSION)}
+    assert by_sha["m1"][1:] == ("disputed", None, [], None)
+    assert by_sha["m2"][1:3] == ("current", "reviewed")
+
+
+async def test_rejudge_with_per_file_dispute_at_head(fresh_db, indexer_pool):
+    bad = doc("a", "supersedes: ghost\n")
+    r = repo_of([merged("m1", "a0", {"a.md": bad}, 1)])
+    await sync(indexer_pool, r)
+    await sync(indexer_pool, r, rejudge=True)
+    assert rows(fresh_db, VERSION)[0][1:] == ("disputed", None, [], None)
+    assert rows(fresh_db, "SELECT status, stamp FROM kh.documents") == [("disputed", None)]
