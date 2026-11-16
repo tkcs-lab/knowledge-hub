@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from knowledge_hub.visibility import Visibility, derive_visibility
+from knowledge_hub.visibility import Visibility, can_read, clause, clause_members, derive_visibility
 
 
 def test_union_of_audiences_sorted_and_deduplicated():
@@ -55,3 +55,44 @@ def test_single_source_is_returned_normalised():
 def test_no_sources_is_an_error():
     with pytest.raises(ValueError):
         derive_visibility([])
+
+
+def test_clause_sorts_and_deduplicates():
+    assert clause(["mgmt", "finance", "mgmt"]) == "finance|mgmt"
+    assert clause(["all"]) == "all"
+    assert clause_members("finance|mgmt") == frozenset({"finance", "mgmt"})
+
+
+def test_empty_clause_is_an_error():
+    with pytest.raises(ValueError, match="at least one audience"):
+        clause([])
+
+
+def test_union_of_clauses_is_an_and_over_sources():
+    out = derive_visibility([Visibility(["finance|mgmt"]), Visibility(["hr"])])
+    assert out.required_audiences == ["finance|mgmt", "hr"]
+
+
+@pytest.mark.parametrize(
+    ("caller", "row", "expected"),
+    [
+        ({"mgmt"}, ["finance|mgmt"], True),
+        ({"finance"}, ["finance|mgmt"], True),
+        ({"all"}, ["finance|mgmt"], False),
+        (set(), ["finance|mgmt"], False),
+        ({"mgmt"}, ["finance", "mgmt"], False),
+        ({"mgmt", "finance"}, ["finance", "mgmt"], True),
+        ({"all"}, ["all|mgmt"], True),
+        (set(), [], True),
+    ],
+)
+def test_can_read_truth_table(caller, row, expected):
+    assert can_read(Visibility(row), caller, None) is expected
+
+
+def test_can_read_email_rule():
+    vis = Visibility([], ["a@x.io"])
+    assert can_read(vis, set(), "a@x.io") is True
+    assert can_read(vis, set(), "b@x.io") is False
+    assert can_read(vis, set(), None) is False
+    assert can_read(Visibility(["all"], ["a@x.io"]), set(), "a@x.io") is False
