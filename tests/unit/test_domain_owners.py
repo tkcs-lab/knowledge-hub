@@ -31,13 +31,15 @@ TEAMS = {
 REASON = "Reason for widening: HR needs this"
 
 
-def make(paths, reviews=(), *, labels=(), body="", state="open", teams=None, previous=None):
+def make(
+    paths, reviews=(), *, labels=(), body="", state="open", teams=None, previous=None, ref=None, statuses=()
+):
     pr = {
         "number": 7,
         "state": state,
         "body": body,
         "user": {"login": "alice"},
-        "head": {"sha": "h1"},
+        "head": {"sha": "h1", "ref": ref},
         "base": {"sha": "b1"},
         "merge_base": "m1",
         "labels": [{"name": n} for n in labels],
@@ -52,6 +54,7 @@ def make(paths, reviews=(), *, labels=(), body="", state="open", teams=None, pre
             "compare": compare,
             "pulls": {7: pr},
             "reviews": {7: list(reviews)},
+            "statuses": {"h1": list(statuses)},
         }
     }
     return FakeForgejoHttp(world, teams=TEAMS if teams is None else teams)
@@ -240,3 +243,58 @@ def test_check_owners_text():
         "widen-audience needs a destination label widen-audience/<audience>",
         "x/y.md: no owner in owners.yml",
     ]
+
+
+UUID = "11111111-1111-1111-1111-111111111111"
+PROP_REF = f"bot/propose/{UUID}"
+PRODUCT_PATH = "product/x/design/a.md"
+
+
+def record(login, uuid=UUID):
+    return {
+        "context": "kh/requested-by",
+        "state": "success",
+        "creator": "kh-hub-bot",
+        "description": f"{login} {uuid}",
+    }
+
+
+async def test_requester_approval_does_not_count():
+    fake = make([PRODUCT_PATH], [ok("bob")], ref=PROP_REF, statuses=[record("bob")])
+    result = await run(fake)
+    assert not result.ok and result.lines == ["product/**: approval from owners-product required"]
+
+
+async def test_requester_exclusion_is_casefolded():
+    fake = make([PRODUCT_PATH], [ok("bob")], ref=PROP_REF, statuses=[record("BOB")])
+    assert not (await run(fake)).ok
+
+
+async def test_other_owner_approval_counts_for_proposal():
+    fake = make([PRODUCT_PATH], [ok("bob")], ref=PROP_REF, statuses=[record("alice2")], teams=TEAMS)
+    assert (await run(fake)).ok
+
+
+async def test_proposal_without_record_fails():
+    from knowledge_hub.proposals import NO_REQUESTER
+
+    result = await run(make([PRODUCT_PATH], [ok("bob")], ref=PROP_REF))
+    assert not result.ok and NO_REQUESTER in result.lines
+
+
+async def test_human_commit_on_top_fails():
+    # the record belongs to an earlier head: statuses are read for h1 only, so none is found
+    fake = make([PRODUCT_PATH], [ok("bob")], ref=PROP_REF)
+    fake.repos["canonical-all"]["statuses"] = {"old-head": [record("bob")]}
+    result = await run(fake)
+    assert not result.ok and result.lines[-1].startswith("agent proposal has no valid requester")
+
+
+async def test_other_branch_unaffected_without_record():
+    assert (await run(make([PRODUCT_PATH], [ok("bob")], ref="feature/x"))).ok
+
+
+async def test_other_branch_excludes_named_approver():
+    fake = make([PRODUCT_PATH], [ok("bob")], ref="feature/x", statuses=[record("bob", "whatever")])
+    result = await run(fake)
+    assert not result.ok and result.lines == ["product/**: approval from owners-product required"]

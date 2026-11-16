@@ -14,7 +14,7 @@ Inputs
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -94,6 +94,7 @@ def _merge_verdict(
     prs: list[dict[str, Any]],
     reviews: dict[int, list[dict[str, Any]]],
     bot_logins: set[str],
+    requesters: Mapping[int, tuple[tuple[str, ...], str | None]] | None = None,
 ) -> Verdict:
     pr = next(
         (
@@ -107,7 +108,12 @@ def _merge_verdict(
     )
     if pr is None:
         return Verdict(DISPUTED, reason="no merged pull request for merge commit")
-    approvals = current_approvals(pr, reviews.get(pr["number"], []), bot_logins)
+    logins, problem = (requesters or {}).get(pr["number"], ((), None))
+    if problem is not None:
+        return Verdict(
+            DISPUTED, merge_pr=pr["number"], pr_url=pr.get("html_url"), reason="no requester record"
+        )
+    approvals = current_approvals(pr, reviews.get(pr["number"], []), bot_logins, exclude_logins=logins)
     if not approvals:
         return Verdict(
             DISPUTED,
@@ -130,6 +136,7 @@ def evaluate_chain(
     changed_files: dict[str, list[str]],
     bot_logins: Iterable[str],
     anchor: str | None,
+    requesters: Mapping[int, tuple[tuple[str, ...], str | None]] | None = None,
 ) -> TrustResult:
     bots = set(bot_logins)
     chain = list(reversed(commits))  # oldest first
@@ -163,7 +170,7 @@ def evaluate_chain(
             result.trusted = False
             result.alerts.append(f"non-merge commit {sha} on main of {repo}")
         else:
-            verdict = _merge_verdict(sha, prs, reviews, bots)
+            verdict = _merge_verdict(sha, prs, reviews, bots, requesters)
         result.commit_verdicts[sha] = verdict
         for path in changed_files.get(sha, []):
             result.file_verdicts[path] = verdict

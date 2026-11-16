@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from knowledge_hub.approvals import BOT_LOGINS, current_approvals
+from knowledge_hub.approvals import BOT_LOGINS, current_approvals, requester_from_statuses
 from knowledge_hub.config import Config, owner_teams_for
 from knowledge_hub.forgejo.client import ForgejoClient, ForgejoError
 from knowledge_hub.governance.messages import (
@@ -246,7 +246,9 @@ async def _domain_owners(
         if change.get("previous_filename"):
             paths.add(change["previous_filename"])
     reviews = await read.pull_reviews(repo, number)
-    counted = current_approvals(pr, reviews, BOT_LOGINS)
+    statuses = await read.commit_statuses(repo, pr["head"]["sha"])
+    requesters, problem = requester_from_statuses(pr, statuses)
+    counted = current_approvals(pr, reviews, BOT_LOGINS, exclude_logins=requesters)
     labels = [lab["name"] for lab in pr.get("labels") or [] if isinstance(lab.get("name"), str)]
     widen, label_problem = _widen(config, labels)
 
@@ -276,6 +278,8 @@ async def _domain_owners(
         widen_reason_ok=_reason_ok(pr.get("body")),
         widen_label_problem=label_problem,
     )
+    if problem is not None:
+        lines = sorted([*lines, problem])
     return CheckResult(lines, not lines)
 
 

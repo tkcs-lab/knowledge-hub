@@ -15,11 +15,13 @@ DATA = Path(__file__).parent.parent / "data" / "forgejo"
 ROOT, M1, M2 = "a" * 40, "b" * 40, "c" * 40
 
 
-def run(name: str, **override) -> TrustResult:
+def run(name: str, requesters=None, **override) -> TrustResult:
     d = json.loads((DATA / f"{name}.json").read_text()) | override
     changed = {sha: files_from_compare(c) for sha, c in d["compare"].items()}
     reviews = {int(k): v for k, v in d["reviews"].items()}
-    return evaluate_chain(d["repo"], d["commits"], d["pulls"], reviews, changed, d["bot_logins"], d["anchor"])
+    return evaluate_chain(
+        d["repo"], d["commits"], d["pulls"], reviews, changed, d["bot_logins"], d["anchor"], requesters
+    )
 
 
 def test_all_approved_chain_is_trusted():
@@ -132,3 +134,17 @@ def test_unparsable_anchor_date_is_disputed():
     r = run("all_approved", commits=d["commits"])
     assert r.anchor_verdict.status == DISPUTED
     assert any("no readable commit date" in a for a in r.alerts)
+
+
+def test_proposal_without_record_is_disputed():
+    r = run("all_approved", requesters={1: ((), "agent proposal has no valid requester record")})
+    v = r.file_verdicts["a.md"]
+    assert (v.status, v.reason, v.merge_pr) == (DISPUTED, "no requester record", 1)
+    assert "file a.md on kh/canonical-all/main has no approved merge PR" in r.alerts
+
+
+def test_requester_approval_is_excluded():
+    r = run("all_approved", requesters={1: (("Bob",), None)})
+    assert r.file_verdicts["a.md"].status == DISPUTED
+    assert r.file_verdicts["a.md"].reason == "no approval of the final head"
+    assert run("all_approved", requesters={1: (("carol",), None)}).file_verdicts["a.md"].status == TRUSTED

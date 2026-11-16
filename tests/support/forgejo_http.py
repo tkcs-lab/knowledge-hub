@@ -74,6 +74,21 @@ class FakeForgejoHttp:
             if pm["reviews"]:
                 return httpx.Response(200, json=world.get("reviews", {}).get(number, []))
             return httpx.Response(200, json=world["pulls"][number])
+        sm = re.fullmatch(r"commits/(?P<sha>[^/]+)/statuses", rest)
+        if sm is not None:
+            raw = world.get("statuses", {}).get(unquote(sm["sha"]), [])
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "status": s.get("state", "success"),
+                        "context": s.get("context"),
+                        "description": s.get("description"),
+                        "creator": {"login": s.get("creator")},
+                    }
+                    for s in raw
+                ],
+            )
         if rest.startswith("branches/"):
             if unquote(rest[len("branches/") :]) != "main" or world.get("sha") is None:
                 return httpx.Response(404, json={})
