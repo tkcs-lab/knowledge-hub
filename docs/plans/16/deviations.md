@@ -61,6 +61,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p13-docs
 
 - None.
+- level: Main gained plans 12, 18 and owner-self-merge while this ran; merging it into the feature branch conflicts in 10 files, so a strong-level conflict worker (fix-1) did the merge instead of the standard worker level.
 
 ## Final review
 
