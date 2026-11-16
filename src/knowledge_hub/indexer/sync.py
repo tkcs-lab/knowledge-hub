@@ -40,7 +40,8 @@ async def _load(conn: Any, repo: str) -> tuple[dict | None, dict[str, dict]]:
         await cur.execute("SELECT * FROM kh.repo_state WHERE repo = %s", (repo,))
         state = await cur.fetchone()
         await cur.execute(
-            "SELECT id, doc_key, path, content_sha, commit_sha, status, approved_by, approved_at, merge_pr"
+            "SELECT id, doc_key, path, content_sha, commit_sha, status, approved_by, approved_at, merge_pr,"
+            " stamp"
             " FROM kh.documents WHERE repo = %s",
             (repo,),
         )
@@ -71,9 +72,9 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
             """
             INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, frontmatter,
                 status, review_by, owner, entities, supersedes, commit_sha, content_sha, approved_by,
-                approved_at, merge_pr, pr_url, required_audiences, allowed_emails)
+                approved_at, merge_pr, pr_url, stamp, required_audiences, allowed_emails)
             VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s)
             ON CONFLICT (repo, doc_key) DO UPDATE SET
                 path = EXCLUDED.path, tier = EXCLUDED.tier, domain = EXCLUDED.domain,
                 title = EXCLUDED.title, body = EXCLUDED.body, frontmatter = EXCLUDED.frontmatter,
@@ -81,7 +82,7 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
                 entities = EXCLUDED.entities, supersedes = EXCLUDED.supersedes,
                 commit_sha = EXCLUDED.commit_sha, content_sha = EXCLUDED.content_sha,
                 approved_by = EXCLUDED.approved_by, approved_at = EXCLUDED.approved_at,
-                merge_pr = EXCLUDED.merge_pr, pr_url = EXCLUDED.pr_url,
+                merge_pr = EXCLUDED.merge_pr, pr_url = EXCLUDED.pr_url, stamp = EXCLUDED.stamp,
                 required_audiences = EXCLUDED.required_audiences,
                 allowed_emails = EXCLUDED.allowed_emails,
                 indexed_at = now(), updated_at = now()
@@ -90,7 +91,7 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
                 repo, u.path, u.doc_key, u.tier, u.domain, u.title, u.body, Jsonb(u.frontmatter),
                 u.status, date.fromisoformat(u.review_by), u.owner, u.entities, u.supersedes,
                 u.commit_sha, u.content_sha, u.approved_by, _parse_ts(u.approved_at), u.merge_pr,
-                u.pr_url, u.required_audiences, u.allowed_emails,
+                u.pr_url, u.stamp, u.required_audiences, u.allowed_emails,
             ),
         )  # fmt: skip
     # Resolve ``superseded_by`` from doc_key to uuid once every document exists.
@@ -109,13 +110,13 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
         await conn.execute(
             """
             INSERT INTO kh.document_versions
-                (document_id, commit_sha, path, tier, status, approved_by, approved_at)
-            SELECT id, %s, %s, %s, %s, %s, %s FROM kh.documents WHERE repo = %s AND doc_key = %s
+                (document_id, commit_sha, path, tier, status, approved_by, approved_at, stamp)
+            SELECT id, %s, %s, %s, %s, %s, %s, %s FROM kh.documents WHERE repo = %s AND doc_key = %s
             ON CONFLICT (document_id, commit_sha) DO NOTHING
             """,
             (
                 v.commit_sha, v.path, v.tier, v.status, v.approved_by,
-                _parse_ts(v.approved_at), repo, v.doc_key,
+                _parse_ts(v.approved_at), v.stamp, repo, v.doc_key,
             ),
         )  # fmt: skip
     for a in dict.fromkeys((a.repo, a.path, a.message) for a in plan.alerts):
