@@ -16,7 +16,6 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-agent-rules
 
-- None.
 - final: Final review: a rationale line "Reason for widening: x" could satisfy the widening check through the PR body; fixed by fix-2 (rationale lines made inert, test added).
 
 ## p4-agent-store
@@ -70,7 +69,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Final review
 
 - final: First review: 1 blocking (p3 render.py: a rationale line "Reason for widening: x" passed the widening check); fixed by fix-2.
+- final: Second review: approve (the first review blocking finding is fixed).
 
 ## Finishing
 
-- pending
+- scope: Scope disposition: three out-of-scope paths accepted (test_any_of_migration.py by p2 and p11, agent_proposals.py by p12); orchestrator removed a stale "None." line above the final entry of p3.
