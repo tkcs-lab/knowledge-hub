@@ -119,6 +119,33 @@ def _daily(settings: Settings, config: Config) -> int:
     return 0
 
 
+def _governance(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from knowledge_hub.governance.render import render_governance
+
+    out = Path(args.out)
+    try:
+        written = render_governance(
+            out,
+            repo=args.repo,
+            audience=args.audience,
+            org=args.org,
+            portfolio_team=args.portfolio_team,
+            product_team=args.product_team,
+            technical_team=args.technical_team,
+            owner_team=args.owner_team,
+            admin_team=args.admin_team,
+            review_trigger=args.review_trigger,
+        )
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    for path in written:
+        print(f"wrote {path.relative_to(out)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -128,7 +155,20 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--port", type=int, default=8080)
         if name == "rebuild":
             p.add_argument("--repo")
+    gov = sub.add_parser("governance").add_subparsers(dest="governance_command", required=True)
+    render = gov.add_parser("render")
+    for flag in ("--repo", "--audience", "--out"):
+        render.add_argument(flag, required=True)
+    render.add_argument("--org", default="kh")
+    render.add_argument("--portfolio-team", default="owners-portfolio")
+    render.add_argument("--product-team", default="owners-product")
+    render.add_argument("--technical-team", default="owners-technical")
+    render.add_argument("--owner-team")
+    render.add_argument("--admin-team", default="kh-admins")
+    render.add_argument("--review-trigger", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "governance":
+        return _governance(args)
     if args.command == "serve":
         try:
             settings = load_settings()

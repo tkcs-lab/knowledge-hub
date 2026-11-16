@@ -7,6 +7,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 ### Added
 
 - Governance config: `reference_audiences` per entity kind (default for `cus`: contracts and mgmt), `governance.owner_teams` in `kh.yaml`, and the `owners.yml` model with `CODEOWNERS` rendering.
+- `kh governance render` writes the frontmatter JSON Schema, `owners.yml`, `CODEOWNERS`, the pull request template and the `kh` Forgejo workflow for a canonical repository.
 
 ## [0.1.1] - 2026-11-16
 
