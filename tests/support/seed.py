@@ -16,6 +16,8 @@ CASES: dict[str, tuple[list[str], list[str] | None]] = {
     "all_mgmt": (["all", "mgmt"], None),
     "attendee": ([], ["dave@example.org"]),
     "empty_emails": ([], []),
+    "mgmt_or_finance": (["finance|mgmt"], None),
+    "mgmt_and_finance": (["finance", "mgmt"], None),
 }
 
 VISIBILITY_TABLES = (

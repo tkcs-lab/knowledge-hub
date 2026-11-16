@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from knowledge_hub.visibility import Visibility, can_read
 from tests.integration.test_search_ranking import (  # noqa: F401  (fixtures)
     add_derived,
     add_doc,
@@ -20,8 +21,7 @@ BASE = datetime(2026, 3, 1, tzinfo=UTC)
 
 
 def visible(caller, case: str) -> bool:
-    audiences, emails = CASES[case]
-    return set(audiences) <= caller.audiences and (emails is None or caller.email in emails)
+    return can_read(Visibility(*CASES[case]), caller.audiences, caller.email)
 
 
 @pytest.fixture
