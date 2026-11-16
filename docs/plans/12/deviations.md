@@ -48,4 +48,5 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- scope: No out-of-scope paths were recorded by any phase, so there is no scope drift to accept or revert.
+- final: main moved while the plan ran (any-of-audiences, PR 17); fix-3 merged it in and renumbered the plan migration to 0008. Full suite, 1279 passed, green after the merge.
