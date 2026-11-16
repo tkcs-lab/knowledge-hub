@@ -76,9 +76,9 @@ async def add_doc(
         await conn.execute(
             "INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, status, stale,"
             " owner, entities, commit_sha, content_sha, approved_by, approved_at, review_by,"
-            " required_audiences, allowed_emails)"
+            " stamp, required_audiences, allowed_emails)"
             " VALUES (%s, 'canonical-all', %s, %s, %s, %s, 'T', %s, %s, %s, 'team', %s, 'c1', %s,"
-            " '{x}', now(), '2027-01-01', %s, %s)",
+            " '{x}', now(), '2027-01-01', 'reviewed', %s, %s)",
             (doc, f"p/{doc}.md", str(doc), tier, domain, text, status, stale, list(entities),
              uuid.uuid4().hex, list(audiences), emails),
         )
@@ -163,6 +163,7 @@ async def test_t0_ranks_above_equally_relevant_t3(indexer_pool, mcp_client):
     assert not res.is_error, res.text
     assert ids(res) == [t0, t3]
     assert [h["tier"] for h in res.data["hits"]] == ["T0", "T3"]
+    assert [h["stamp"] for h in res.data["hits"]] == ["reviewed", ""]
 
 
 async def test_stale_ranks_below_current(indexer_pool, mcp_client):

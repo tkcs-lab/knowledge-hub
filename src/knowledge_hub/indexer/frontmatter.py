@@ -19,6 +19,7 @@ FORBIDDEN_KEYS = (
     "approved_at",
     "generated_by",
     "derived_from",
+    "stamp",
 )
 REQUIRED_KEYS = ("id", "title", "domain", "review_by")
 OPTIONAL_KEYS = ("type", "owner", "status", "entities", "supersedes", "superseded_by")

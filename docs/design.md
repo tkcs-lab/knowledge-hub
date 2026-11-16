@@ -48,7 +48,7 @@ This document records the decisions as built, the alternatives that were rejecte
 
 - The webhook only queues a job after checking the HMAC signature. Everything is re-fetched from Forgejo with the indexer token, and a push syncs the head of `main` as Forgejo reports it, not the payload.
 - For each canonical repo the walk follows the first-parent chain of `main` from the configured `trust_anchor` to HEAD. The anchor comes only from `kh.yaml`; `repo_state.trust_anchor_sha` is a display copy.
-- A commit after the anchor passes only if it is a merge commit of a pull request merged into `main` with that merge sha, and the PR has an official, non-dismissed `APPROVED` review on its final head sha by someone other than the author and `kh-hub-bot`.
+- A commit after the anchor passes only if it is a merge commit of a pull request merged into `main` with that merge sha, and one of two things holds. (a) The PR has an official, non-dismissed `APPROVED` review on its final head sha by someone other than the author and the bots (stamp `reviewed`). (b) Self-merge (stamp `owner_merge`): the author equals `merged_by`, the author is not a bot (`bot_logins`, `kh-hub-bot` always), and for every path the merge touched (tree comparison against the first parent, renames count both paths) the first matching rule of `owners.yml` at the first parent names a team in `self_merge_teams` that the author belongs to. Author and merger are the same person (ids when Forgejo gives them, else case-folded logins), the merge commit's second parent is the PR head, the PR has no `widen-audience` label, and the last commit that changed `owners.yml` was itself trusted. A missing or invalid `owners.yml` means no self-merge, and a PR cannot change the rules that judge it.
 - A file takes the verdict of the last first-parent commit that changed it. Files last changed at or before the anchor carry `approved_by = ['trust-anchor']`. A file changed by a merge without an approved PR is `disputed`.
 - A non-merge commit after the anchor, or an anchor not on the chain, marks the repo untrusted: every document is indexed `disputed` until an operator moves the anchor.
 - `trust_anchor: null` means no anchor, so every commit including the root must pass; in practice set an anchor.
@@ -58,7 +58,20 @@ This document records the decisions as built, the alternatives that were rejecte
 - `supersedes` and `superseded_by` resolve inside one repo only. Duplicate ids reject every file not last changed by an approved merge.
 - Document ids are scoped to a repo: `documents` is unique on `(repo, doc_key)`, `get_doc` takes the row's uuid and supersedes resolves in one repo, so the same id may exist in two repos without effect. There is therefore no cross-repo duplicate alert and no `index_alerts` row for it; `kh validate` checks id uniqueness only across the repos its token can read.
 - A T1 repo needs no approval but must be listed in config. T1 files are indexed from `last_indexed_sha` only.
-- `get_doc` serves the indexed copy. With `version=<sha>` it requires that sha in `document_versions` (checked through RLS) and returns the whole file with frontmatter, fetched from Forgejo; tier, status, approvals and `source_link` still come from the current row.
+- `get_doc` serves the indexed copy. With `version=<sha>` it requires that sha in `document_versions` (checked through RLS) and returns the whole file with frontmatter, fetched from Forgejo; tier, status, approvals, stamp and `source_link` come from the version row, not the current row.
+
+- Merge verdicts are stored in `kh.merge_verdicts` (readable by the indexer role only) at first judgement. Every sync and rebuild reuses them, and only `kh rebuild --rejudge` replaces them. See the [runbook](runbook.md).
+
+### Provenance stamp
+
+`stamp` says why a document is trusted. It is one of:
+
+- `reviewed`: a merge approved by someone other than the author.
+- `owner_merge`: the merge passed as a self-merge by an owner. This is an accountable decision by an owner and not a second-person review; the tier is still T0 and `approved_by` is the merger.
+- `anchor`: the document was last changed at or before the trust anchor (`approved_by` is `['trust-anchor']`).
+- empty: disputed documents and records of other tiers.
+
+`search` and `get_doc` return `stamp` next to `approved_by`.
 
 ## Provenance exception
 
