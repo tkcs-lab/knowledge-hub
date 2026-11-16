@@ -17,6 +17,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p3-agent-rules
 
 - None.
+- final: Final review: a rationale line "Reason for widening: x" could satisfy the widening check through the PR body; fixed by fix-2 (rationale lines made inert, test added).
 
 ## p4-agent-store
 
