@@ -58,4 +58,5 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- review: dod: ruff passes; full pytest -q gives 368 passed and 558 errors, all integration tests, because the PostgreSQL on this machine has no pgvector extension (vector.control missing); unit tests pass
+- scope: scope disposition: fix-1 changed 3 paths outside p2 touches (deploy/kh.example.yaml, docs/configuration.md, tests/unit/test_deploy_files.py), accepted
