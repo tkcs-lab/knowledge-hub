@@ -256,6 +256,33 @@ async def test_narrowing_a_repo_audience_narrows_documents_and_their_derived_row
     assert admin.execute("SELECT required_audiences FROM kh.chunks").fetchall() == [(["mgmt"],)]
 
 
+async def test_proposal_audiences_follow_the_repo_audience_in_the_config(admin, indexer_pool):
+    def cfg(aud):
+        return parse_config(
+            {"repos": {"canonical-all": {"tier": "T0", "audience": aud, "trust_anchor": "a0"}}}
+        )
+
+    def proposal(repo, aud):
+        pid = uid()
+        insert(
+            admin,
+            "proposals",
+            dict(
+                id=pid, kind="doc", state="pending", repo=repo, path="p.md", doc_key=uid(),
+                domain="product", title="t", content_sha="s", dedupe_key=uid(),
+                requester_login="alice", created_by_sub="alice", required_audiences=[aud],
+            ),
+        )
+        return pid
+
+    inside, outside = proposal("canonical-all", "all"), proposal("gone-repo", "hr")
+    await recompute_visibility(indexer_pool, cfg("mgmt"))
+    assert vis(admin, "proposals", inside) == (["mgmt"], None)
+    assert vis(admin, "proposals", outside) == (["hr"], None)  # a repo outside the config is left alone
+    await recompute_visibility(indexer_pool, cfg("all"))
+    assert vis(admin, "proposals", inside) == (["all"], None)
+
+
 async def test_deleting_a_cited_document_never_widens(admin, indexer_pool):
     cfg = parse_config({"repos": {"canonical-all": {"tier": "T0", "audience": "mgmt", "trust_anchor": "a0"}}})
     d = doc(admin, ("mgmt",))
