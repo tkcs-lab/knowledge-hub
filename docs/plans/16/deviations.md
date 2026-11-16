@@ -60,7 +60,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p13-docs
 
-- pending
+- None.
 
 ## Final review
 
