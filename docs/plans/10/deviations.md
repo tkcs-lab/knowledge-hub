@@ -20,7 +20,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9-privacyfence-docs
 
-- pending
+- worker: none
+- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check
 
 ## p3-schema-render
 
