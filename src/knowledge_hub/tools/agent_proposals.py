@@ -7,8 +7,6 @@ failed Forgejo write leaves a ``failed`` row for the retry; the transaction ``to
 used for reads only.
 """
 
-from __future__ import annotations
-
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
