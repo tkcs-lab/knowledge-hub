@@ -69,7 +69,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: First review: 1 blocking (p3 render.py: a rationale line "Reason for widening: x" passed the widening check); fixed by fix-2.
 
 ## Finishing
 
