@@ -12,6 +12,12 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `kh validate --repo R --base B --head H` checks the markdown files a pull request changes in a canonical repository, prints one `path: reason` line per problem, exits 0, 1 or 2 and posts the `kh/validate` commit status.
 - `kh domain-owners --repo R --pr N` checks that the teams named in `owners.yml` (and, for a `widen-audience/<audience>` label, the audience's owner teams) have approved the current head of a pull request, prints one line per missing approval and posts the `kh/domain-owners` commit status.
 
+### Changed
+
+- `generated_by` and `derived_from` are forbidden frontmatter keys, like the other keys the server writes.
+- The indexer skips paths with a dot-prefixed segment, so `.forgejo/pull_request_template.md` raises no alert.
+- The PrivacyFence declaration example sets `email_for_visibility: true`.
+
 ## [0.1.1] - 2026-11-16
 
 ### Changed

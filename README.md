@@ -35,6 +35,9 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 | `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
 | `kh recompute-visibility` | Rewrite visibility from the config. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
+| `kh validate` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. See [governance](docs/governance.md). |
+| `kh domain-owners` | CI gate: owner-team approvals of a pull request. See [governance](docs/governance.md). |
+| `kh governance render` | Write the seed files (schema, `owners.yml`, CODEOWNERS, PR template, workflow) of a canonical repo. See [governance](docs/governance.md). |
 
 ## Documentation
 
