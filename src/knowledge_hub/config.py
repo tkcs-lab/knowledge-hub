@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 
 class ConfigError(ValueError):
@@ -28,6 +29,34 @@ def _default_repos() -> dict[str, RepoConfig]:
     return repos
 
 
+ENTITY_KIND_RE = re.compile(r"[a-z][a-z0-9_-]{0,15}")
+GRIST_TABLE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+ENTITY_LABEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
+RESERVED_ENTITY_KINDS = frozenset({"doc", "raw", "derived"})
+MAX_ENTITY_KINDS = 32
+LEGACY_ENTITY_KINDS: dict[str, tuple[str, str]] = {
+    "prd": ("Products", "product"),
+    "cmp": ("Components", "component"),
+    "ver": ("Versions", "version"),
+    "cus": ("Customers", "customer"),
+}
+
+
+class EntityKind(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    table: str
+    audiences: list[str]
+    label: str | None = None
+
+
+def _default_entities() -> dict[str, EntityKind]:
+    audiences = {"prd": ["all"], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]}
+    return {
+        kind: EntityKind(table=table, audiences=audiences[kind], label=label)
+        for kind, (table, label) in LEGACY_ENTITY_KINDS.items()
+    }
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audiences: list[str] = ["all", "mgmt", "hr", "contracts"]
@@ -37,13 +66,26 @@ class Config(BaseModel):
     raw_audience_map: dict[str, list[str]] = {}
     ingest_principal_types: list[str] = ["n8n_workflow"]
     restricted_audiences_imply_all: bool = False
-    entities: dict[Literal["prd", "cmp", "ver", "cus"], list[str]] = {
-        "prd": ["all"],
-        "cmp": ["all"],
-        "ver": ["all"],
-        "cus": ["contracts"],
-    }
+    entities: dict[str, EntityKind] = _default_entities()
     forgejo_web_url: str | None = None
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def _legacy_entity_lists(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        out: dict[Any, Any] = {}
+        for kind, spec in value.items():
+            if isinstance(spec, list):
+                if kind not in LEGACY_ENTITY_KINDS:
+                    raise ValueError(
+                        f"entities {kind}: the list form is only for prd, cmp, ver and cus; "
+                        "use {table, audiences}"
+                    )
+                table, label = LEGACY_ENTITY_KINDS[kind]
+                spec = {"table": table, "audiences": spec, "label": label}
+            out[kind] = spec
+        return out
 
     @model_validator(mode="after")
     def _validate(self) -> Config:
@@ -63,8 +105,32 @@ class Config(BaseModel):
             for a in auds:
                 if a not in known:
                     raise ValueError(f"raw_audience_map {key} has unknown audience {a!r}")
-        for kind, auds in self.entities.items():
-            for a in auds:
+        if not self.entities:
+            raise ValueError("entities must name at least one kind")
+        if len(self.entities) > MAX_ENTITY_KINDS:
+            raise ValueError(f"entities has more than {MAX_ENTITY_KINDS} kinds")
+        tables: dict[str, str] = {}
+        for kind, spec in self.entities.items():
+            if not ENTITY_KIND_RE.fullmatch(kind):
+                raise ValueError(
+                    f"entities kind {kind!r} must be 1-16 lowercase letters, digits, '_' or '-', "
+                    "starting with a letter"
+                )
+            if kind in RESERVED_ENTITY_KINDS:
+                raise ValueError(f"entities kind {kind!r} is reserved")
+            if not GRIST_TABLE_RE.fullmatch(spec.table):
+                raise ValueError(
+                    f"entities {kind} table {spec.table!r} must be letters, digits or '_', "
+                    "starting with a letter"
+                )
+            if spec.table in tables:
+                raise ValueError(
+                    f"entities {tables[spec.table]} and {kind} use the same table {spec.table!r}"
+                )
+            tables[spec.table] = kind
+            if spec.label is not None and not ENTITY_LABEL_RE.fullmatch(spec.label):
+                raise ValueError(f"entities {kind} label must be 1-40 characters without control characters")
+            for a in spec.audiences:
                 if a not in known:
                     raise ValueError(f"entities {kind} has unknown audience {a!r}")
         for p in self.ingest_principal_types:
