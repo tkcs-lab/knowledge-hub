@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- Forgejo client: compare files, branch head lookup, team and membership reads, and `post_status` guarded to the `kh/validate` and `kh/domain-owners` contexts.
+
 ## [0.1.1] - 2026-11-16
 
 ### Changed
