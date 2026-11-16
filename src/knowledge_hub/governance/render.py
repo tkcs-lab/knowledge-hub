@@ -15,6 +15,8 @@ _REVIEW_LINES = (
     "  pull_request_review:\n"
     "    types: [submitted, dismissed]\n"
 )
+RUNNER_LABEL = "kh-validate:host"
+_RUNNER = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}(:host)?")
 _MARKER_LINE = "{{REVIEW_TRIGGER}}\n"
 
 
@@ -34,9 +36,12 @@ def render_governance(
     owner_team: str | None = None,
     admin_team: str = "kh-admins",
     review_trigger: bool = False,
+    runner_label: str = RUNNER_LABEL,
 ) -> list[Path]:
     if not _AUDIENCE.match(audience):
         raise ValueError("render: audience must match ^[a-z0-9][a-z0-9_-]{0,62}$")
+    if not _RUNNER.fullmatch(runner_label):
+        raise ValueError("render: runner label must match ^[a-z0-9][a-z0-9._-]{0,62}(:host)?$")
     owners = build_owners(
         audience,
         portfolio_team=portfolio_team,
@@ -46,6 +51,7 @@ def render_governance(
         admin_team=admin_team,
     )
     workflow = _template("kh.yml.tmpl").replace(_MARKER_LINE, _REVIEW_LINES if review_trigger else "")
+    workflow = workflow.replace("{{RUNS_ON}}", runner_label.partition(":")[0])
     contents = {
         Path("schema/frontmatter.schema.json"): dump_schema(),
         Path("owners.yml"): dump_owners(owners),

@@ -10,6 +10,7 @@ from knowledge_hub.auth.claims import (
     ClaimMiddleware,
     InMemoryReplayCache,
     KhAuthError,
+    _build_caller,
     caller_from_scope,
 )
 from knowledge_hub.auth.pf_claim_verify import CLAIM_HEADER, ClaimVerifier, request_hash
@@ -237,3 +238,15 @@ def test_http_jwks_url_with_other_host_than_issuer_is_accepted():
     principal = verifier.verify(token, body=call_body("search", ARGS))
     assert principal.sub == "person"
     assert fetched == [url]
+
+
+@pytest.mark.parametrize(
+    ("ptype", "email", "expected"),
+    [
+        ("claude_client", "Dev@Example.org", "dev@example.org"),
+        ("n8n_workflow", "wf@example.org", None),
+        ("service", "svc@example.org", None),
+    ],
+)
+def test_email_kept_only_for_claude_client(ptype, email, expected):
+    assert _build_caller("sub", ptype, email, ["all"], None, None).email == expected

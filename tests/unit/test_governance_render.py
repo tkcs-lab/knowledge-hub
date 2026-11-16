@@ -36,6 +36,35 @@ def test_golden(tmp_path, repo, audience):
         assert (out / rel).read_bytes() == (golden / rel).read_bytes(), rel
 
 
+AUDIENCES = ["all", "mgmt", "hr", "contracts"]
+WORKFLOW = Path(".forgejo/workflows/kh.yml")
+
+
+@pytest.mark.parametrize("audience", AUDIENCES)
+def test_runner_label_golden(tmp_path, audience):
+    out = tmp_path / "out"
+    render_governance(
+        out, repo=f"canonical-{audience}", audience=audience, runner_label=f"kh-validate-{audience}:host"
+    )
+    golden = GOLDEN / "runner-label" / audience / "kh.yml"
+    if os.environ.get("KH_UPDATE_GOLDEN") == "1":
+        golden.parent.mkdir(parents=True, exist_ok=True)
+        golden.write_bytes((out / WORKFLOW).read_bytes())
+        return
+    assert (out / WORKFLOW).read_bytes() == golden.read_bytes()
+    default = tmp_path / "default"
+    render_governance(default, repo=f"canonical-{audience}", audience=audience)
+    for rel in _files(out):
+        if rel != str(WORKFLOW):
+            assert (out / rel).read_bytes() == (default / rel).read_bytes(), rel
+
+
+@pytest.mark.parametrize("label", ["", "Bad Label", "kh-validate:docker", "a;b", "kh-validate\n"])
+def test_runner_label_rejected(tmp_path, label):
+    with pytest.raises(ValueError, match="runner label must match"):
+        render_governance(tmp_path, repo="r", audience="all", runner_label=label)
+
+
 def test_review_trigger(tmp_path):
     render_governance(tmp_path / "on", repo="r", audience="all", review_trigger=True)
     render_governance(tmp_path / "off", repo="r", audience="all")
@@ -84,3 +113,8 @@ def test_cli(tmp_path, capsys):
     assert (tmp_path / ".forgejo/CODEOWNERS").is_file()
     assert main(["governance", "render", "--repo", "r", "--audience", "BAD", "--out", str(tmp_path)]) == 2
     assert "audience must match" in capsys.readouterr().err
+    main_argv = [*argv[:-1], str(tmp_path / "rl"), "--runner-label", "kh-validate-hr:host"]
+    assert main(main_argv) == 0
+    assert "runs-on: kh-validate-hr\n" in (tmp_path / "rl" / WORKFLOW).read_text()
+    assert main([*argv[:-1], str(tmp_path / "bad"), "--runner-label", "Bad Label"]) == 2
+    assert "runner label must match" in capsys.readouterr().err

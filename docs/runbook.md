@@ -20,7 +20,7 @@ Not run in the cloud, so yours to do and check by hand: the Dockerfile build, an
    Check with `docker compose exec ollama ollama list`. Ollama's documentation shows no one-off pull; this is the usual way and is confirmed on the first deploy. Until the model is available, embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. Embedding runs on the CPU and no speed is measured yet. To measure it on the host: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second; a `kh rebuild` takes about the number of chunks (`SELECT count(*) FROM kh.chunks`) divided by that. Watch `docker stats` during the first rebuild to confirm the 3 GB limit.
 6. **Index and record the config.** Run `kh rebuild`, then `kh recompute-visibility` **once**. The audience-map loader does not recompute visibility when no `__config__` hash is stored, so until you run it `kh check` reports config drift. Then run `kh check` and expect exit 0.
 7. **Webhook.** In Forgejo set an organisation webhook to `http://knowledge-hub:8080/webhooks/forgejo` with the secret from `kh_webhook_hmac`, for push and pull request events.
-8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups). The example declaration already sets `email_for_visibility: true`.
+8. **PrivacyFence.** Declare the hub as an upstream and map groups to audiences (section "PrivacyFence setup"), restart PrivacyFence, then create the n8n token (PrivacyFence follow-ups). The declaration must carry `email_for_visibility: true`: without it no caller sees attendee-only records.
 
 ## Bootstrapping the trust anchor
 
@@ -33,6 +33,8 @@ A fresh Forgejo has no reviewed history, so a T0 repo has no real `trust_anchor`
 Setting an anchor trusts everything up to and including that commit: read the commit first.
 
 ## PrivacyFence setup
+
+The declaration must carry `email_for_visibility: true`: without it no caller sees attendee-only records.
 
 Copy `deploy/privacyfence-upstream.example.yaml` to the PrivacyFence host, set `PRIVACYFENCE_UPSTREAM_MCP_FILE` to it and restart PrivacyFence; the file and the hub's tool list are read at startup only. Its `audience` equals `KH_PF_AUDIENCE`. Then map Workspace groups to the hub's audiences in PrivacyFence's `admin_config.json` (re-read when it changes; edit it while nobody is saving on the Admin page):
 

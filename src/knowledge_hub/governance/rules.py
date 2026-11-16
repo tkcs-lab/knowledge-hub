@@ -60,6 +60,14 @@ def parse_layout(path: str, domains: list[str]) -> Layout | None:
     return Layout(parts[0], product, component, kind, stem, is_adr, False)
 
 
+def entity_kind_allowed(config: Config, kind: str, repo_audience: str) -> bool:
+    """True when documents of ``repo_audience`` may cite entities of ``kind``."""
+    spec = config.entities.get(kind)
+    if spec is None:
+        return False
+    return spec.reference_audiences is None or repo_audience in spec.reference_audiences
+
+
 def id_from_path(path: str, domains: list[str]) -> str | None:
     layout = parse_layout(path, domains)
     if layout is None:
@@ -154,8 +162,7 @@ def _validate_one(
             add(Code.ENTITY_FORMAT, ref)
             continue
         kind = ref.split(":", 1)[0]
-        spec = config.entities[kind]
-        if spec.reference_audiences is not None and repo_audience not in spec.reference_audiences:
+        if not entity_kind_allowed(config, kind, repo_audience):
             add(Code.ENTITY_NOT_ALLOWED, ref)
         elif ref not in entity_keys.get(kind, ()):
             add(Code.ENTITY_NOT_FOUND, ref)

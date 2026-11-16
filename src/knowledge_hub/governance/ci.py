@@ -21,7 +21,13 @@ from knowledge_hub.governance.messages import (
 )
 from knowledge_hub.governance.owners import load_owners
 from knowledge_hub.governance.owners_check import check_owners
-from knowledge_hub.governance.rules import FileInput, id_from_path, parse_layout, validate_files
+from knowledge_hub.governance.rules import (
+    FileInput,
+    entity_kind_allowed,
+    id_from_path,
+    parse_layout,
+    validate_files,
+)
 from knowledge_hub.grist.client import GristClient
 from knowledge_hub.indexer.frontmatter import ParsedDoc, parse_document
 
@@ -47,10 +53,20 @@ def _is_404(exc: ForgejoError) -> bool:
     return "HTTP 404" in str(exc)
 
 
+def _not_visible(exc: ForgejoError) -> bool:
+    """The token cannot see the repository (403 or 404)."""
+    text = str(exc)
+    return text.endswith("HTTP 403") or text.endswith("HTTP 404")
+
+
 async def build_id_index(
     read: ForgejoClient, config: Config, own_repo: str, head: str
 ) -> tuple[dict[str, list[str]], set[str]]:
-    """(id to paths in the own repo's head tree, ids of every other T0 repo's main tree)."""
+    """(id to paths in the own repo's head tree, ids of the other T0 repos the token can read).
+
+    A repository the token cannot see (403 or 404) is skipped: the check is best effort across
+    audiences, and the hub scopes document ids per repo.
+    """
 
     async def tree(repo: str) -> list[dict[str, Any]] | None:
         try:
@@ -62,9 +78,11 @@ async def build_id_index(
                 return None
             return await read.list_tree(repo, sha)
         except ForgejoError as exc:
-            if repo != own_repo and _is_404(exc):
+            if repo == own_repo:
+                raise
+            if _not_visible(exc):
                 return None
-            raise
+            raise CiError("another repository could not be read") from None
 
     others = [r for r, spec in config.repos.items() if spec.tier == "T0" and r != own_repo]
     results = await asyncio.gather(tree(own_repo), *(tree(r) for r in others))
@@ -142,7 +160,12 @@ async def _validate(
                     kinds.add(kind)
         doc = parse_document(f.text, f.path, config.domains)
         if isinstance(doc, ParsedDoc):
-            kinds.update(k for k in (ref.partition(":")[0] for ref in doc.entities) if k in config.entities)
+            audience = config.repos[repo].audience
+            kinds.update(
+                k
+                for k in (ref.partition(":")[0] for ref in doc.entities)
+                if entity_kind_allowed(config, k, audience)
+            )
     ordered = sorted(kinds)
     tables = await asyncio.gather(*(grist.fetch_table(config.entities[k].table) for k in ordered))
     entity_keys: dict[str, set[str]] = {}

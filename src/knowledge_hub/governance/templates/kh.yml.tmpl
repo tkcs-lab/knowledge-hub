@@ -13,7 +13,7 @@ on:
 jobs:
   validate:
     if: github.event_name == 'pull_request_target'
-    runs-on: kh-validate
+    runs-on: {{RUNS_ON}}
     steps:
       - name: kh validate
         env:
@@ -42,7 +42,7 @@ jobs:
           kh validate --repo "$REPO" --forgejo-org "$ORG" --base "$BASE" --head "$HEAD" --forgejo-url "$FORGEJO_URL" --token-file "$dir/token" --grist-url "$GRIST_URL" --grist-key-file "$dir/grist" --grist-doc-id "$GRIST_DOC" ${extra[@]+"${extra[@]}"}
 
   domain-owners:
-    runs-on: kh-validate
+    runs-on: {{RUNS_ON}}
     steps:
       - name: kh domain-owners
         env:

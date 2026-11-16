@@ -55,6 +55,7 @@ This document records the decisions as built, the alternatives that were rejecte
 - `generated_by` and `derived_from` are also forbidden (the server writes provenance), and paths with a dot-prefixed segment (`.forgejo/...`) are not indexed. The CI gate is described in [governance](governance.md).
 - Frontmatter may not set `tier`, `audience`, `visibility`, `approved_by` and similar keys (the file is rejected), and may not set `status: disputed`. The server decides tier and audience from the repo.
 - `supersedes` and `superseded_by` resolve inside one repo only. Duplicate ids reject every file not last changed by an approved merge.
+- Document ids are scoped to a repo: `documents` is unique on `(repo, doc_key)`, `get_doc` takes the row's uuid and supersedes resolves in one repo, so the same id may exist in two repos without effect. There is therefore no cross-repo duplicate alert and no `index_alerts` row for it; `kh validate` checks id uniqueness only across the repos its token can read.
 - A T1 repo needs no approval but must be listed in config. T1 files are indexed from `last_indexed_sha` only.
 - `get_doc` serves the indexed copy. With `version=<sha>` it requires that sha in `document_versions` (checked through RLS) and returns the whole file with frontmatter, fetched from Forgejo; tier, status, approvals and `source_link` still come from the current row.
 
@@ -95,7 +96,7 @@ One statement inside `caller_tx`: an exact vector order (no ANN index) fused by 
 
 PrivacyFence 8.0.0a3 ships the opt-in key `email_for_visibility` (PrivacyFence ADR 0310). The declaration sets it, so PrivacyFence puts the verified email in the claim for this upstream.
 
-A change of how PrivacyFence fills `email` changes who sees attendee-only rows.
+What the hub relies on: `email` is lower-cased; it is ASCII only; it is present only for `claude_client` (the hub also drops it for every other principal, `auth/claims.py`); a change to any of these is a breaking contract change in PrivacyFence.
 
 ## Rejected alternatives
 
