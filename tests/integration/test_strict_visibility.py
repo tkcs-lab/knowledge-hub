@@ -69,6 +69,53 @@ def test_union_of_audiences(fresh_db, admin):  # noqa: F811
     assert sv(fresh_db, both, ids) == (2, ["hr", "mgmt"], None)
 
 
+def _readable(cluster, who, table):
+    with app_conn(cluster, who) as conn:
+        return {str(r[0]) for r in conn.execute(f"SELECT id FROM kh.{table}")}
+
+
+def test_mgmt_and_finance_sources_are_hidden_from_mgmt_only(fresh_db, admin):  # noqa: F811
+    d1, d2 = doc(admin, ("mgmt",)), doc(admin, ("finance",))
+    mgmt_only, both = caller(("mgmt",)), caller(("finance", "mgmt"))
+    ids = [f"doc:{d1}", f"doc:{d2}"]
+    assert sv(fresh_db, both, ids) == (2, ["finance", "mgmt"], None)
+    assert sv(fresh_db, mgmt_only, ids) == (1, ["mgmt"], None)
+    cid, kid = uid(), uid()
+
+    def body():
+        candidate_row(admin, ("finance", "mgmt"), None, cid=cid)
+        conflict_row(admin, ("finance", "mgmt"), None, cid=kid)
+        for sid in (d1, d2):
+            candidate_source(admin, cid, "doc", sid)
+            conflict_item(admin, kid, "doc", sid)
+
+    assert commit_error(admin, body) is None
+    for table, rid in (("candidates", cid), ("conflicts", kid)):
+        assert rid not in _readable(fresh_db, mgmt_only, table)
+        assert rid in _readable(fresh_db, both, table)
+
+
+def test_any_of_source_and_hr_source_need_one_of_each(fresh_db, admin):  # noqa: F811
+    d1, d2 = doc(admin, ("finance|mgmt",)), doc(admin, ("hr",))
+    ids = [f"doc:{d1}", f"doc:{d2}"]
+    mgmt_hr, mgmt_only = caller(("hr", "mgmt")), caller(("mgmt",))
+    assert sv(fresh_db, mgmt_hr, ids) == (2, ["finance|mgmt", "hr"], None)
+    assert sv(fresh_db, mgmt_only, ids) == (1, ["finance|mgmt"], None)
+    cid, kid = uid(), uid()
+
+    def body():
+        candidate_row(admin, ("finance|mgmt", "hr"), None, cid=cid)
+        conflict_row(admin, ("finance|mgmt", "hr"), None, cid=kid)
+        for sid in (d1, d2):
+            candidate_source(admin, cid, "doc", sid)
+            conflict_item(admin, kid, "doc", sid)
+
+    assert commit_error(admin, body) is None
+    for table, rid in (("candidates", cid), ("conflicts", kid)):
+        assert rid in _readable(fresh_db, mgmt_hr, table)
+        assert rid not in _readable(fresh_db, mgmt_only, table)
+
+
 def test_intersection_of_email_lists(fresh_db, admin):  # noqa: F811
     who = caller(("all",), "dave@example.org")
     a = doc(admin, (), ["a@example.org", "dave@example.org"])
