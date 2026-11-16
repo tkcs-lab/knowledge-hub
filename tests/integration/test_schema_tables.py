@@ -9,9 +9,9 @@ EXPECTED = {
     "documents": ["id", "repo", "path", "doc_key", "tier", "domain", "title", "body", "frontmatter",
                   "status", "stale", "review_by", "owner", "entities", "supersedes", "superseded_by",
                   "commit_sha", "content_sha", "approved_by", "approved_at", "merge_pr", "pr_url",
-                  "indexed_at", "updated_at"] + VIS,
+                  "indexed_at", "updated_at"] + VIS + ["stamp"],
     "document_versions": ["document_id", "commit_sha", "path", "tier", "status", "approved_by",
-                          "approved_at", "indexed_at"],
+                          "approved_at", "indexed_at", "stamp"],
     "chunks": ["id", "document_id", "raw_id", "derived_id", "entities", "ordinal", "heading_path",
                "text", "content_sha", "embedding", "embedding_model", "tsv", "owner_key",
                "owner_created_at", "tier", "domain", "status", "stale", "superseded"] + VIS,
@@ -39,6 +39,8 @@ EXPECTED = {
     "repo_state": ["repo", "trust_anchor_sha", "last_indexed_sha", "trusted", "untrusted_reason",
                    "config_hash"],
     "index_alerts": ["id", "repo", "path", "message", "created_at"],
+    "merge_verdicts": ["repo", "merge_sha", "pr_number", "status", "stamp", "reason", "approved_by",
+                       "approved_at", "pr_url", "judged_at"],
 }
 
 OPEN = {"required_audiences": [], "allowed_emails": None}
