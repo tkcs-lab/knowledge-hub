@@ -8,6 +8,7 @@ from knowledge_hub.governance.messages import Code, Finding, render_line, sort_f
 from knowledge_hub.governance.owners import build_owners
 from knowledge_hub.governance.rules import (
     FileInput,
+    entity_kind_allowed,
     expected_type,
     id_from_path,
     parse_layout,
@@ -139,3 +140,20 @@ def test_render_and_sort():
         "a.md: frontmatter: oops",
         "b.md: owner must be x",
     ]
+
+
+@pytest.mark.parametrize("audience", ["all", "mgmt", "hr", "contracts"])
+def test_entity_kind_allowed_unrestricted_kinds(audience):
+    assert entity_kind_allowed(CONFIG, "prd", audience)
+    assert entity_kind_allowed(CONFIG, "cmp", audience)
+
+
+def test_entity_kind_allowed_unlisted_kind():
+    assert not entity_kind_allowed(CONFIG, "zzz", "all")
+
+
+@pytest.mark.parametrize(
+    ("audience", "expected"), [("contracts", True), ("mgmt", True), ("all", False), ("hr", False)]
+)
+def test_entity_kind_allowed_cus_default(audience, expected):
+    assert entity_kind_allowed(CONFIG, "cus", audience) is expected

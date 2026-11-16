@@ -137,6 +137,7 @@ def _governance(args: argparse.Namespace) -> int:
             owner_team=args.owner_team,
             admin_team=args.admin_team,
             review_trigger=args.review_trigger,
+            runner_label=args.runner_label,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)
@@ -279,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--owner-team")
     render.add_argument("--admin-team", default="kh-admins")
     render.add_argument("--review-trigger", action="store_true")
+    render.add_argument("--runner-label", default="kh-validate:host")
     val = sub.add_parser("validate")
     for flag in ("--repo", "--base", "--head"):
         val.add_argument(flag, required=True)

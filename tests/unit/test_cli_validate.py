@@ -193,6 +193,68 @@ async def test_id_index_skips_missing_branch_and_404():
     assert await build_id_index(read, CONFIG, "canonical-all", "head") == ({}, set())
 
 
+@pytest.mark.parametrize(
+    "fail",
+    [{"canonical-hr/git/trees": 403}, {"canonical-hr/git/trees": 404}, {"canonical-hr/branches": 403}],
+)
+async def test_id_index_skips_repo_the_token_cannot_see(fail):
+    fake = FakeForgejoHttp(world({}, [], {"canonical-hr": repo({"x.md": "x"})}), fail=fail)
+    read, _, _ = clients(fake, {})
+    assert await build_id_index(read, CONFIG, "canonical-all", "head") == ({}, set())
+
+
+async def test_clean_pr_passes_when_other_repos_are_hidden():
+    p = path_of("good")
+    fail = {"canonical-mgmt/": 403, "canonical-hr/": 403, "canonical-contracts/": 403}
+    fake = FakeForgejoHttp(world({p: doc("good")}, [p]), fail=fail)
+    result = await run(fake)
+    assert result.ok and result.lines == []
+    assert [s["state"] for s in fake.statuses] == ["success"]
+
+
+async def test_unreadable_other_repo_error_names_nothing():
+    p = path_of("good")
+    fake = FakeForgejoHttp(world({p: doc("good")}, [p]), fail={"canonical-hr/branches": 500})
+    with pytest.raises(CiError) as info:
+        await run(fake)
+    assert str(info.value) == "another repository could not be read"
+    assert info.value.__cause__ is None
+    assert [s["state"] for s in fake.statuses] == ["error"]
+
+
+async def test_cus_without_customers_table_is_not_allowed_and_not_read():
+    p = path_of("cites")
+    fake = FakeForgejoHttp(world({p: doc("cites", entities=["cus:acme"])}, [p]))
+    t = grist_transport({"Products": ["prd:alpha"], "Components": ["cmp:api"]})
+    grist = GristClient("http://g", "doc", "k", transport=t)
+    read = ForgejoClient("http://f", "t", "kh", transport=fake.transport)
+    status = ForgejoClient("http://f", "t", "kh", transport=fake.transport)
+    result = await run_validate(read, status, grist, CONFIG, "canonical-all", "base", "head")
+    assert result.lines == [f"{p}: entity cus:acme is not allowed in this repository"]
+    assert not any("Customers" in r.url.path for r in t.requests)
+
+
+async def test_cus_is_read_and_accepted_where_the_audience_may_cite_it():
+    p = path_of("cites")
+    w = {
+        "canonical-contracts": repo(
+            {"owners.yml": OWNERS_YML, p: doc("cites", entities=["cus:acme", "prd:alpha"])},
+            [{"filename": p, "status": "added"}],
+        ),
+        "canonical-all": repo({}),
+        "canonical-mgmt": repo({}),
+        "canonical-hr": repo({}),
+    }
+    fake = FakeForgejoHttp(w)
+    t = grist_transport(TABLES)
+    grist = GristClient("http://g", "doc", "k", transport=t)
+    read = ForgejoClient("http://f", "t", "kh", transport=fake.transport)
+    status = ForgejoClient("http://f", "t", "kh", transport=fake.transport)
+    result = await run_validate(read, status, grist, CONFIG, "canonical-contracts", "base", "head")
+    assert result.lines == [] and result.ok
+    assert any("Customers" in r.url.path for r in t.requests)
+
+
 @pytest.mark.parametrize("collide_in", ["other", "same"])
 async def test_no_leak(collide_in):
     p = "technical/gateway/api/adr/0001-use-grpc.md"

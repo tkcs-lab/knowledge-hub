@@ -57,7 +57,9 @@ def test_tool_rules_follow_the_privacyfence_loader():
             assert name in WRITE_TOOLS, name
 
 
-def test_email_for_visibility():
+def test_identity_declaration():
+    assert UPSTREAM["identity_claim"] == "required"
+    assert UPSTREAM["allowed_principal_types"] == ["claude_client", "n8n_workflow"]
     assert UPSTREAM["email_for_visibility"] is True
 
 
