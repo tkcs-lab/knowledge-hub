@@ -47,14 +47,37 @@ class EntityKind(BaseModel):
     table: str
     audiences: list[str]
     label: str | None = None
+    reference_audiences: list[str] | None = None
 
 
 def _default_entities() -> dict[str, EntityKind]:
     audiences = {"prd": ["all"], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]}
     return {
-        kind: EntityKind(table=table, audiences=audiences[kind], label=label)
+        kind: EntityKind(
+            table=table,
+            audiences=audiences[kind],
+            label=label,
+            reference_audiences=["contracts", "mgmt"] if kind == "cus" else None,
+        )
         for kind, (table, label) in LEGACY_ENTITY_KINDS.items()
     }
+
+
+TEAM_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+
+
+class GovernanceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_teams: dict[str, list[str]] = {}
+
+    @field_validator("owner_teams")
+    @classmethod
+    def _team_names(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        for teams in value.values():
+            for team in teams:
+                if not TEAM_RE.fullmatch(team):
+                    raise ValueError(f"governance owner_teams team {team!r} is not a valid team name")
+        return value
 
 
 class Config(BaseModel):
@@ -68,6 +91,7 @@ class Config(BaseModel):
     restricted_audiences_imply_all: bool = False
     entities: dict[str, EntityKind] = _default_entities()
     forgejo_web_url: str | None = None
+    governance: GovernanceConfig = GovernanceConfig()
 
     @field_validator("entities", mode="before")
     @classmethod
@@ -84,6 +108,8 @@ class Config(BaseModel):
                     )
                 table, label = LEGACY_ENTITY_KINDS[kind]
                 spec = {"table": table, "audiences": spec, "label": label}
+                if kind == "cus":
+                    spec["reference_audiences"] = ["contracts", "mgmt"]
             out[kind] = spec
         return out
 
@@ -133,10 +159,25 @@ class Config(BaseModel):
             for a in spec.audiences:
                 if a not in known:
                     raise ValueError(f"entities {kind} has unknown audience {a!r}")
+            for a in spec.reference_audiences or []:
+                if a not in known:
+                    raise ValueError(f"entities {kind} has unknown reference audience {a!r}")
+        for a in self.governance.owner_teams:
+            if a not in known:
+                raise ValueError(f"governance owner_teams has unknown audience {a!r}")
         for p in self.ingest_principal_types:
             if p != "n8n_workflow":
                 raise ValueError(f"ingest_principal_types value {p!r} is not allowed; only n8n_workflow")
         return self
+
+
+def owner_teams_for(config: Config, audience: str) -> list[str]:
+    configured = config.governance.owner_teams.get(audience)
+    if configured:
+        return list(configured)
+    if audience == "all":
+        return ["owners-portfolio", "owners-product", "owners-technical"]
+    return [f"owners-{audience}"]
 
 
 def _wrap(exc: ValidationError) -> ConfigError:
