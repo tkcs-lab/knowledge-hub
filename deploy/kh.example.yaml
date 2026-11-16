@@ -14,9 +14,10 @@ repos:
 raw_audience_map: {}
 ingest_principal_types: [n8n_workflow]
 restricted_audiences_imply_all: false
+# Entity kinds: prefix -> Grist table, audiences, optional label. The list form "prd: [all]" still works for prd, cmp, ver and cus.
 entities:
-  prd: [all]
-  cmp: [all]
-  ver: [all]
-  cus: [contracts]
+  prd: {table: Products, audiences: [all], label: product}
+  cmp: {table: Components, audiences: [all], label: component}
+  ver: {table: Versions, audiences: [all], label: version}
+  cus: {table: Customers, audiences: [contracts], label: customer}
 forgejo_web_url: null

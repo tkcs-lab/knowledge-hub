@@ -94,7 +94,7 @@ A partial S3 setting is a startup error. With no S3 setting the raw-record tools
 | Variable | Default | Meaning |
 |---|---|---|
 | `KH_GRIST_URL` | none | Grist base URL. |
-| `KH_GRIST_DOC_ID` | none | Document with the tables `Products`, `Components`, `Versions`, `Customers`. |
+| `KH_GRIST_DOC_ID` | none | Document that holds the Grist table of every kind in `entities` (by default `Products`, `Components`, `Versions`, `Customers`). |
 | `KH_GRIST_KEY_FILE` | none | API key file. `kh daily` exits 2 unless all three Grist settings are set. |
 
 ## Commands
@@ -124,7 +124,7 @@ Unknown keys are refused. Every error text starts with `config:`.
 | `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
-| `entities` | `prd/cmp/ver: [all]`, `cus: [contracts]` | Audiences of entity cache rows per kind (`prd`, `cmp`, `ver`, `cus`). Applied on every `kh daily` run. |
+| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
 | `forgejo_web_url` | null | Base URL for `source_link`; empty links when null. |
 
 Example (see `deploy/kh.example.yaml` for the defaults):
@@ -144,10 +144,12 @@ raw_audience_map:
 ingest_principal_types: [n8n_workflow]
 restricted_audiences_imply_all: false
 entities:
-  prd: [all]
-  cmp: [all]
-  ver: [all]
-  cus: [contracts]
+  prd: {table: Products, audiences: [all], label: product}
+  cmp: {table: Components, audiences: [all], label: component}
+  ver: {table: Versions, audiences: [all], label: version}
+  cus: {table: Customers, audiences: [contracts], label: customer}
+  # a home install might use only kinds such as this one
+  # fam: {table: Family, audiences: [all], label: family member}
 forgejo_web_url: https://forgejo.example.invalid
 ```
 
@@ -156,3 +158,9 @@ forgejo_web_url: https://forgejo.example.invalid
 Documents of a restricted audience such as `hr` usually also cite `all` sources, so the union of source audiences is `{all, hr}`. With `restricted_audiences_imply_all: false` the router refuses that proposal (`SPAN`). With `true`, `all` is removed from the union when other audiences are present, and the proposal goes to the `hr` repo. The stored visibility of the candidate keeps the full union; only the routing changes. Leave it `false` unless people in a restricted audience always also hold `all`.
 
 A change to `audiences`, `repos`, `raw_audience_map` or the visibility of `entities` changes the config hash: run `kh recompute-visibility` after deploying it. Document visibility follows `repos`, raw and derived rows follow the map, entity rows follow `entities` at the next `kh daily`.
+
+### entities
+
+A kind is the id prefix (`fam` in `fam:kid1`): 1-16 lowercase letters, digits, `_` or `-`, starting with a letter; `doc`, `raw` and `derived` are reserved. Each kind reads one Grist table (letters, digits or `_`, starting with a letter), and two kinds cannot share a table. The optional `label` is 1-40 characters without control characters and appears in the tool descriptions. At most 32 kinds are allowed.
+
+The rows of a kind removed from the config are deleted at the next `kh daily`. Adding or removing a kind, or changing its audiences, changes the config hash (run `kh recompute-visibility`); a `table` or `label` change does not.

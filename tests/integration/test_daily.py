@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from knowledge_hub.config import Config
+from knowledge_hub.config import Config, parse_config
 from knowledge_hub.db.caller_tx import caller_tx
 from knowledge_hub.jobs.daily import run_daily
 from tests.integration.test_search_ranking import QUERY, add_doc, app_pool_of, deps, ids, search  # noqa: F401
@@ -133,3 +133,13 @@ async def test_rerun_changes_nothing(deps, indexer_pool):  # noqa: F811
     res = await run_daily(indexer_pool, grist(), Config(), TODAY)
     assert await snapshot() == before
     assert res["stale_changed"] == 0 and res["entities_removed"] == 0
+
+
+async def test_custom_kind_reads_its_table(deps, indexer_pool):  # noqa: F811
+    await run_daily(indexer_pool, grist(), Config(), TODAY)
+    cfg = parse_config({"entities": {"fam": {"table": "Family", "audiences": ["all"]}}})
+    g = FakeGrist({"Family": [{"key": "fam:kid1", "name": "Kid 1"}, {"key": "prd:x", "name": "x"}],
+                   "Products": [{"key": "prd:gateway"}]})
+    res = await run_daily(indexer_pool, g, cfg, TODAY)
+    assert await entity_ids(indexer_pool, alice_all) == ["fam:kid1"]
+    assert res["entities_skipped"] == 1

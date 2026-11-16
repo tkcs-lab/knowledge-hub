@@ -1,4 +1,4 @@
-"""``kh daily`` (plan 3.12): stale flags, entity cache from Grist, expired claim ids."""
+"""``kh daily`` (plan 3.12): stale flags, entity cache from the configured Grist tables, expired claim ids."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-TABLES = {"Products": "prd", "Components": "cmp", "Versions": "ver", "Customers": "cus"}
-
 
 def _text(value: Any) -> str | None:
     return None if value is None or value == "" else str(value)
@@ -18,16 +16,16 @@ def _text(value: Any) -> str | None:
 async def run_daily(indexer_pool: Any, grist: Any, config: Any, today: date) -> dict[str, int]:
     """Idempotent. Grist is read first, so a Grist failure changes nothing."""
     audiences: dict[str, list[str]] = {}
-    for kind in TABLES.values():
-        auds = list(config.entities.get(kind, []))
+    for kind, spec in config.entities.items():
+        auds = list(spec.audiences)
         if not auds:  # never an open row: refuse instead of storing empty audiences
             raise ValueError(f"config entities.{kind} has no audience; refusing to cache open entities")
         audiences[kind] = auds
 
     rows: dict[str, tuple] = {}
     skipped = 0
-    for table, kind in TABLES.items():
-        for fields in await grist.fetch_table(table):
+    for kind, spec in config.entities.items():
+        for fields in await grist.fetch_table(spec.table):
             key = _text(fields.get("key"))
             if key is None or key.partition(":")[0] != kind or not key.partition(":")[2]:
                 skipped += 1

@@ -38,11 +38,11 @@ SELECT c.id FROM kh.chunks c JOIN kh.derived_records r ON r.id = c.derived_id
 
 
 def config_hash(config: Config) -> str:
-    """Hash of the audience map, the repo audiences and the entity visibility."""
+    """Hash of the audience map, the repo audiences and the entity audiences per kind."""
     payload = {
         "raw_audience_map": {k: sorted(v) for k, v in sorted(config.raw_audience_map.items())},
         "repos": {name: r.audience for name, r in sorted(config.repos.items())},
-        "entities": {k: sorted(v) for k, v in sorted(config.entities.items())},
+        "entities": {k: sorted(v.audiences) for k, v in sorted(config.entities.items())},
     }
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

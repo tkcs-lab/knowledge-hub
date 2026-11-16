@@ -1,11 +1,15 @@
 """get_entity and list_entities: visibility of cached entities and of the documents that list them."""
 
+import types
+
 import psycopg
 import pytest
 
-from knowledge_hub.config import Config
+from knowledge_hub.config import Config, parse_config
 from knowledge_hub.mcp import errors
-from knowledge_hub.mcp.server import Deps
+from knowledge_hub.mcp.server import Deps, build_mcp
+from knowledge_hub.settings import Settings
+from knowledge_hub.tools.entities import list_entities
 from tests.integration.test_derived_visibility_sql import doc as make_doc
 from tests.support.pg import FRESH_DB
 from tests.support.principals import PRINCIPALS, alice_all, bob_mgmt, carol_hr
@@ -138,3 +142,16 @@ async def test_cursors_are_bound(admin, mcp_client):
     for bad in ("nope", "a.b"):
         res = await mcp_client.call(alice_all, "list_entities", {"type": "prd", "cursor": bad})
         assert res.is_error and res.text.endswith(errors.CURSOR_FOREIGN)
+
+
+async def test_custom_kinds_drive_type_check_and_descriptions():
+    fam = {"table": "Family", "audiences": ["all"], "label": "family member"}
+    cfg = parse_config({"entities": {"fam": fam}})
+    d = Deps(settings=Settings(env="test"), config=cfg, app_pool=None, indexer_pool=None)
+    tools = {t.name: t for t in await build_mcp(d).list_tools()}
+    for name in ("get_entity", "list_entities"):
+        assert "fam (family member)" in tools[name].description and "prd" not in tools[name].description
+    call = types.SimpleNamespace(deps=d, caller=alice_all, conn=None)
+    with pytest.raises(errors.KhError) as exc:
+        await list_entities(call, type="prd")
+    assert exc.value.text == "type must be one of fam"

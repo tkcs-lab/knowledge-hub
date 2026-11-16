@@ -1,19 +1,25 @@
-"""``get_entity`` and ``list_entities``: the Grist entity cache under RLS (plan 3.9, 3.12)."""
+"""``get_entity`` and ``list_entities``: the Grist entity cache under RLS, kinds from ``config.entities``."""
 
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from psycopg.rows import dict_row
 
+from knowledge_hub.config import Config
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.tools.docs import MAX_LIST_LIMIT, cursor_key, decode_keyset, encode_keyset, keyset_scope
 
-ENTITY_TYPES = ("prd", "cmp", "ver", "cus")
 
-# Local fixed text (the catalogue has no entry for this argument error).
-BAD_TYPE = "type must be one of prd, cmp, ver, cus"
+def bad_type_text(config: Config) -> str:
+    # Local text (the catalogue has no entry for this argument error).
+    return "type must be one of " + ", ".join(config.entities)
+
+
+def kinds_text(config: Config) -> str:
+    return ", ".join(f"{k} ({v.label})" if v.label else k for k, v in config.entities.items())
+
 
 _COLUMNS = "id, kind, name, owner_team, status, attrs, synced_at"
 _ENTITY_SQL = f"SELECT {_COLUMNS} FROM kh.entities_cache WHERE id = %s"
@@ -70,8 +76,9 @@ async def get_entity(call: ToolCall, id: str) -> dict[str, Any]:
 async def list_entities(
     call: ToolCall, type: str, status: str = "", owner_team: str = "", limit: int = 50, cursor: str = ""
 ) -> dict[str, Any]:
-    if type not in ENTITY_TYPES:
-        raise errors.KhError("bad_type", BAD_TYPE)
+    config = call.deps.config
+    if type not in config.entities:
+        raise errors.KhError("bad_type", bad_type_text(config))
     limit = max(1, min(MAX_LIST_LIMIT, limit))
     caller, key = call.caller, cursor_key(call.deps)
     scope = keyset_scope("list_entities", type, status, owner_team)
@@ -94,16 +101,17 @@ async def list_entities(
 
 
 def register(server: MCPServer, deps: Deps) -> None:
+    kinds = kinds_text(deps.config)
     server.tool(
         name="get_entity",
         description=(
-            "Return one entity (prd:, cmp:, ver: or cus: id) with the documents you may see that list it."
+            f"Return one entity by id (<kind>:<key>; kinds: {kinds}) "
+            "with the documents you may see that list it."
         ),
     )(tool_guard("get_entity", deps)(get_entity))
     server.tool(
         name="list_entities",
         description=(
-            "List entities you may see of one type (prd, cmp, ver or cus), by id; "
-            "filter by status and owner team."
+            f"List entities you may see of one type ({kinds}), by id; filter by status and owner team."
         ),
     )(tool_guard("list_entities", deps)(list_entities))
