@@ -17,8 +17,6 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p4-forgejo-client
 
 - worker: none
-- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; worker doorbell never arrived (no doorbell), found by timer
-- worker: none
 - review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; no doorbell arrived, found by the timer
 - conflict: CHANGELOG.md: both sides added entries under Unreleased; kept both
 
@@ -54,7 +52,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: p2-config-owners: deploy/kh.example.yaml and the docs/configuration.md example gave cus no reference_audiences, so an install from the example would lose the customer-reference restriction; fixed in a fix worker
+- final: p10-retire-docs: docs/configuration.md has no reference_audiences row in the config table (described in prose only); fixed in a fix worker
 
 ## Finishing
 
