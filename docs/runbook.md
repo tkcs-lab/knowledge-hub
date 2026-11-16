@@ -2,7 +2,7 @@
 
 For the operator. Names of variables and keys are in [configuration](configuration.md); the reasons behind the rules are in [design](design.md). Commands run as the `kh` user inside the container, with the `KH_*` environment of the service (see `deploy/compose.example.yaml`). Secrets are files, never variables, and nothing in this document is a real secret or host.
 
-Not run in the cloud, so yours to do and check by hand: the Dockerfile build, and the backup script's `pg_dump` against the protected tables (`deploy/backup-kh.sh`). Check both on the first deploy.
+Not run in the cloud, so yours to do and check by hand: the backup script's `pg_dump` against the protected tables (`deploy/backup-kh.sh`). Check it on the first deploy. The Dockerfile build runs in the `ci` workflow on every pull request.
 
 ## Install order
 
@@ -172,7 +172,7 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 Releases follow the `/tld:release` skill. The version lives only in `src/knowledge_hub/__init__.py`.
 
 1. Run `/tld:release`. It moves the `## [Unreleased]` changelog entries under a `## [X.Y.Z] - <date>` heading, bumps `__version__` and opens a `chore/release-<X-Y-Z>` pull request. Review and merge it.
-2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first. A dry run checks the changelog heading, that every other check on the commit is green, builds the arm64 image and runs `docker run --rm <image> --help`. It pushes nothing.
+2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first. The skill dispatches only once the `ci` workflow has finished on the merge commit; a dry run started earlier fails at **Require the ci checks on this commit**. A dry run checks the changelog heading, that every other check on the commit is green, that `lint`, `test (3.12)`, `test (3.13)` and `image` are among them, builds the arm64 image and runs `docker run --rm <image> --help`. It pushes nothing.
 3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes the image to GHCR by digest only.
 4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The workflow has no `skip_checks` input.
 5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.

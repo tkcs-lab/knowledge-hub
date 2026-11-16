@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = ["pytest", "pytest-asyncio", "ruff==0.17.5"]
 
 [project.scripts]
 kh = "knowledge_hub.cli:main"

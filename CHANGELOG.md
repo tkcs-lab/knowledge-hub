@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.
+
 ## [0.2.0] - 2026-11-16
 
 ### Added

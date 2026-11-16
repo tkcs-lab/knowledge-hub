@@ -24,6 +24,10 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python -m pytest -q
 ```
 
+## CI
+
+The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: `lint` (ruff), `test (3.12)` and `test (3.13)` (the whole pytest suite against a throwaway PostgreSQL 16 with pgvector) and `image` (builds the Dockerfile on arm64 and runs `kh --help` in it). The commands are the ones in Quick start. A release dry run requires these four checks green on its commit by name (`.github/workflows/release.yml`), so a job renamed in `ci.yml` must be renamed there and in the `main` ruleset too.
+
 ## The `kh` commands
 
 | Command | Use |
