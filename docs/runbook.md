@@ -77,6 +77,7 @@ Consequences:
 - A person leaving a team does not turn their earlier self-merges disputed.
 - Enabling `self_merge_teams` does not bless history that was already judged; `--rejudge` does that on purpose.
 - A disputed merge stays disputed until `--rejudge`, even if an approval is added afterwards.
+- Older version rows that were disputed stay disputed after a rejudge even when the merge is now trusted, because the original per-file status is not stored; only the current document row changes.
 - Changing `bot_logins` or `self_merge_teams`, an account compromise, or a reviewer later found unfit all need `kh rebuild --repo R --rejudge`.
 - The first sync after upgrading to 0.2.0 judges the whole history once. Run `kh rebuild` right after `kh migrate`.
 

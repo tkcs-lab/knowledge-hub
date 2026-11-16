@@ -198,8 +198,9 @@ async def _rejudge_versions(conn: Any, plan: SyncPlan) -> None:
     repo_trusted = plan.repo_state is None or bool(plan.repo_state.get("trusted"))
     for sha, v in plan.verdicts.items():
         ok = v.status == "trusted" and repo_trusted
+        # A row disputed per file (duplicate id, bad reference...) never gains a trusted stamp.
         await conn.execute(
-            _VERSION_UPDATE.format(extra=""),
+            _VERSION_UPDATE.format(extra="AND v.status <> 'disputed'" if ok else ""),
             (
                 v.stamp if ok else None, list(v.approved_by) if ok else [],
                 _parse_ts(v.approved_at) if ok else None, not ok, None, repo, sha,
@@ -218,7 +219,6 @@ async def _rejudge_versions(conn: Any, plan: SyncPlan) -> None:
                 repo, u.commit_sha, u.doc_key,
             ),
         )  # fmt: skip
-
 
 
 async def _chunk_plan(
