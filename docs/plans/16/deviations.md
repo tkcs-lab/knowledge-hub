@@ -28,7 +28,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6-propose-doc
 
-- pending
+- None.
 
 ## p7-propose-edit
 
