@@ -15,12 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from knowledge_hub.approvals import BOT_LOGINS
 from knowledge_hub.config import Config
 from knowledge_hub.forgejo.client import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
 from knowledge_hub.indexer.trust import TRUSTED, Verdict, evaluate_chain, parse_forgejo_ts
 
-BOT_LOGINS = ("kh-hub-bot",)
 BRANCH = "main"
 REWRITTEN = "main of {repo} was rewritten; run kh rebuild after review"
 NOT_APPROVED = "file {path} on {repo}/main has no approved merge PR"
@@ -249,7 +249,11 @@ async def build_sync_plan(
     rejected_paths: list[str] = []
     for entry in sorted(tree, key=lambda e: e["path"]):
         path = entry["path"]
-        if entry.get("type") != "blob" or not path.endswith(".md"):
+        if (
+            entry.get("type") != "blob"
+            or not path.endswith(".md")
+            or any(seg.startswith(".") for seg in path.split("/"))
+        ):
             continue
         text = await forgejo.get_raw(repo, path, head)
         parsed = parse_document(text, path, config.domains)
