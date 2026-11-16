@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from knowledge_hub.approvals import BOT_LOGINS
+from knowledge_hub.approvals import BOT_LOGINS, requester_from_statuses
 from knowledge_hub.config import Config
 from knowledge_hub.forgejo.client import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
@@ -116,6 +116,7 @@ async def _gather_trust(forgejo: Any, repo: str, chain: list[dict[str, Any]], an
     prs: list[dict[str, Any]] = []
     reviews: dict[int, list[dict[str, Any]]] = {}
     changed: dict[str, list[str]] = {}
+    requesters: dict[int, tuple[tuple[str, ...], str | None]] = {}
     for c in oldest_first[start:]:
         parents = c.get("parents") or []
         if parents:
@@ -125,7 +126,12 @@ async def _gather_trust(forgejo: Any, repo: str, chain: list[dict[str, Any]], an
             if pull is not None:
                 prs.append(pull)
                 reviews[pull["number"]] = await forgejo.pull_reviews(repo, pull["number"])
-    return evaluate_chain(repo, chain, prs, reviews, changed, BOT_LOGINS, anchor), changed
+                record = requester_from_statuses(
+                    pull, await forgejo.commit_statuses(repo, pull["head"]["sha"])
+                )
+                if record != ((), None):
+                    requesters[pull["number"]] = record
+    return evaluate_chain(repo, chain, prs, reviews, changed, BOT_LOGINS, anchor, requesters), changed
 
 
 def _last_commit_for(

@@ -7,7 +7,7 @@ import psycopg
 from knowledge_hub.config import parse_config
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.indexer.sync import sync_repo
-from tests.support.forgejo_fake import FakeCommit, FakeRepo, ForgejoFake
+from tests.support.forgejo_fake import FakeCommit, FakeRepo, ForgejoFake, approval
 from tests.unit.test_sync_plan import doc, merged, repo_of
 
 DB = "kh_fresh"
@@ -141,3 +141,50 @@ async def test_offset_and_fractional_dates_resync_unchanged(fresh_db, indexer_po
     await sync(indexer_pool, r)
     assert rows(fresh_db, SNAP) == first
     assert rows(fresh_db, "SELECT * FROM kh.repo_state") == state
+
+
+UUID = "11111111-1111-1111-1111-111111111111"
+
+
+def proposal_repo(approvers):
+    commit = FakeCommit("m1", ["a0", "h1"], {"a.md": doc("a")}, "2026-11-02T10:00:00Z")
+    pull = {
+        "number": 1,
+        "html_url": "https://forgejo.test/kh/repo/pulls/1",
+        "merged": True,
+        "merge_commit_sha": "m1",
+        "user": {"login": "kh-hub-bot"},
+        "base": {"ref": "main"},
+        "head": {"sha": "h1", "ref": f"bot/propose/{UUID}"},
+    }
+    reviews = [approval("h1", who) for who in approvers]
+    return FakeRepo([FakeCommit("a0", [], {}), commit], [pull], {1: reviews})
+
+
+def requested_by(login):
+    return {
+        "context": "kh/requested-by",
+        "state": "success",
+        "description": f"{login} {UUID}",
+        "creator": "kh-hub-bot",
+    }
+
+
+async def test_proposal_approved_only_by_requester_is_disputed(fresh_db, indexer_pool):
+    fake = ForgejoFake({"canonical-all": proposal_repo(["bob"])})
+    fake.statuses[("canonical-all", "h1")] = [requested_by("bob")]
+    await sync_repo(indexer_pool, fake, CFG, "canonical-all", FakeEmbedder())
+    assert rows(fresh_db, "SELECT status, approved_by FROM kh.documents") == [("disputed", [])]
+
+
+async def test_proposal_approved_by_another_is_trusted(fresh_db, indexer_pool):
+    fake = ForgejoFake({"canonical-all": proposal_repo(["bob", "carol"])})
+    fake.statuses[("canonical-all", "h1")] = [requested_by("bob")]
+    await sync_repo(indexer_pool, fake, CFG, "canonical-all", FakeEmbedder())
+    assert rows(fresh_db, "SELECT status, approved_by FROM kh.documents") == [("current", ["carol"])]
+
+
+async def test_proposal_without_record_is_disputed_in_sync(fresh_db, indexer_pool):
+    fake = ForgejoFake({"canonical-all": proposal_repo(["carol"])})
+    await sync_repo(indexer_pool, fake, CFG, "canonical-all", FakeEmbedder())
+    assert rows(fresh_db, "SELECT status FROM kh.documents") == [("disputed",)]
