@@ -44,7 +44,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-proposal-events
 
-- pending
+- None.
 
 ## p11-search-marking
 
