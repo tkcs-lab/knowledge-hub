@@ -4,15 +4,15 @@
 
 ## Summary
 
-**Use it:** An operator writes `audiences: [mgmt, finance]` for an entity kind, or `"series:weekly-sync": [mgmt, finance]` in `raw_audience_map`, and a caller holding mgmt or finance (either one) can read those rows. A caller holding neither still gets `not found`, exactly as for a missing row. A summary, candidate or conflict built from a mgmt source and a finance source stays readable only by someone who holds both. After deploying, `kh migrate` converts the stored rows and `kh recompute-visibility` gives the same result.
+**Use it:** An operator writes `audiences: [mgmt, finance]` for an entity kind, or `"series:weekly-sync": [mgmt, finance]` in `raw_audience_map`, and a caller holding mgmt or finance can read those rows. A caller holding neither gets `not found`, as for a missing row. A summary, candidate or conflict built from a mgmt source and a finance source stays readable only by someone who holds both. `propose_change` answers `ambiguous` when the sources fit two canonical repos and asks for a `target_id`. `kh.yaml` is refused if an `audiences` name has anything but lowercase letters, digits, `_` or `-`. `kh migrate` converts the stored rows; `kh recompute-visibility` gives the same result.
 
-**Scope:** One new migration `0007_any_of_audiences.sql`: a new `kh.visible` body, a clause format for `required_audiences`, the raw-visibility trigger, a CHECK on every visibility column and a data migration. Python: the clause helpers and routing rules in `visibility.py`, raw recompute, entity sync, the external-embedder filter, audience-name validation in config, a test-only `stop_after` in the migration runner. Policies, column grants, chunk triggers, `kh check`, search, the derived and strict visibility functions and their deferred triggers keep their code. Domains, Forgejo teams and the PrivacyFence claim do not change.
+**Scope:** One migration `0007_any_of_audiences.sql`: a new `kh.visible`, a clause format inside `required_audiences`, the raw-visibility trigger, a CHECK per visibility column and a data migration. Python: clause helpers and routing in `visibility.py`, raw recompute, entity sync, the external-embedder filter, audience-name validation, a test-only `stop_after` in the migration runner. Policies, grants, chunk triggers, `kh check`, search and the derived and strict visibility functions keep their code. Domains, Forgejo teams and the PrivacyFence claim do not change.
 
-**Security:** This widens who can read every row whose configured list has two or more audiences; an operator must check the production `kh.yaml` before deploying (manual step ma1). Derived rows keep an AND over their sources. Enforcement stays in Postgres under forced RLS, with no new definer function that reads rows.
+**Security:** Every row whose configured list has two or more audiences becomes readable by each member; check the production `kh.yaml` first (ma1). Derived rows keep an AND over their sources. Enforcement stays in Postgres under forced RLS; no new definer function reads rows.
 
-**Performance:** Rows of plain audience names keep today's inlined test; only rows holding a multi-audience clause call a helper with a sub-select. Measured on 200 000 rows: 81 ms today, 127 ms with 2% clause rows, 255 ms with 33%. The cost does not depend on whether the caller can see the row.
+**Performance:** Rows of plain names keep today's inlined test; only rows with a multi-audience clause call a helper. On 200 000 rows: 81 ms today, 127 ms with 2% clause rows, 255 ms with 33%.
 
-**Review focus:** the clause encoding inside the existing `required_audiences` column instead of new columns (3.1, 3.2); the new routing rule and the error text for sources that fit two repositories (3.5); keeping the ingest check strict, so a token must hold every mapped audience (3.4); the data migration, which applies the current audience map like recompute does (3.8).
+**Review focus:** the clause encoding inside the existing column (3.1, 3.2); the routing rule and the `ambiguous` error (3.5); the strict ingest check (3.4); the data migration (3.8); `kh.visible` staying inlinable and the `EXECUTE` grants (3.3, section 5).
 
 ## 1. Goal
 
@@ -22,18 +22,18 @@ This document is the design note the owner asked for. **Nothing is implemented u
 
 ## 2. Current state
 
-- `src/knowledge_hub/migrations/0003_rls.sql:28-31`: `kh.visible(req, emails)` is `coalesce(req <@ kh.caller_audiences() AND (emails IS NULL OR kh.caller_email() = ANY(emails)), false)`, `LANGUAGE sql STABLE`, no `SET` clause (inlinable). Every `kh_app_select` policy on `documents`, `chunks`, `entities_cache`, `raw_records`, `derived_records`, `candidates`, `conflicts` calls it (`0003_rls.sql:189-284`); the three source tables and `document_versions` use `EXISTS` on their parent.
+- `src/knowledge_hub/migrations/0003_rls.sql:28-31`: `kh.visible(req, emails)` is `coalesce(req <@ kh.caller_audiences() AND (emails IS NULL OR kh.caller_email() = ANY(emails)), false)`, `LANGUAGE sql STABLE`, no `SET` clause (inlinable). Every `kh_app_select` policy on `documents`, `chunks`, `entities_cache`, `raw_records`, `derived_records`, `candidates`, `conflicts` calls it (`0003_rls.sql:186-295`); the three source tables and `document_versions` use `EXISTS` on their parent.
 - `0002_tables.sql`: every visibility table has `required_audiences text[] NOT NULL`, `allowed_emails text[]` and `CONSTRAINT kh_no_open_rows CHECK (cardinality(required_audiences) > 0 OR allowed_emails IS NOT NULL)`. The source tables hold snapshots in `src_required_audiences`/`src_allowed_emails`.
-- `0004_triggers.sql:13-58`: `chunks_inherit_owner` copies the owner's two visibility columns into every chunk; `owner_propagate_to_chunks` re-fires it after an owner UPDATE. `src/knowledge_hub/indexer/rebuild.py:19-37` (`DRIFT_SQL`) compares those columns.
-- `0004_triggers.sql:103-133`: `raw_records_assign_visibility` sets `required_audiences` to the union of every matching `raw_audience_map` entry (series and folder) and raises `P0K02` unless the caller holds all of them; else participants become `allowed_emails`; else `P0K01`.
+- `0004_triggers.sql:9-62`: `chunks_inherit_owner` copies the owner's two visibility columns into every chunk; `owner_propagate_to_chunks` re-fires it after an owner UPDATE. `src/knowledge_hub/indexer/rebuild.py:19-37` (`DRIFT_SQL`) compares those columns.
+- `0004_triggers.sql:97-125`: `raw_records_assign_visibility` sets `required_audiences` to the union of every matching `raw_audience_map` entry (series and folder) and raises `P0K02` unless the caller holds all of them; else participants become `allowed_emails`; else `P0K01`.
 - `0005_derived_visibility.sql`, `0006_strict_visibility.sql`: `kh.derived_visibility` and `kh.strict_visibility` return the union of the resolved sources' `required_audiences` (`array_agg(DISTINCT a ORDER BY a)`) and the intersection of the non-null email lists; the deferred `*_visibility_matches` triggers recompute the same from the snapshots at commit and compare as sets (`P0K04`).
 - `src/knowledge_hub/visibility.py:30-79`: `derive_visibility` (Python statement of the union rule) and `route_target_repo` (union `U`; `restricted_audiences_imply_all` drops `all`; `|U| >= 2` is `SPAN`; with an explicit repo `U <= {repo.audience}` or `WIDER`).
-- `src/knowledge_hub/jobs/recompute.py:47-71` (`_recompute_raw`) repeats the trigger's union in SQL; `_refresh_and_apply` (`:84-125`) refreshes snapshots and sets parents to the union; derived rows go in citation order (`:128-146`). `jobs/daily.py:18-24,47-63` writes `spec.audiences` of each entity kind as the row's `required_audiences`.
+- `src/knowledge_hub/jobs/recompute.py:47-71` (`_recompute_raw`) repeats the trigger's union in SQL; `_refresh_and_apply` (`:84-125`) refreshes snapshots and sets parents to the union; derived rows go in citation order (`:130-149`). `jobs/daily.py:18-24,47-63` writes `spec.audiences` of each entity kind as the row's `required_audiences`.
 - `src/knowledge_hub/embed/http.py:30-34` (`may_embed`): a chunk goes to the external embedder only if its audiences are a non-empty subset of `KH_EMBED_HTTP_ALLOWED_AUDIENCES` and it has no email list.
 - `src/knowledge_hub/tools/derived.py:119-121` raises `derived_nobody` when the result has no audiences and no emails; `tools/promote.py:193-206` routes with the strict-visibility result; `tools/raw.py:96-97` maps `P0K02` to `INGEST_AUDIENCE`.
 - `src/knowledge_hub/config.py:83-133`: `audiences` names are not validated; `db/caller_tx.py:22-24` refuses caller audiences that do not match `^[a-z0-9][a-z0-9_-]{0,62}$`.
 - `src/knowledge_hub/db/migrate.py:31-53`: migrations are checksummed; an applied file must not change.
-- Tests: `tests/support/seed.py:12-19` (`CASES`, written with triggers off), `tests/support/principals.py`, `tests/integration/test_leak_matrix.py:16-18` (an AND predicate).
+- Tests: `tests/support/seed.py:12-19` (`CASES`, written with triggers off), `tests/support/principals.py`, `tests/integration/test_leak_matrix.py:18-20` (an AND predicate).
 
 ## 3. Design
 
@@ -112,17 +112,39 @@ Truth table (caller audiences / row): `{mgmt}` sees `finance|mgmt`; `{finance}` 
 - **Raw trigger** (`CREATE OR REPLACE kh.raw_records_assign_visibility`, still `SECURITY DEFINER`, `SET search_path = kh, pg_temp`, owner `kh_provenance`): one clause per matching non-empty map entry, then the unchanged strict ingest check over the members:
 
 ```sql
-SELECT array_agg(c ORDER BY c COLLATE "C") INTO mapped
-  FROM (SELECT DISTINCT kh.audience_clause(m.audiences) AS c
-          FROM kh.raw_audience_map m
-         WHERE cardinality(m.audiences) > 0
-           AND ((m.kind = 'series' AND m.key = NEW.series)
-             OR (m.kind = 'folder' AND m.key = NEW.folder))) s;
-SELECT array_agg(DISTINCT a) INTO members
-  FROM kh.raw_audience_map m, unnest(m.audiences) AS a
- WHERE (m.kind = 'series' AND m.key = NEW.series) OR (m.kind = 'folder' AND m.key = NEW.folder);
--- IF mapped IS NOT NULL: IF NOT (members <@ kh.caller_audiences()) THEN P0K02; required := mapped; emails := NULL
--- participants and P0K01 branches unchanged
+CREATE OR REPLACE FUNCTION kh.raw_records_assign_visibility() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path = kh, pg_temp
+    AS $$
+DECLARE
+    mapped  text[];
+    members text[];
+BEGIN
+    SELECT array_agg(c ORDER BY c COLLATE "C") INTO mapped
+      FROM (SELECT DISTINCT kh.audience_clause(m.audiences) AS c
+              FROM kh.raw_audience_map m
+             WHERE cardinality(m.audiences) > 0
+               AND ((m.kind = 'series' AND m.key = NEW.series)
+                 OR (m.kind = 'folder' AND m.key = NEW.folder))) s;
+    IF mapped IS NOT NULL THEN
+        SELECT array_agg(DISTINCT a) INTO members
+          FROM kh.raw_audience_map m, unnest(m.audiences) AS a
+         WHERE (m.kind = 'series' AND m.key = NEW.series)
+            OR (m.kind = 'folder' AND m.key = NEW.folder);
+        IF NOT (members OPERATOR(pg_catalog.<@) kh.caller_audiences()) THEN
+            RAISE EXCEPTION 'ingest audience not held by caller' USING ERRCODE = 'P0K02';
+        END IF;
+        NEW.required_audiences := mapped;
+        NEW.allowed_emails := NULL;
+    ELSIF coalesce(cardinality(NEW.participants), 0) > 0 THEN
+        NEW.required_audiences := '{}';
+        NEW.allowed_emails := (SELECT array_agg(DISTINCT lower(p) ORDER BY lower(p))
+                                 FROM unnest(NEW.participants) AS p);
+    ELSE
+        RAISE EXCEPTION 'no audience mapping and no participants' USING ERRCODE = 'P0K01';
+    END IF;
+    RETURN NEW;
+END $$;
 ```
 
   The ingest check stays strict (decision): a token may only write rows into audiences it holds all of; ANY-of changes who reads, not who may write. A series mapped to `[mgmt]` and a folder mapped to `[finance]` gives `{finance, mgmt}`, two clauses: both are needed, as today.
@@ -162,7 +184,7 @@ Runs as `kh_migrator` (member of `kh_provenance`; `USING (true)` on every table)
 3. `CREATE OR REPLACE kh.raw_records_assign_visibility` (3.4); re-run `ALTER FUNCTION ... OWNER TO kh_provenance` and `REVOKE EXECUTE ... FROM PUBLIC`.
 4. Entities: `UPDATE kh.entities_cache SET required_audiences = ARRAY[kh.audience_clause(required_audiences)] WHERE cardinality(required_audiences) > 1;` (daily always wrote the whole configured list.)
 5. Raw rows: the statement of `_recompute_raw` below, verbatim.
-6. Derived rows: a `DO` block that loops: refresh `derived_sources` snapshots from the live rows (the `_LIVE` union of `recompute.py:16-23`), then set every derived row to the union/intersection over its snapshots (the aggregate of `recompute.py:98-125` over all derived ids), until the UPDATE changes 0 rows; after 1000 rounds `RAISE EXCEPTION 'derived_sources contain a citation cycle'`. On an acyclic graph this reaches the same values as recompute's citation-order pass.
+6. Derived rows: a `DO` block that loops: refresh `derived_sources` snapshots from the live rows (the `_LIVE` union of `recompute.py:16-23`), then set every derived row to the union/intersection over its snapshots (the aggregate of `recompute.py:98-125` over all derived ids), until the UPDATE changes 0 rows; after 1000 rounds `RAISE EXCEPTION 'derived visibility did not converge'` (a guard only: the write path cites existing rows, so no cycle can be stored through it). On an acyclic graph this reaches the same values as recompute's citation-order pass.
 7. Candidates, then conflicts: one refresh-and-apply each (they are never sources).
 8. Add the CHECK constraints of 3.2.
 
@@ -277,8 +299,8 @@ phases:
       1. Run `bash scripts/ensure_test_pg.sh`; if Postgres 16 with pgvector cannot start, stop with status=blocked.
       2. Do not edit 0001-0006 (checksummed). Create src/knowledge_hub/migrations/0007_any_of_audiences.sql with steps 1-8 of plan 3.8, using the SQL of 3.2, 3.3, 3.4 verbatim. Step 5 is the `_recompute_raw` statement of 3.8. Step 6 is a DO block with the loop and the error text of 3.8; copy the aggregate of src/knowledge_hub/jobs/recompute.py:98-125 with `{pcol}`=derived_id, `{kcol}`=source_kind, `{icol}`=source_id, `{table}`=derived_sources, `{parent}`=derived_records and no id filter. Step 7 does the same for candidate_sources/candidates (source_kind, source_id) and conflict_items/conflicts (item_kind, item_id).
       3. src/knowledge_hub/db/migrate.py: add keyword-only `stop_after: str | None = None` to `migrate`; skip files whose name is greater than it. `migrate_main` unchanged.
-      4. Tests, extending the named files: test_migrate_runner.py (`stop_after` applies 0001-0006 only); test_rls_policies.py (`test_visible_truth_table` with the cases of plan 3.3, and the required test `test_any_of_rows_are_visible_to_each_listed_audience` for a raw row and an entities_cache row `{finance|mgmt}`, callers mgmt-only, finance-only, mgmt+finance visible, all-only and no-audience hidden); test_triggers.py (rename `test_mapped_series_and_folder_give_the_union` to `test_mapped_series_and_folder_give_one_clause_each`, add `test_multi_audience_entry_gives_one_clause` and `test_token_missing_one_mapped_audience_raises_p0k02`); test_derived_visibility_sql.py and test_strict_visibility.py (`test_mgmt_and_finance_sources_are_hidden_from_mgmt_only` for derived rows, candidates and conflicts; `test_any_of_source_and_hr_source_need_one_of_each`); test_schema_tables.py (`test_audience_clauses_check` rejects `''`, `'mgmt|finance'` (unsorted), `'MGMT'`, and accepts `'finance|mgmt'`, naming constraint `kh_audience_clauses`).
-      5. New tests/integration/test_any_of_migration.py: build a fresh database with `migrate(dsn, stop_after="0006_strict_visibility.sql")`, insert as kh_migrator a raw_audience_map entry `series:s1 -> {finance, mgmt}`, a raw row of series s1 stored `{finance, mgmt}` with one chunk, an entities_cache row `{finance, mgmt}`, a derived row citing that raw row and a `{hr}` document, a candidate and a conflict on the same sources; then `migrate(dsn)` and assert: raw `{finance|mgmt}` and its chunk the same, entity `{finance|mgmt}`, derived/candidate/conflict `{finance|mgmt, hr}`, `DRIFT_SQL` (src/knowledge_hub/indexer/rebuild.py) returns no rows, constraints `kh_audience_clauses` exist on the 7 tables.
+      4. Tests, extending the named files: test_migrate_runner.py (`stop_after` applies 0001-0006 only); test_rls_policies.py (`test_visible_truth_table` with the cases of plan 3.3, and the required test `test_any_of_rows_are_visible_to_each_listed_audience` for a raw row and an entities_cache row `{finance|mgmt}`, callers mgmt-only, finance-only, mgmt+finance visible, all-only and no-audience hidden); test_triggers.py (rename `test_mapped_series_and_folder_give_the_union` to `test_mapped_series_and_folder_give_one_clause_each`, add `test_multi_audience_entry_gives_one_clause` and `test_token_missing_one_mapped_audience_raises_p0k02`); test_derived_visibility_sql.py and test_strict_visibility.py (`test_mgmt_and_finance_sources_are_hidden_from_mgmt_only` for derived rows, candidates and conflicts; `test_any_of_source_and_hr_source_need_one_of_each`); test_schema_tables.py (`test_audience_clauses_check` rejects `''`, `'mgmt|finance'` (unsorted), `'MGMT'`, and accepts `'finance|mgmt'`, naming constraint `kh_audience_clauses`); test_triggers.py also: `test_mapped_series_gives_mapped_audiences_and_null_emails` (line 204) now expects `["all|mgmt"]`.
+      5. New tests/integration/test_any_of_migration.py: build a fresh database with `migrate(dsn, stop_after="0006_strict_visibility.sql")`. Insert as kh_migrator in one transaction that starts with `SET LOCAL session_replication_role = replica` (as tests/support/seed.py does, so no trigger fires): a raw_audience_map entry `series:s1 -> {finance, mgmt}`; a document stored `{hr}`; a raw row of series s1 stored `{finance, mgmt}` with one chunk stored `{finance, mgmt}`; an entities_cache row stored `{finance, mgmt}`; a derived row stored `{finance, hr, mgmt}` citing the raw row and the document, with its two derived_sources snapshots `{finance, mgmt}` and `{hr}`; one candidate and one conflict with the same sources and stored values. Then `migrate(dsn)` and assert: raw `{finance|mgmt}` and its chunk the same; entity `{finance|mgmt}`; derived, candidate and conflict `{finance|mgmt, hr}`; `DRIFT_SQL` (src/knowledge_hub/indexer/rebuild.py) returns no rows; constraints `kh_audience_clauses` exist on the 7 visibility tables and `kh_src_audience_clauses` on the 3 source tables.
       6. Add `test_visible_stays_inlined` to test_rls_policies.py: as kh_app with audiences set, `EXPLAIN (COSTS OFF) SELECT 1 FROM kh.chunks` contains `strpos` and not `kh.visible(`.
       7. `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q` pass.
       Stop with status=blocked if: a CHECK insert fails with a function permission error after the grants of 3.2; any existing test outside the touched files fails because a seeded value is not a canonical clause; the derived loop does not converge on the test data.
@@ -314,9 +336,9 @@ phases:
       3. jobs/recompute.py: replace the SQL of `_recompute_raw` with the statement of plan 3.8; update the module docstring (clauses). Nothing else.
       4. jobs/daily.py: `audiences[kind] = [clause(spec.audiences)]`.
       5. embed/http.py: `may_embed` as plan 3.6.
-      6. config.py: in `Config._validate`, reject an `audiences` entry that does not match `^[a-z0-9][a-z0-9_-]{0,62}$` with `config: audience {a!r} is not a valid audience name`.
-      7. Tests, extending the named files: test_visibility.py (`clause` sorts and de-duplicates, empty raises; `can_read` for every row of the plan 3.3 truth table; `derive_visibility` of `["finance|mgmt"]` and `["hr"]` is `["finance|mgmt", "hr"]`); test_routing.py (the cases in plan 3.9; existing tests keep passing); test_embed_providers.py (`finance|mgmt` embedded only when both are allowed); test_config.py (`audiences: [a|b]` refused with the exact text); test_daily.py (`[mgmt, finance]` kind stored as `["finance|mgmt"]`); test_recompute.py (map `[finance, mgmt]` gives one clause; series `[mgmt]` + folder `[finance]` give two); test_propose_change.py (`test_any_of_source_with_two_repos_is_ambiguous`).
-      8. Required (4), new tests/integration/test_recompute_matches_migration.py: database A: `migrate(dsn, stop_after="0006_strict_visibility.sql")`, seed the rows of p1's test_any_of_migration (fixed ids) under map M = `series:s1 -> [finance, mgmt]`, then `migrate(dsn)`; database B: `migrate(dsn)`, seed the same ids under map `series:s1 -> [mgmt]` (raw stored `{mgmt}`), then `recompute_in` with a Config whose raw_audience_map is M. Assert the sorted visibility columns of raw_records, derived_records, derived_sources, candidates, conflicts and chunks are equal in A and B, and that `recompute_in` with M on A changes no row.
+      6. config.py: add `AUDIENCE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")` and, in `Config` before `_validate`, `@field_validator("audiences") @classmethod def _audience_names(cls, value: list[str]) -> list[str]` (the pattern of `GovernanceConfig._team_names`) that raises `ValueError(f"audience {a!r} is not a valid audience name")` for the first entry that does not full-match. It must be a field validator: `_validate` checks repo audiences first and would report a different error. `_wrap` already adds the `config: ` prefix and the `(audiences)` location.
+      7. Tests, extending the named files: test_visibility.py (`clause` sorts and de-duplicates, empty raises; `can_read` for every row of the plan 3.3 truth table; `derive_visibility` of `["finance|mgmt"]` and `["hr"]` is `["finance|mgmt", "hr"]`); test_routing.py (the cases in plan 3.9; existing tests keep passing; `finance` is not a default audience, so the new cases build their Config with `Config(audiences=["all", "mgmt", "hr", "contracts", "finance"], repos={**_default_repos(), "canonical-finance": RepoConfig(tier="T0", audience="finance")})`, or `Config(audiences=[...])` with only the repos the case needs); test_embed_providers.py (`finance|mgmt` embedded only when both are allowed); test_config.py (`parse_config({"audiences": ["all", "mgmt", "hr", "contracts", "a|b"]})` raises `ConfigError` with the message `config: audience 'a|b' is not a valid audience name (audiences)`); test_daily.py (a kind with `audiences=["mgmt", "finance"]` stored as `["finance|mgmt"]`); test_recompute.py (map `[finance, mgmt]` gives one clause; series `[mgmt]` + folder `[finance]` give two); test_propose_change.py (`test_any_of_source_with_two_repos_is_ambiguous`). Every Config in these tests that names `finance` lists it in `audiences`; without it the config is refused with `unknown audience 'finance'`.
+      8. Required (4), new tests/integration/test_recompute_matches_migration.py: database A: `migrate(dsn, stop_after="0006_strict_visibility.sql")`, seed the rows of p1's test_any_of_migration (fixed ids) under map M = `series:s1 -> [finance, mgmt]`, then `migrate(dsn)`; database B: `migrate(dsn)`, seed the same ids under map `series:s1 -> [mgmt]` (raw stored `{mgmt}`), then `recompute_in` with a Config whose raw_audience_map is M. Assert the sorted visibility columns of raw_records, derived_records, derived_sources, candidates, conflicts and chunks are equal in A and B, and that a second `recompute_in` with M on A changes no row of raw_records, derived_records, derived_sources, candidates, conflicts and chunks (compare `xmin` of those tables before and after, as tests/integration/test_recompute.py:105 does; `raw_audience_map` is rewritten on every run and is not compared). Seed both databases with `SET LOCAL session_replication_role = replica`, as p1 step 5 does.
       9. `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q` pass.
       Stop with status=blocked if an existing test in test_routing.py needs a changed expectation other than one created for the new rules, or if databases A and B differ.
     acceptance:
@@ -331,18 +353,22 @@ phases:
     touches:
       - tests/support/principals.py
       - tests/support/seed.py
-      - tests/support/tool_cases.py
       - tests/integration/test_leak_matrix.py
       - tests/integration/test_search_leaks.py
+      - tests/integration/test_rls_tables.py
+      - tests/integration/test_list_stale.py
+      - tests/integration/test_tool_get_doc.py
+      - tests/integration/test_write_derived.py
     brief: |
       Read first: docs/plans/15/plan.md sections 3.2, 3.3, 3.9; tests/integration/test_leak_matrix.py; tests/support/seed.py.
-      1. principals.py: add `mgmt_only = _caller("mia", ("mgmt",), "mia@example.org")`, `finance_only = _caller("finn", ("finance",), "finn@example.org")`, `mgmt_finance = _caller("max", ("finance", "mgmt"), None)`, and add them and the existing `eve_nobody` to `PRINCIPALS` (names `mgmt_only`, `finance_only`, `mgmt_finance`). `mgmt_only` and `finance_only` hold no `all`.
-      2. seed.py: add cases `"mgmt_or_finance": (["finance|mgmt"], None)` and `"mgmt_and_finance": (["finance", "mgmt"], None)` to `CASES`.
-      3. test_leak_matrix.py and test_search_leaks.py: replace every local AND predicate with `knowledge_hub.visibility.can_read(Visibility(*CASES[case]), caller.audiences, caller.email)`.
-      4. tool_cases.py: only if a case lookup needs the new cases; no new tool.
-      5. Required (3), in test_leak_matrix.py: `test_any_of_hidden_row_matches_missing_row`: for `get_doc`, `get_entity` and `search`, the response of `alice_all` for the `mgmt_or_finance` rows has the same fingerprint as for a missing id, and `mgmt_only` and `finance_only` get the row.
-      6. `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q` pass.
-      Stop with status=blocked if another test that imports `PRINCIPALS` or `CASES` fails for a reason other than the new entries.
+      1. principals.py: add `mgmt_only = _caller("mia", ("mgmt",), "mia@example.org")`, `finance_only = _caller("finn", ("finance",), "finn@example.org")`, `mgmt_finance = _caller("max", ("finance", "mgmt"), None)` and add them to `PRINCIPALS` under the names `mgmt_only`, `finance_only`, `mgmt_finance` (`eve_nobody` is already there). `mgmt_only` and `finance_only` hold no `all`.
+      2. seed.py: add cases `"mgmt_or_finance": (["finance|mgmt"], None)` and `"mgmt_and_finance": (["finance", "mgmt"], None)` to `CASES`. tool_cases.py needs no change (it builds its cases from `CASES`).
+      3. In test_leak_matrix.py, test_search_leaks.py, test_tool_get_doc.py and test_write_derived.py replace every local predicate of the form `set(audiences) <= caller.audiences and (emails is None or caller.email in emails)` with `knowledge_hub.visibility.can_read(Visibility(*CASES[case]), caller.audiences, caller.email)` (in test_tool_get_doc.py and test_write_derived.py the lines at `_visible`, `test_hidden_source_reads_like_a_missing_one` and `test_every_hidden_seed_row_reads_like_a_missing_one`).
+      4. test_rls_tables.py `EXPECTED`: `bob_mgmt` gains `mgmt_or_finance`; add `"mgmt_only": {"mgmt", "mgmt_or_finance"}`, `"finance_only": {"mgmt_or_finance"}`, `"mgmt_finance": {"mgmt", "mgmt_or_finance", "mgmt_and_finance"}`. Check every other principal's set against `can_read` and add what it now sees.
+      5. test_list_stale.py `want` (test_each_principal_sees_only_visible_documents): add `"mgmt_only": {m}`, `"finance_only": set()`, `"mgmt_finance": {m}`.
+      6. Required (3), in test_leak_matrix.py: `test_any_of_hidden_row_matches_missing_row`: for `get_doc`, `get_entity` and `search`, the response of `alice_all` for the `mgmt_or_finance` rows has the same fingerprint as for a missing id, and `mgmt_only` and `finance_only` get the row.
+      7. `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q` pass.
+      Stop with status=blocked if a test outside the eight touched files fails because of the new principals or cases.
     acceptance:
       - .venv/bin/python -m pytest tests/integration/test_leak_matrix.py tests/integration/test_search_leaks.py -q passes
       - grep -n "mgmt_finance" tests/support/principals.py matches
@@ -360,7 +386,7 @@ phases:
     brief: |
       Read first: docs/plans/15/plan.md section 3; docs/design.md; docs/configuration.md.
       1. docs/design.md "Roles and RLS matrix": replace the kh.visible bullet with the clause rule of plan 3.3 (every clause must share an audience with the caller; plain names are one-member clauses); add a bullet for the `kh_audience_clauses` check. "Provenance exception": "union of audiences" becomes "union of the sources' clauses, so the caller must satisfy every source". Raw bullet: one clause per matching map entry; the token must hold every mapped audience. "Promotion routing": replace the routing bullet with the rules of plan 3.5, including `ambiguous`. Add a row to "Rejected alternatives": "Two visibility columns (any and all) | Lossy for derived rows; a set of OR-clauses in the existing column is exact".
-      2. docs/configuration.md: the `raw_audience_map` and `entities` rows say "a list means ANY of these audiences may read the rows (a wider audience, not a narrower one)"; the restricted_audiences_imply_all section describes rule 3 of plan 3.5; add the upgrade note: "From 0007, multi-audience lists mean ANY-of; check them before upgrading."
+      2. docs/configuration.md: the `audiences` row (line 125) adds "Names are 1-63 characters of lowercase letters, digits, `_` or `-`, starting with a letter or digit; a name containing anything else is refused."; the `KH_EMBED_HTTP_ALLOWED_AUDIENCES` row (line 60) says "embeds only chunks whose every audience, including each member of a multi-audience list, is in it, and that have no `allowed_emails`"; the `raw_audience_map` and `entities` rows say "a list means ANY of these audiences may read the rows (a wider audience, not a narrower one)"; the restricted_audiences_imply_all section describes rule 3 of plan 3.5; add the upgrade note: "From 0007, multi-audience lists mean ANY-of; check them before upgrading."
       3. README.md "Audience model": "A row is visible when its required_audiences are all held" becomes the clause rule, and the derived sentence says a derived record needs every source.
       4. deploy/kh.example.yaml: the raw_audience_map comment shows `"series:weekly-sync": [mgmt, finance]   # mgmt or finance may read`.
       5. CHANGELOG.md under "## [Unreleased]": "Changed: an audience list in `entities.<kind>.audiences` or `raw_audience_map` now means any one of the audiences may read the rows; derived records, candidates and conflicts still need every source. Check multi-audience lists before upgrading (migration 0007)."
