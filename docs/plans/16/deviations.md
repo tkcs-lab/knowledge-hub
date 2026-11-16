@@ -16,7 +16,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-agent-rules
 
-- pending
+- None.
 
 ## p4-agent-store
 
