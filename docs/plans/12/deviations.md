@@ -10,6 +10,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p2-schema-and-fake
 
 - None.
+- conflict: main gained migration 0007_any_of_audiences.sql (PR 17) while the plan ran; the plan migration was renumbered to 0008_merge_verdicts.sql and the migration tests adjusted (fix-3).
 
 ## p2b-forbid-stamp
 
@@ -43,6 +44,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - final: Review 1 (changes, 1 blocking): the version-row UPDATE in sync.py ran on every sync and ignored per-file disputes (p4); fix-1 started.
 - final: Review 2 (changes, 1 blocking): fix-1 writes a trusted stamp onto old version rows that stay disputed when a rejudge turns their merge trusted (sync.py _rejudge_versions); the owner was asked how to proceed.
+- final: Review 3 (approve, 0 blocking): fix-2 resolves the review 2 finding; non-blocking points go to the pull request body.
 
 ## Finishing
 
