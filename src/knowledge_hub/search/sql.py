@@ -117,7 +117,8 @@ meta AS (
 )
 SELECT p.id, p.owner_key, p.tier, p.domain, p.status, p.stale, p.entities, p.text, p.score,
        d.repo AS doc_repo, d.path AS doc_path, d.commit_sha AS doc_commit_sha, d.owner AS doc_owner,
-       d.approved_by AS doc_approved_by, d.approved_at AS doc_approved_at, d.review_by AS doc_review_by,
+       d.approved_by AS doc_approved_by, d.approved_at AS doc_approved_at,
+       d.stamp AS doc_stamp, d.review_by AS doc_review_by,
        r.source_url AS raw_source_url,
        meta.total, meta.normative_hits, meta.low_t2, meta.low_t3, meta.low_newest_at
   FROM meta

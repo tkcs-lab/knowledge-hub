@@ -95,11 +95,12 @@ def seed_rows(admin_dsn: str) -> dict[str, dict[str, str]]:
                 domain="product", title=f"Doc {case}", body=f"Body {case}", frontmatter=Jsonb({}),
                 status="current", stale=False, review_by=None, owner="team", entities=["prd:a"],
                 supersedes=[], superseded_by=None, commit_sha="c1", content_sha=f"s-{case}",
-                approved_by=["x"], approved_at=WHEN, merge_pr=1, pr_url=None, indexed_at=WHEN,
+                approved_by=["x"], stamp="reviewed", approved_at=WHEN, merge_pr=1, pr_url=None,
+                indexed_at=WHEN,
                 updated_at=WHEN, **vis))
             _insert(cur, "document_versions", dict(
                 document_id=doc, commit_sha="c1", path=f"docs/{case}.md", tier="T0", status="current",
-                approved_by=["x"], approved_at=WHEN, indexed_at=WHEN))
+                approved_by=["x"], stamp="reviewed", approved_at=WHEN, indexed_at=WHEN))
             _insert(cur, "raw_records", dict(
                 id=raw, source_system="meet", source_ref=f"ref-{case}", source_url=None, series=None,
                 folder=None, participants=None, title=f"Raw {case}", blob_key=None, excerpt="e",
