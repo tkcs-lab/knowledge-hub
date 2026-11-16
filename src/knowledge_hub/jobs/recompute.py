@@ -164,6 +164,13 @@ async def recompute_in(conn: Any, config: Config) -> str:
         ids = [row[0] for row in await cur.fetchall()]
         if ids:
             await _refresh_and_apply(conn, parent, spec, ids)
+    # Proposals are tied to one repo; a repo that left the configuration keeps its stored value.
+    for name, repo in config.repos.items():
+        await conn.execute(
+            "UPDATE kh.proposals SET required_audiences = %s"
+            " WHERE repo = %s AND required_audiences IS DISTINCT FROM %s",
+            ([repo.audience], name, [repo.audience]),
+        )
     digest = config_hash(config)
     await conn.execute(
         "INSERT INTO kh.repo_state (repo, config_hash) VALUES (%s, %s)"

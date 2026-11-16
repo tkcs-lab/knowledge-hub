@@ -54,6 +54,13 @@ MATRIX: dict[str, dict[str, dict[str, object]]] = {
         "kh_indexer": {"select": "all", "update": ("state", "decided_at") + VIS},
         "kh_provenance": {"select": ("id", "required_audiences", "allowed_emails")},
     },
+    # kh_app sees and inserts only its own rows (created_by_sub), and has no UPDATE: it moves a
+    # row through kh.proposal_mark.
+    "proposals": {
+        "kh_app": {"select": "visible", "insert": "check"},
+        "kh_indexer": {"select": "all",
+                       "update": ("state", "decided_at", "pr_number", "pr_url", "required_audiences")},
+    },
     "candidate_sources": {
         "kh_app": {"select": "parent", "insert": "check"},
         "kh_indexer": {"select": "all", "update": SNAP},
@@ -83,7 +90,7 @@ COMMANDS = ("select", "insert", "update", "delete")
 PROBE = {
     "documents": "title", "document_versions": "path", "chunks": "text",
     "entities_cache": "name", "raw_records": "title", "raw_audience_map": "audiences",
-    "derived_records": "title", "derived_sources": "version", "candidates": "title",
+    "derived_records": "title", "derived_sources": "version", "candidates": "title", "proposals": "title",
     "candidate_sources": "source_id", "conflicts": "note", "conflict_items": "item_id",
     "index_jobs": "last_error", "repo_state": "config_hash", "index_alerts": "message",
     "claim_jti": "expires_at", "schema_migrations": "sha256",
@@ -92,6 +99,7 @@ PROBE = {
 DEFINER_FUNCS = {
     "owns_derived": "kh_migrator", "owns_candidate": "kh_migrator", "owns_conflict": "kh_migrator",
     "my_raw_id": "kh_migrator", "claim_seen": "kh_migrator", "candidate_mark": "kh_migrator",
+    "proposal_mark": "kh_migrator", "count_proposals_today": "kh_migrator",
 }
 HELPER_FUNCS = ("caller_audiences", "caller_email", "caller_sub", "caller_type", "visible")
 
@@ -127,6 +135,10 @@ def factories(p: dict[str, str]) -> dict:
                                "target_repo": "canonical-all", "target_path": "product/x.md",
                                "title": "t", "body_sha": "s", "dedupe_key": uid(),
                                "created_by_sub": SUB_A, **vis},
+        "proposals": lambda: {"id": uid(), "kind": "doc", "state": "pending", "repo": "canonical-all",
+                              "path": "product/x.md", "doc_key": uid(), "domain": "product",
+                              "title": "t", "content_sha": "s", "dedupe_key": uid(),
+                              "requester_login": "alice", "created_by_sub": SUB_A, **vis},
         "candidate_sources": lambda: {"candidate_id": p["candidate"], "source_kind": "raw",
                                       "source_id": uid(), **snap},
         "conflicts": lambda: {"id": uid(), "state": "open", "created_by_sub": SUB_A, **vis},
