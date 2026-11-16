@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-forgejo-client
 
-- pending
+- review: Worker brief pointed to the plan manifest entry instead of pasting it; worker had no tld CLI, so roles were checked by the orchestrator (none required).
+- worker: none reported; worker suggested a CHANGELOG line, not added (outside touches).
 
 ## p2-proposals-migration
 
