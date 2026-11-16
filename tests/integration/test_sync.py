@@ -141,3 +141,43 @@ async def test_offset_and_fractional_dates_resync_unchanged(fresh_db, indexer_po
     await sync(indexer_pool, r)
     assert rows(fresh_db, SNAP) == first
     assert rows(fresh_db, "SELECT * FROM kh.repo_state") == state
+
+
+# --- re-plan under the lock when the stored verdicts changed (plan section 3.6) ---
+
+
+async def _count_plans(monkeypatch, loads):
+    import knowledge_hub.indexer.sync as sync_mod
+
+    real_load, calls, plans = sync_mod._load, iter(range(10)), []
+
+    async def fake_load(conn, repo):
+        state, existing, verdicts = await real_load(conn, repo)
+        return state, existing, loads[next(calls)](verdicts)
+
+    async def counting_plan(*args, **kwargs):
+        plans.append(1)
+        return await real_build(*args, **kwargs)
+
+    real_build = sync_mod.build_sync_plan
+    monkeypatch.setattr(sync_mod, "_load", fake_load)
+    monkeypatch.setattr(sync_mod, "build_sync_plan", counting_plan)
+    return plans
+
+
+async def test_sync_replans_when_verdicts_change_under_the_lock(fresh_db, indexer_pool, monkeypatch):
+    from knowledge_hub.indexer.trust import Verdict
+
+    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
+    plans = await _count_plans(
+        monkeypatch, [lambda v: v, lambda v: {**v, "zz": Verdict(status="disputed")}]
+    )
+    await sync(indexer_pool, r)
+    assert len(plans) == 2
+
+
+async def test_sync_plans_once_when_verdicts_are_equal(fresh_db, indexer_pool, monkeypatch):
+    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
+    plans = await _count_plans(monkeypatch, [lambda v: v, lambda v: dict(v)])
+    await sync(indexer_pool, r)
+    assert len(plans) == 1
