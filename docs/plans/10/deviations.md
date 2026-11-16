@@ -5,7 +5,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-shared-core
 
-- pending
+- worker: none
+- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check
+- review: full pytest -q cannot run here: integration tests error because the pgvector extension is missing on this machine; unit tests (244) and ruff pass
 
 ## p2-config-owners
 
