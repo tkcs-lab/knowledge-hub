@@ -77,6 +77,15 @@ def _fence(text: str) -> str:
     return "`" * max(3, longest + 1)
 
 
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _inert(text: str) -> str:
+    """Indent every line so none can start a column-0 CI directive (e.g. `Reason for widening:`)."""
+    return "\n".join("    " + line for line in text.splitlines()) or "    "
+
+
 def pr_body(
     title: str,
     path: str,
@@ -88,8 +97,8 @@ def pr_body(
 ) -> str:
     fence = _fence(rationale)
     return (
-        f"## What\n\nTitle: {title}\n\n`{path}`\n\n"
-        f"## Why\n\n{UNVERIFIED}\n\n{fence}\n{rationale}\n{fence}\n\n"
+        f"## What\n\nTitle: {_one_line(title)}\n\n`{_one_line(path)}`\n\n"
+        f"## Why\n\n{UNVERIFIED}\n\n{fence}\n{_inert(rationale)}\n{fence}\n\n"
         f"## Origin\n\n{trailers(tool, requester, proposal_id)}\nBase: {base_sha}\n"
     )
 
