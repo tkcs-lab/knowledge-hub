@@ -14,6 +14,8 @@ repos:
 raw_audience_map: {}
 ingest_principal_types: [n8n_workflow]
 restricted_audiences_imply_all: false
+self_merge_teams: []
+bot_logins: [kh-hub-bot]
 # Entity kinds: prefix -> Grist table, audiences, optional label. The list form "prd: [all]" still works for prd, cmp, ver and cus.
 entities:
   prd: {table: Products, audiences: [all], label: product}
