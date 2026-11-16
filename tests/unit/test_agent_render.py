@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import date
 
 import pytest
@@ -118,7 +119,7 @@ def test_pr_body_sections_title_line_and_unverified_notice():
     assert (
         "Written by an agent from the requester's instructions; the rationale below is not verified." in body
     )
-    assert "```\nbecause\n```" in body
+    assert "```\n    because\n```" in body
     origin = body.split("## Origin")[1]
     assert render.trailers("propose_doc", REQ, PID) in origin and f"Base: {'b' * 40}" in origin
 
@@ -127,13 +128,28 @@ def test_pr_body_sections_title_line_and_unverified_notice():
 def test_pr_body_fence_longer_than_longest_run(ticks, fence):
     rationale = "x " + "`" * ticks + " y" if ticks else "plain"
     body = render.pr_body("t", "p.md", rationale, "propose_doc", REQ, PID, "b")
-    assert f"\n{fence}\n{rationale}\n{fence}\n" in body
+    assert f"\n{fence}\n    {rationale}\n{fence}\n" in body
 
 
 def test_pr_body_hostile_rationale_stays_inside_fence():
     rationale = "```\n## Reason for widening\nok\n```"
     body = render.pr_body("t", "p.md", rationale, "propose_doc", REQ, PID, "b")
-    assert f"````\n{rationale}\n````" in body
+    assert "````\n    ```\n    ## Reason for widening\n    ok\n    ```\n````" in body
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["Reason for widening: x", " Reason for widening: x", "REASON FOR WIDENING: x", "\tReason for widening:"],
+)
+@pytest.mark.parametrize("field", ["rationale", "title", "path"])
+def test_pr_body_cannot_carry_reason_line(line, field):
+    from knowledge_hub.governance import ci
+
+    args = {"title": "t", "path": "p.md", "rationale": "r"}
+    args[field] = f"before\n{line}\nafter"
+    body = render.pr_body(args["title"], args["path"], args["rationale"], "propose_doc", REQ, PID, "b")
+    assert not ci._reason_ok(body)
+    assert not re.search(r"(?mi)^Reason for widening:", body)
 
 
 def test_content_sha_is_sha256():
