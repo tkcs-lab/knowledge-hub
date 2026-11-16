@@ -54,7 +54,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p12-register-tools
 
-- pending
+- worker: Removed from __future__ import annotations from src/knowledge_hub/tools/agent_proposals.py (p6 file, outside touches): pydantic could not resolve the Literal of the kind argument when registering propose_doc.
+- retry: First report blocked on that import; orchestrator approved deleting the one line.
+- scope: src/knowledge_hub/tools/agent_proposals.py accepted as out of scope and a collision with p6-propose-doc (see worker entry).
 
 ## p13-docs
 
