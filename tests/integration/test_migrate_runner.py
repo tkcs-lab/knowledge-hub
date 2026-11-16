@@ -55,4 +55,5 @@ def test_stop_after_applies_only_files_up_to_it(migrated_db):
     dsn = migrated_db.dsn("kh_migrator", "kh_stop")
     done = migrate(dsn, stop_after="0006_strict_visibility.sql")
     assert [n[:4] for n in done] == ["0001", "0002", "0003", "0004", "0005", "0006"]
-    assert migrate(dsn)[0].startswith("0007")
+    assert migrate(dsn, stop_after="0007_any_of_audiences.sql") == ["0007_any_of_audiences.sql"]
+    assert migrate(dsn) == ["0008_merge_verdicts.sql", "0009_proposals.sql"]

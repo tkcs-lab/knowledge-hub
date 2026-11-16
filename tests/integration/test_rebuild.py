@@ -11,6 +11,7 @@ from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.indexer.rebuild import check, config_hash, rebuild
 from knowledge_hub.mcp.server import Deps
 from tests.support.forgejo_fake import ForgejoFake
+from tests.support.self_merge_cases import build_trust_world, load_cases, make_fake
 from tests.unit.test_sync_plan import doc, merged, repo_of
 
 DB = "kh_fresh"
@@ -150,3 +151,95 @@ async def test_check_reports_chunk_agent_written_drift(fresh_db, indexer_pool):
         )
         conn.execute("ALTER TABLE kh.chunks ENABLE TRIGGER chunks_inherit_owner")
     assert len((await check(deps)).chunk_drift) == 1
+
+
+# --- stored merge verdicts and --rejudge (plan sections 3.5 and 3.6) ---
+
+CASE = {c["name"]: c for c in load_cases()}["owner-self-merge-in-own-domain"]
+VERDICTS = "SELECT merge_sha, status, stamp, approved_by, pr_number FROM kh.merge_verdicts ORDER BY 1"
+DOCS = "SELECT status, stamp, approved_by FROM kh.documents"
+
+
+def self_merge_deps(indexer_pool, teams=None, case=CASE):
+    repos, config = build_trust_world(case)
+    deps = make_deps(indexer_pool, None, config)
+    deps.forgejo = make_fake(case, repos, teams)
+    return deps
+
+
+def left_team():
+    return {t: set(m) - {"alice"} for t, m in CASE["teams"].items()}
+
+
+async def test_first_sync_stores_owner_merge_verdict(fresh_db, indexer_pool):
+    await rebuild(self_merge_deps(indexer_pool))
+    assert rows(fresh_db, VERDICTS) == [("m1", "trusted", "owner_merge", ["alice"], 1)]
+    assert rows(fresh_db, DOCS) == [("current", "owner_merge", ["alice"])]
+
+
+async def test_stored_verdict_survives_membership_change_and_plain_rebuild(fresh_db, indexer_pool):
+    await rebuild(self_merge_deps(indexer_pool))
+    stamped = rows(fresh_db, "SELECT merge_sha, judged_at FROM kh.merge_verdicts")
+    deps = self_merge_deps(indexer_pool, left_team())
+    await rebuild(deps)
+    await rebuild(deps, "canonical-all")
+    assert rows(fresh_db, VERDICTS) == [("m1", "trusted", "owner_merge", ["alice"], 1)]
+    assert rows(fresh_db, DOCS) == [("current", "owner_merge", ["alice"])]
+    assert rows(fresh_db, "SELECT merge_sha, judged_at FROM kh.merge_verdicts") == stamped
+    assert "is_team_member" not in deps.forgejo.calls
+
+
+async def test_rejudge_replaces_verdict_and_document(fresh_db, indexer_pool):
+    await rebuild(self_merge_deps(indexer_pool))
+    deps = self_merge_deps(indexer_pool, left_team())
+    await rebuild(deps, rejudge=True)
+    assert rows(fresh_db, DOCS) == [("disputed", None, [])]
+    assert rows(fresh_db, VERDICTS) == [("m1", "disputed", None, [], 1)]
+    again = rows(fresh_db, "SELECT merge_sha, judged_at FROM kh.merge_verdicts")
+    await rebuild(deps)
+    assert rows(fresh_db, DOCS) == [("disputed", None, [])]
+    assert rows(fresh_db, "SELECT merge_sha, judged_at FROM kh.merge_verdicts") == again
+
+
+async def test_rejudge_updates_the_stored_version(fresh_db, indexer_pool):
+    await rebuild(self_merge_deps(indexer_pool))
+    sql = (
+        "SELECT status, stamp, approved_by, approved_at FROM kh.document_versions WHERE commit_sha = 'm1'"
+    )
+    assert rows(fresh_db, sql)[0][:3] == ("current", "owner_merge", ["alice"])
+    await rebuild(self_merge_deps(indexer_pool, left_team()), rejudge=True)
+    assert rows(fresh_db, sql) == [("disputed", None, [], None)]
+
+
+async def test_rejudge_drops_rows_for_shas_off_the_chain(fresh_db, indexer_pool):
+    await rebuild(self_merge_deps(indexer_pool))
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO kh.merge_verdicts (repo, merge_sha, status, stamp)"
+            " VALUES ('canonical-all', 'gone', 'trusted', 'reviewed')"
+        )
+    deps = self_merge_deps(indexer_pool)
+    await rebuild(deps)
+    assert [r[0] for r in rows(fresh_db, VERDICTS)] == ["gone", "m1"]
+    await rebuild(deps, rejudge=True)
+    assert [r[0] for r in rows(fresh_db, VERDICTS)] == ["m1"]
+
+
+async def test_plain_approved_pr_stores_reviewed(fresh_db, indexer_pool):
+    await rebuild(make_deps(indexer_pool, two_docs()))
+    assert rows(fresh_db, VERDICTS) == [("m1", "trusted", "reviewed", ["bob"], 1)]
+
+
+async def test_disputed_merge_is_stored_without_stamp(fresh_db, indexer_pool):
+    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1, approve=False)])
+    await rebuild(make_deps(indexer_pool, r))
+    assert rows(fresh_db, VERDICTS) == [("m1", "disputed", None, [], 1)]
+
+
+async def test_document_row_without_stamp_gets_its_stamp(fresh_db, indexer_pool):
+    deps = make_deps(indexer_pool, two_docs())
+    await rebuild(deps)
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute("UPDATE kh.documents SET stamp = NULL")
+    await rebuild(deps)
+    assert rows(fresh_db, "SELECT stamp, approved_by FROM kh.documents") == [("reviewed", ["bob"])] * 2

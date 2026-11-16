@@ -44,6 +44,10 @@ async def test_document_fields(seeded_db, mcp_client):
     assert res.data["text"] == "Body all"
     assert res.data["owner"] == "team"
     assert res.data["approved_by"] == ["x"]
+    assert res.data["stamp"] == "reviewed"
+    for table, prefix in (("raw_records", "raw"), ("derived_records", "derived")):
+        other = await mcp_client.call(alice_all, "get_doc", {"id": f"{prefix}:{seeded_db[table]['all']}"})
+        assert other.data["stamp"] == ""
     assert res.data["commit_sha"] == "c1"
     assert res.data["superseded_by"] is None
     assert res.data["entities"] == ["prd:a"]

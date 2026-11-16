@@ -60,6 +60,24 @@ jobs:
             exit 1
           fi
 
+      - name: Require the ci checks on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+            --jq '.check_runs[] | select(.status == "completed" and .conclusion == "success") | .name' > "$RUNNER_TEMP/ci-green.txt"
+          missing=""
+          for name in "lint" "test (3.12)" "test (3.13)" "image"; do
+            grep -Fxq "$name" "$RUNNER_TEMP/ci-green.txt" || missing="$missing [$name]"
+          done
+          if [ -n "$missing" ]; then
+            echo "Required ci checks not green on this commit:$missing"
+            exit 1
+          fi
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build image

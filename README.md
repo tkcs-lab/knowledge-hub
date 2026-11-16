@@ -24,19 +24,23 @@ python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 .venv/bin/python -m pytest -q
 ```
 
+## CI
+
+The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: `lint` (ruff), `test (3.12)` and `test (3.13)` (the whole pytest suite against a throwaway PostgreSQL 16 with pgvector) and `image` (builds the Dockerfile on arm64 and runs `kh --help` in it). The commands are the ones in Quick start. A release dry run requires these four checks green on its commit by name (`.github/workflows/release.yml`), so a job renamed in `ci.yml` must be renamed there and in the `main` ruleset too.
+
 ## The `kh` commands
 
 | Command | Use |
 |---|---|
 | `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the webhook worker. |
 | `kh migrate` | Apply the SQL migrations as `kh_migrator`. |
-| `kh rebuild` | Re-walk trust from the configured anchor and re-index Forgejo. |
+| `kh rebuild` | Re-walk trust from the configured anchor and re-index Forgejo. `--rejudge` judges every merge afresh. |
 | `kh check` | Compare the index and the config with Forgejo; exit 1 on drift. |
 | `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
 | `kh recompute-visibility` | Rewrite visibility from the config. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
 | `kh validate` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. See [governance](docs/governance.md). |
-| `kh domain-owners` | CI gate: owner-team approvals of a pull request. See [governance](docs/governance.md). |
+| `kh domain-owners` | CI gate: owner-team approvals or self-merge by an owner of a pull request. See [governance](docs/governance.md). |
 | `kh governance render` | Write the seed files (schema, `owners.yml`, CODEOWNERS, PR template, workflow) of a canonical repo. See [governance](docs/governance.md). |
 
 ## Documentation

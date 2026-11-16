@@ -1,4 +1,4 @@
-"""Migration 0007_proposals: kh.proposals, proposal_mark, count_proposals_today (plan 16 3.8)."""
+"""Migration 0009_proposals: kh.proposals, proposal_mark, count_proposals_today (plan 16 3.8)."""
 
 from __future__ import annotations
 

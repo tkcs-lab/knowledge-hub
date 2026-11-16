@@ -44,7 +44,7 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_FORGEJO_URL` | none | Forgejo base URL. The worker and promotion exist only when it is set. |
 | `KH_FORGEJO_ORG` | `kh` | Forgejo organisation that holds the repos. Webhook events from other owners are ignored. `kh validate` and `kh domain-owners` use it too. |
 | `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of `kh-hub-bot`, used only for promotion branches and pull requests. |
-| `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token the indexer uses to fetch commits, reviews and files. Required when `KH_FORGEJO_URL` is set. |
+| `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token the indexer uses to fetch commits, reviews and files. Required when `KH_FORGEJO_URL` is set. It needs `read:organization` when `self_merge_teams` is not empty (team reads). |
 | `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. |
 
 ### Agent writes
@@ -120,13 +120,13 @@ A partial S3 setting is a startup error. With no S3 setting the raw-record tools
 |---|---|
 | `kh migrate` | Apply migrations as `kh_migrator`. |
 | `kh serve [--port 8080]` | Run the HTTP app and the webhook worker. |
-| `kh rebuild [--repo R]` | Re-walk trust from the anchor and re-index. Idempotent. |
+| `kh rebuild [--repo R] [--rejudge]` | Re-walk trust from the anchor and re-index, reusing the stored merge verdicts. Idempotent. `--rejudge` makes a fresh judgement of every merge and replaces the stored verdicts (see the [runbook](runbook.md#merge-verdicts-and---rejudge)). |
 | `kh check` | Compare the index with Forgejo and the config; exit 1 on drift. |
 | `kh recompute-visibility` | Rewrite visibility from the config. Run once after install or restore, and after any change to audiences, repos or `raw_audience_map`. |
 | `kh requeue-embeddings` | Queue embedding jobs for raw and derived records without chunks (after a restore). |
 | `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
 | `kh validate --repo R --base SHA --head SHA` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. Exit 0, 1 or 2. See [governance](governance.md). |
-| `kh domain-owners --repo R --pr N` | CI gate: owner-team approvals of a pull request. Exit 0, 1 or 2. See [governance](governance.md). |
+| `kh domain-owners --repo R --pr N` | CI gate: owner-team approvals or self-merge by an owner of a pull request. Exit 0, 1 or 2. See [governance](governance.md). |
 | `kh governance render --repo R --audience A --out DIR` | Write the schema, `owners.yml`, CODEOWNERS, PR template and workflow for a new canonical repo. |
 
 The CI runner needs `KH_CONFIG_FILE` in its environment when `kh.yaml` is not the default config.
@@ -146,6 +146,8 @@ Unknown keys are refused. Every error text starts with `config:`.
 | `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. A list means ANY of these audiences may read the rows (a wider audience, not a narrower one); the ingesting token must hold every listed audience. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
+| `self_merge_teams` | `[]` | Teams whose members may merge their own pull requests on the paths the team owns in `owners.yml`; the merge is then trusted with stamp `owner_merge`. Names match `^[a-z0-9][a-z0-9_-]*$`. Needs `read:organization` on the indexer token. Governance paths need `kh-admins`. |
+| `bot_logins` | `[kh-hub-bot]` | Logins that are bots. `kh-hub-bot` is always included. Bots never self-merge and their approvals never count. |
 | `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows (a list means ANY of these audiences may read the rows: a wider audience, not a narrower one), an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
 | `entities.<kind>.reference_audiences` | `[contracts, mgmt]` for `cus`, unset for the other default kinds | Repository audiences whose documents may cite the kind. Unset means any repository may cite it. Members must be in `audiences`, otherwise `config: entities <kind> has unknown reference audience ...`. Enforced by `kh validate`. See [entities](#entities). |
 | `governance.owner_teams` | `{}` | Map of audience to the Forgejo teams whose approval allows widening a PR into that audience (`kh domain-owners`). Keys must be in `audiences`; names match `^[a-z0-9][a-z0-9_-]{0,62}$`. Default: `owners-<audience>`, and the three domain teams for `all`. See [governance](governance.md). |
@@ -167,6 +169,8 @@ raw_audience_map:
   "folder:hr-interviews": [hr]
 ingest_principal_types: [n8n_workflow]
 restricted_audiences_imply_all: false
+self_merge_teams: []
+bot_logins: [kh-hub-bot]
 entities:
   prd: {table: Products, audiences: [all], label: product}
   cmp: {table: Components, audiences: [all], label: component}

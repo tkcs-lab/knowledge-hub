@@ -15,11 +15,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from knowledge_hub.approvals import BOT_LOGINS, requester_from_statuses
+from knowledge_hub.approvals import current_approvals, requester_from_statuses
 from knowledge_hub.config import Config
 from knowledge_hub.forgejo.client import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
-from knowledge_hub.indexer.trust import TRUSTED, Verdict, evaluate_chain, parse_forgejo_ts
+from knowledge_hub.indexer.trust import (
+    TRUSTED,
+    MergeInput,
+    Verdict,
+    evaluate_chain,
+    parse_forgejo_ts,
+)
+from knowledge_hub.merge_io import TeamDirectory, owners_at, tree_paths_changed
+from knowledge_hub.merge_rule import is_bot, same_person, teams_to_check
 
 BRANCH = "main"
 REWRITTEN = "main of {repo} was rewritten; run kh rebuild after review"
@@ -57,6 +65,7 @@ class DocUpsert:
     approved_at: str | None
     merge_pr: int | None
     pr_url: str | None
+    stamp: str | None
     required_audiences: list[str]
     allowed_emails: list[str] | None
     agent_written: bool = False
@@ -73,6 +82,7 @@ class DocVersion:
     status: str
     approved_by: list[str]
     approved_at: str | None
+    stamp: str | None = None
 
 
 @dataclass
@@ -95,6 +105,9 @@ class SyncPlan:
     alerts: list[IndexAlert] = field(default_factory=list)
     # New repo_state values; ``None`` when the sync was refused (state unchanged).
     repo_state: dict[str, Any] | None = None
+    # Merge verdicts judged in this run, to store (plan section 3.5).
+    verdicts: dict[str, Verdict] = field(default_factory=dict)
+    rejudge: bool = False
 
 
 @dataclass
@@ -106,7 +119,14 @@ class _File:
     commit_sha: str
 
 
-async def _gather_trust(forgejo: Any, repo: str, chain: list[dict[str, Any]], anchor: str | None):
+async def _gather_trust(
+    forgejo: Any,
+    repo: str,
+    chain: list[dict[str, Any]],
+    anchor: str | None,
+    config: Config,
+    stored: Mapping[str, Verdict],
+):
     """Collect PRs, reviews and changed files, then run the trust walk."""
     oldest_first = list(reversed(chain))
     start = 0
@@ -117,22 +137,58 @@ async def _gather_trust(forgejo: Any, repo: str, chain: list[dict[str, Any]], an
     prs: list[dict[str, Any]] = []
     reviews: dict[int, list[dict[str, Any]]] = {}
     changed: dict[str, list[str]] = {}
+    inputs: dict[str, MergeInput] = {}
     requesters: dict[int, tuple[tuple[str, ...], str | None]] = {}
+    directory = TeamDirectory(forgejo)
+    bots = config.bots
     for c in oldest_first[start:]:
         parents = c.get("parents") or []
         if parents:
             changed[c["sha"]] = await forgejo.changed_files(repo, parents[0]["sha"], c["sha"])
-        if len(parents) >= 2:
-            pull = await forgejo.pull_for_commit(repo, c["sha"])
-            if pull is not None:
-                prs.append(pull)
-                reviews[pull["number"]] = await forgejo.pull_reviews(repo, pull["number"])
-                record = requester_from_statuses(
-                    pull, await forgejo.commit_statuses(repo, pull["head"]["sha"])
-                )
-                if record != ((), None):
-                    requesters[pull["number"]] = record
-    return evaluate_chain(repo, chain, prs, reviews, changed, BOT_LOGINS, anchor, requesters), changed
+        if len(parents) < 2 or c["sha"] in stored:
+            continue
+        pull = await forgejo.pull_for_commit(repo, c["sha"])
+        if pull is None:
+            continue
+        prs.append(pull)
+        pr_reviews = await forgejo.pull_reviews(repo, pull["number"])
+        reviews[pull["number"]] = pr_reviews
+        record = requester_from_statuses(pull, await forgejo.commit_statuses(repo, pull["head"]["sha"]))
+        if record != ((), None):
+            requesters[pull["number"]] = record
+        logins, problem = record
+        if (
+            problem is not None
+            or not config.self_merge_teams
+            or current_approvals(pull, pr_reviews, bots, exclude_logins=logins)
+        ):
+            continue
+        user, merger = pull.get("user") or {}, pull.get("merged_by") or {}
+        author = user.get("login")
+        if not same_person(author, merger.get("login"), user.get("id"), merger.get("id")):
+            continue
+        if is_bot(author, bots):
+            continue
+        owners = await owners_at(forgejo, repo, parents[0]["sha"])
+        paths = await tree_paths_changed(forgejo, repo, parents[0]["sha"], c["sha"])
+        teams = await directory.teams_of(
+            author, teams_to_check(owners, paths, config.self_merge_teams)
+        )
+        inputs[c["sha"]] = MergeInput(owners, paths, teams)
+    result = evaluate_chain(
+        repo,
+        chain,
+        prs,
+        reviews,
+        changed,
+        bots,
+        anchor,
+        stored=stored,
+        inputs=inputs,
+        self_merge_teams=config.self_merge_teams,
+        requesters=requesters,
+    )
+    return result, changed
 
 
 def _last_commit_for(
@@ -164,6 +220,7 @@ def _doc_changed(row: Mapping[str, Any] | None, up: DocUpsert) -> bool:
         ("approved_by", up.approved_by),
         ("approved_at", up.approved_at),
         ("merge_pr", up.merge_pr),
+        ("stamp", up.stamp),
         ("agent_written", up.agent_written),
     )
     for key, value in pairs:
@@ -222,11 +279,13 @@ async def build_sync_plan(
     repo: str,
     repo_state: Mapping[str, Any] | None,
     existing_docs: Mapping[str, Mapping[str, Any]],
+    stored_verdicts: Mapping[str, Verdict] | None = None,
+    rejudge: bool = False,
 ) -> SyncPlan:
     if repo not in config.repos:
         raise ValueError(f"repo {repo} is not listed in config")
     rc = config.repos[repo]
-    plan = SyncPlan(repo=repo)
+    plan = SyncPlan(repo=repo, rejudge=rejudge)
 
     head = await forgejo.head_sha(repo, BRANCH)
     chain = await forgejo.commits_first_parent(repo, BRANCH)
@@ -243,7 +302,9 @@ async def build_sync_plan(
     anchor = rc.trust_anchor
     trusted, trust_alerts, trust_result = True, [], None
     if canonical:
-        trust_result, changed = await _gather_trust(forgejo, repo, chain, anchor)
+        stored = {} if rejudge else dict(stored_verdicts or {})
+        trust_result, changed = await _gather_trust(forgejo, repo, chain, anchor, config, stored)
+        plan.verdicts = dict(trust_result.judged)
         trusted, trust_alerts = trust_result.trusted, list(trust_result.alerts)
     else:
         changed = {}
@@ -349,6 +410,7 @@ async def build_sync_plan(
             approved_at=v.approved_at if trusted_file and v is not None else None,
             merge_pr=v.merge_pr if v is not None else None,
             pr_url=v.pr_url if v is not None else None,
+            stamp=v.stamp if trusted_file and v is not None else None,
             required_audiences=[rc.audience],
             allowed_emails=None,
             agent_written=_is_agent_written(rc.tier, f.path, d),
@@ -361,7 +423,15 @@ async def build_sync_plan(
         if row is None or row.get("commit_sha") != up.commit_sha:
             plan.versions.append(
                 DocVersion(
-                    repo, key, up.commit_sha, up.path, up.tier, up.status, up.approved_by, up.approved_at
+                    repo,
+                    key,
+                    up.commit_sha,
+                    up.path,
+                    up.tier,
+                    up.status,
+                    up.approved_by,
+                    up.approved_at,
+                    up.stamp,
                 )
             )
 

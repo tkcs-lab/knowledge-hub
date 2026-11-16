@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from knowledge_hub.approvals import BOT_LOGINS, current_approvals, requester_from_statuses
+from knowledge_hub.approvals import current_approvals, requester_from_statuses
 from knowledge_hub.config import Config, owner_teams_for
 from knowledge_hub.forgejo.client import ForgejoClient, ForgejoError
 from knowledge_hub.governance.messages import (
@@ -30,6 +30,8 @@ from knowledge_hub.governance.rules import (
 )
 from knowledge_hub.grist.client import GristClient
 from knowledge_hub.indexer.frontmatter import ParsedDoc, parse_document
+from knowledge_hub.merge_io import TeamDirectory, tree_paths_changed
+from knowledge_hub.merge_rule import self_merge_check, teams_to_check
 
 CONTEXT = "kh/validate"
 OWNERS_CONTEXT = "kh/domain-owners"
@@ -47,6 +49,7 @@ class CiError(RuntimeError):
 class CheckResult:
     lines: list[str]
     ok: bool
+    message: str = ""
 
 
 def _is_404(exc: ForgejoError) -> bool:
@@ -248,7 +251,7 @@ async def _domain_owners(
     reviews = await read.pull_reviews(repo, number)
     statuses = await read.commit_statuses(repo, pr["head"]["sha"])
     requesters, problem = requester_from_statuses(pr, statuses)
-    counted = current_approvals(pr, reviews, BOT_LOGINS, exclude_logins=requesters)
+    counted = current_approvals(pr, reviews, config.bots, exclude_logins=requesters)
     labels = [lab["name"] for lab in pr.get("labels") or [] if isinstance(lab.get("name"), str)]
     widen, label_problem = _widen(config, labels)
 
@@ -269,18 +272,60 @@ async def _domain_owners(
             raise CiError(f"team {team} does not exist in Forgejo")
         members[team] = {login for login in logins if await read.is_team_member(tid, login)}
 
-    lines = check_owners(
-        owners=owners,
-        paths=sorted(paths),
-        counted=counted,
-        members=members,
-        widen=widen,
-        widen_reason_ok=_reason_ok(pr.get("body")),
-        widen_label_problem=label_problem,
-    )
+    def owner_lines(*, waived: bool) -> list[str]:
+        return check_owners(
+            owners=owners,
+            paths=sorted(paths),
+            counted=counted,
+            members=members,
+            widen=widen,
+            widen_reason_ok=_reason_ok(pr.get("body")),
+            widen_label_problem=label_problem,
+            owner_approval_waived=waived,
+        )
+
+    lines = owner_lines(waived=False)
     if problem is not None:
-        lines = sorted([*lines, problem])
-    return CheckResult(lines, not lines)
+        # An agent proposal without a valid requester record fails closed; no self-merge waiver.
+        return CheckResult(sorted([*lines, problem]), False)
+    if not lines:
+        approvers = sorted({login for team in members.values() for login in team})
+        message = f"approved by {', '.join(approvers)}" if paths and approvers else "no owner approval needed"
+        return CheckResult([message], True, message)
+    message = ""
+    user = pr.get("user") or {}
+    author = user.get("login")
+    # A requester never merges their own agent-written change alone (plan 16, 3.7).
+    requested = isinstance(author, str) and author.casefold() in {r.casefold() for r in requesters}
+    if (
+        config.self_merge_teams
+        and not requested
+        and not any(n.startswith("widen-audience") for n in labels)
+    ):
+        tree_changed = await tree_paths_changed(
+            read, repo, pr.get("merge_base") or base_sha, pr["head"]["sha"]
+        )
+        touched = sorted(set(paths) | set(tree_changed))
+        author_teams: frozenset[str] = frozenset()
+        if author is not None:
+            author_teams = await TeamDirectory(read).teams_of(
+                author, teams_to_check(owners, touched, config.self_merge_teams)
+            )
+        sm = self_merge_check(
+            author=author,
+            merger=author,
+            author_id=user.get("id"),
+            merger_id=user.get("id"),
+            bots=config.bots,
+            owners=owners,
+            paths=touched,
+            self_merge_teams=config.self_merge_teams,
+            author_teams=author_teams,
+        )
+        if sm.ok:
+            lines = owner_lines(waived=True)
+            message = f"self-merge by owner {author}"
+    return CheckResult(lines or [message], not lines, "" if lines else message)
 
 
 async def run_domain_owners(
@@ -307,7 +352,8 @@ async def run_domain_owners(
         raise
     if post:
         if result.ok:
-            await status.post_status(repo, head, OWNERS_CONTEXT, "success", "all checks passed")
+            description = result.message[:140] if result.message else "all checks passed"
+            await status.post_status(repo, head, OWNERS_CONTEXT, "success", description)
         else:
             await status.post_status(repo, head, OWNERS_CONTEXT, "failure", f"{len(result.lines)} problems")
     return result

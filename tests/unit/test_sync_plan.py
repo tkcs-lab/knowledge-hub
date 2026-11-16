@@ -52,6 +52,9 @@ async def test_approval_fields_and_visibility():
     p = await plan({"canonical-all": r})
     u = up(p, "a")
     assert (u.status, u.approved_by, u.approved_at) == ("current", ["bob"], "2026-11-02T10:00:00Z")
+    assert u.stamp == "reviewed"
+    assert [v.stamp for v in p.versions] == ["reviewed"]
+    assert list(p.verdicts) == ["m1"] and p.verdicts["m1"].stamp == "reviewed"
     assert (u.merge_pr, u.pr_url, u.commit_sha) == (1, "https://forgejo.test/kh/repo/pulls/1", "m1")
     assert (u.tier, u.required_audiences, u.allowed_emails) == ("T0", ["all"], None)
     assert [v.commit_sha for v in p.versions] == ["m1"]
@@ -192,7 +195,13 @@ def test_doc_changed_compares_instants_not_strings():
            "approved_by": ["bob"], "approved_at": "2026-11-02T10:00:00Z", "merge_pr": 1,
            "agent_written": False}  # fmt: skip
     base = dict(
-        path="a.md", content_sha="c", commit_sha="k", status="current", approved_by=["bob"], merge_pr=1,
+        path="a.md",
+        content_sha="c",
+        commit_sha="k",
+        status="current",
+        approved_by=["bob"],
+        merge_pr=1,
+        stamp=None,
         agent_written=False,
     )
     same = SimpleNamespace(**base, approved_at="2026-11-02T11:00:00.600+01:00")
