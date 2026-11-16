@@ -19,7 +19,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-docs-retire
 
-- pending
+- worker: worker had no tld CLI; orchestrator found no roles required and ran the verification
 
 ## Final review
 
