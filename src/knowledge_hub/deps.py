@@ -37,7 +37,7 @@ def make_forgejo(settings: Settings) -> ForgejoClient | None:
     if settings.forgejo_indexer_token_file is None:
         raise ValueError("KH_FORGEJO_INDEXER_TOKEN_FILE is required when KH_FORGEJO_URL is set")
     token = settings.forgejo_indexer_token_file.read_text().strip()
-    return ForgejoClient(settings.forgejo_url, token, settings.forgejo_org)
+    return ForgejoClient(settings.forgejo_url, token, settings.forgejo_org, role="read")
 
 
 def make_forgejo_bot(settings: Settings) -> ForgejoClient | None:
@@ -46,6 +46,17 @@ def make_forgejo_bot(settings: Settings) -> ForgejoClient | None:
         return None
     token = settings.forgejo_bot_token_file.read_text().strip()
     return ForgejoClient(settings.forgejo_url, token, settings.forgejo_org)
+
+
+def make_forgejo_notes(settings: Settings, config: Config) -> ForgejoClient | None:
+    """The write client for agent notes (notes token); None while the notes token is not set."""
+    if not settings.forgejo_url or settings.forgejo_notes_token_file is None:
+        return None
+    token = settings.forgejo_notes_token_file.read_text().strip()
+    t1 = [name for name, repo in config.repos.items() if repo.tier == "T1"]
+    return ForgejoClient(
+        settings.forgejo_url, token, settings.forgejo_org, role="notes", notes_repos=t1
+    )
 
 
 def make_verifier(settings: Settings) -> ClaimVerifier | None:
@@ -72,11 +83,14 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
     blobs = make_blob_store(settings)
     forgejo = make_forgejo(settings)
     forgejo_bot = None
+    forgejo_notes = None
     try:
         forgejo_bot = make_forgejo_bot(settings)
+        forgejo_notes = make_forgejo_notes(settings, config)
     except BaseException:
-        if forgejo is not None:
-            await forgejo.aclose()
+        for client in (forgejo, forgejo_bot):
+            if client is not None:
+                await client.aclose()
         raise
     app_pool = make_app_pool(settings)
     indexer_pool = make_indexer_pool(settings)
@@ -90,6 +104,8 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
             await forgejo.aclose()
         if forgejo_bot is not None:
             await forgejo_bot.aclose()
+        if forgejo_notes is not None:
+            await forgejo_notes.aclose()
         raise
     worker = None
     if forgejo is not None:
@@ -105,6 +121,7 @@ async def build_deps(settings: Settings, config: Config) -> Deps:
         blobs=blobs,
         forgejo=forgejo,
         forgejo_bot=forgejo_bot,
+        forgejo_notes=forgejo_notes,
         verifier=verifier,
         worker=worker,
         ratelimiter=RateLimiter(settings.rate_limit_per_min),
@@ -118,6 +135,8 @@ async def close_deps(deps: Deps) -> None:
         await deps.forgejo.aclose()
     if deps.forgejo_bot is not None:
         await deps.forgejo_bot.aclose()
+    if deps.forgejo_notes is not None:
+        await deps.forgejo_notes.aclose()
     if deps.indexer_pool is not None:
         await deps.indexer_pool.close()
     await deps.app_pool.close()

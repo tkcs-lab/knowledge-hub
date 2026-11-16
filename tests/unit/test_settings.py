@@ -79,3 +79,37 @@ def test_cli_daily_exits_2_without_grist_url(monkeypatch, capsys):
     monkeypatch.delenv("KH_GRIST_URL", raising=False)
     assert cli.main(["daily"]) == 2
     assert capsys.readouterr().err.strip()
+
+
+def test_agent_settings_defaults():
+    s = load_settings()
+    assert s.agent_notes_enabled is False and s.agent_proposals_enabled is False
+    assert s.forgejo_notes_token_file is None and s.agent_email_domains == ""
+    assert s.agent_note_daily_limit == 20 and s.agent_proposal_daily_limit == 5
+    assert s.agent_max_body_bytes == 131072 and s.ci_status_logins == "kh-ci"
+
+
+def test_agent_notes_flag_needs_url_token_and_domains(monkeypatch):
+    monkeypatch.setenv("KH_AGENT_NOTES_ENABLED", "true")
+    with pytest.raises(ValidationError, match="KH_AGENT_NOTES_ENABLED needs KH_FORGEJO_URL"):
+        load_settings()
+    monkeypatch.setenv("KH_FORGEJO_URL", "http://f")
+    monkeypatch.setenv("KH_FORGEJO_NOTES_TOKEN_FILE", "/t")
+    with pytest.raises(ValidationError, match="KH_AGENT_EMAIL_DOMAINS"):
+        load_settings()
+    monkeypatch.setenv("KH_AGENT_EMAIL_DOMAINS", "example.org")
+    assert load_settings().agent_notes_enabled is True
+
+
+def test_agent_proposals_flag_needs_url_token_and_domains(monkeypatch):
+    monkeypatch.setenv("KH_AGENT_PROPOSALS_ENABLED", "true")
+    with pytest.raises(
+        ValidationError,
+        match="KH_AGENT_PROPOSALS_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_BOT_TOKEN_FILE and "
+        "KH_AGENT_EMAIL_DOMAINS",
+    ):
+        load_settings()
+    monkeypatch.setenv("KH_FORGEJO_URL", "http://f")
+    monkeypatch.setenv("KH_FORGEJO_BOT_TOKEN_FILE", "/t")
+    monkeypatch.setenv("KH_AGENT_EMAIL_DOMAINS", "example.org")
+    assert load_settings().agent_proposals_enabled is True

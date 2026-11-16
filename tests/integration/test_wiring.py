@@ -87,3 +87,28 @@ async def test_build_deps_bot_client_only_when_bot_token_file_is_set(wiring_sett
         assert deps.forgejo._http.headers["Authorization"] == "token indexer-token-for-test"
     finally:
         await close_deps(deps)
+
+
+async def test_build_deps_notes_client_only_with_token_file(wiring_settings, tmp_path):
+    indexer, notes = tmp_path / "indexer", tmp_path / "notes"
+    indexer.write_text("indexer-token-for-test\n")
+    notes.write_text("notes-token-for-test\n")
+    base = wiring_settings.model_copy(
+        update={"forgejo_url": "https://forgejo.test.example", "forgejo_indexer_token_file": indexer}
+    )
+    deps = await build_deps(base, Config())
+    try:
+        assert deps.forgejo_notes is None
+        assert deps.forgejo.role == "read"
+    finally:
+        await close_deps(deps)
+    deps = await build_deps(base.model_copy(update={"forgejo_notes_token_file": notes}), Config())
+    try:
+        assert deps.forgejo_notes is not None and deps.forgejo_notes is not deps.forgejo
+        assert deps.forgejo.role == "read" and deps.forgejo_notes.role == "notes"
+        assert deps.forgejo_notes.notes_repos == {"notes-all"}
+        assert deps.forgejo_notes._http.headers["Authorization"] == "token notes-token-for-test"
+        notes_http = deps.forgejo_notes._http
+    finally:
+        await close_deps(deps)
+    assert notes_http.is_closed

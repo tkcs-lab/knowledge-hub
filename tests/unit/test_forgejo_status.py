@@ -95,3 +95,33 @@ async def test_post_status_error_has_no_token():
     with pytest.raises(ForgejoError) as ei:
         await c.post_status("r", "abc", "kh/validate", "success", "d")
     assert TOKEN not in str(ei.value)
+
+
+def _item(n):
+    return {"id": n, "status": "success", "context": f"c{n}", "description": "d",
+            "creator": {"login": "kh-ci", "id": 3}}
+
+
+async def test_commit_statuses_shape():
+    items = [_item(1), {"context": "x", "state": "failure", "description": "", "creator": None}]
+    c, seen = make(lambda r: js(items))
+    assert await c.commit_statuses("r", "abc") == [
+        {"context": "c1", "state": "success", "description": "d", "creator": "kh-ci"},
+        {"context": "x", "state": "failure", "description": "", "creator": None},
+    ]
+    assert seen[0].url.path == "/api/v1/repos/kh/r/commits/abc/statuses"
+
+
+async def test_commit_statuses_pages_and_bound():
+    def h(r):
+        page = int(r.url.params["page"])
+        return js([_item(page * 100 + i) for i in range(50)] if page < 3 else [_item(1)])
+
+    c, seen = make(h)
+    assert len(await c.commit_statuses("r", "abc")) == 101
+    assert len(seen) == 3
+
+    c, seen = make(lambda r: js([_item(i) for i in range(50)]))
+    with pytest.raises(ForgejoError, match="too many statuses"):
+        await c.commit_statuses("r", "abc")
+    assert len(seen) == 20
