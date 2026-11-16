@@ -88,15 +88,13 @@ One statement inside `caller_tx`: an exact vector order (no ANN index) fused by 
 - `kh recompute-visibility` rewrites `raw_audience_map` from config, then raw rows, document visibility, derived rows, candidates and conflicts in one transaction. It refreshes the source snapshots, so deleting a source never widens a row.
 - `kh daily` sets entity visibility from `config.entities` on every run; recompute does not touch `entities_cache`.
 
-## Deviation from the PrivacyFence contract
+## Deviation from the PrivacyFence contract (resolved)
 
 `docs/identity-claim.md` in PrivacyFence says only `sub`, `principal_type`, `audiences` and `req` may change what a query returns, and calls `email` audit-only. The hub uses `email` for visibility: `allowed_emails` rows (meeting attendees, for example) match the claim's lower-cased `email`, and only for `claude_client` callers. The owner decided this on 2026-11-15 because attendee-only records cannot be expressed with group audiences.
 
-Risks: the hub trusts `email` only because PrivacyFence signs the claim and sets it only for a verified person; a change in how PrivacyFence fills it changes who sees attendee-only rows. Ask PrivacyFence to:
+PrivacyFence 8.0.0a3 ships the opt-in key `email_for_visibility` (PrivacyFence ADR 0310). The declaration sets it, so PrivacyFence puts the verified email in the claim for this upstream.
 
-1. bless `email` as a visibility input for upstreams that opt in, and document it in `docs/identity-claim.md`;
-2. promise that `email` is present only for a verified person and never for `n8n_workflow` or `service`, and that it is lower-cased or stable in case;
-3. announce any change of `email` semantics before shipping it, and keep it in the signed payload.
+A change of how PrivacyFence fills `email` changes who sees attendee-only rows.
 
 ## Rejected alternatives
 
