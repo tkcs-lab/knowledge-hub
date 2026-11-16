@@ -10,7 +10,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-python-rules
 
-- pending
+- worker: test_recompute_matches_migration.py seeds its document in canonical-hr (not canonical-all) and its own fixed-id rows, so the second recompute changes nothing
+- worker: worker had no tld CLI; orchestrator found no roles required and ran the verification
 
 ## p3-leak-matrix
 
