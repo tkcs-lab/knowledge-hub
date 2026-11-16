@@ -21,7 +21,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-store-and-rebuild
 
-- pending
+- None.
 
 ## p5-stamp-output
 
