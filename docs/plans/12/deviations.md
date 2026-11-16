@@ -22,6 +22,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p4-store-and-rebuild
 
 - None.
+- final: The worker ran the document_versions UPDATE on every sync, not only on --rejudge, and wrote the merge verdict onto disputed version rows (final review, blocking); fixed by fix-1.
+- review: The DELETE of kh.merge_verdicts on --rejudge is also guarded by not plan.refused, which the plan did not say (final review, non-blocking).
 
 ## p5-stamp-output
 
