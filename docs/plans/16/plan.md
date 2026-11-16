@@ -180,7 +180,7 @@ Metrics: `kh_agent_write_failures_total{tool,reason}` with `reason` `refused` (a
 
 Unit: `tests/unit/test_agent_rules.py` (ids, titles incl. markup, `review_by` window, entities, text hygiene by Unicode category with one case per class incl. a tag-character payload, variation selector, soft hyphen, `<!--`, NFC, body size, body starting `---`, rationale bounds, `base_commit` format, login mapping and allowed domains, path building and `parse_layout` agreement, `..`, `//`, glossary, `.forgejo`, citation extraction incl. upper-case ids, day start and next-day text); `test_agent_render.py` (frontmatter round trip through `parse_document`, forbidden keys never rendered, deterministic output, trailers, PR body fence and `Title:` line, git blob sha); `test_agent_guards.py` (audience and repo lookups, failure metric); `test_forgejo_write.py`/`test_forgejo_client.py` (prefixes, roles `read` and `notes` refuse every branch write, `put_note` path and repo guards incl. a trailing newline, `post_requester` guard, the five new reads); `test_approvals.py` (exclusion, case-folding, `requester_from_statuses`: valid, missing, status from a non-poster, uuid of another proposal, two logins on a proposal, two logins on another PR both excluded); `test_domain_owners.py` (requester approval ignored, another owner counted, no record fails, human commit on top fails, other PRs unaffected); `test_trust.py`; `test_settings.py` (flags default false, validator).
 
-Integration (fake Forgejo and test Postgres): `test_agent_proposals_schema.py` (RLS own-rows select, insert check, `proposal_mark` kind-aware transitions, counts function, dedupe index and note rows, `agent_written` trigger); `test_agent_store.py`; `test_agent_write_note.py` (create, unchanged retry, lost response after commit then retry, update needs `base_commit`, stale `base_commit`, not-yours incl. same login different sub, id in use incl. a human file in the tree, audience not held, no notes repo, n8n refused, no email, domain not allowed, limit 20, size, failed-write retry, trailers and author, nothing written to a canonical repo); `test_agent_propose_doc.py` (path and layout, type and owner, labels, requester status on the branch head posted before the PR, branch prefix, nothing on `main`, idempotent retry, adoption of a pending proposal whose PR exists, a foreign commit between branch creation and write, the `(domain, repo)` limit counting candidates while `propose_change` ignores agent rows, per-requester limit, citation refusals); `test_agent_propose_edit.py`; `test_agent_status.py` (own proposal, foreign and missing ids give the same answer, checks from the expected posters only, approvals, requester approval flagged, merged and indexed); `test_agent_proposal_events.py`; `test_agent_tools_mcp.py` (all five tools through `mcp_client`); `test_wiring.py`; `test_sync.py` (requester exclusion in the trust walk, T1 duplicate rule); `test_search_ranking.py`, `test_tool_get_doc.py`, `test_rebuild.py` (marking, `NORMATIVE`, drift); the leak matrix cases; `test_recompute.py`.
+Integration (fake Forgejo and test Postgres): `test_agent_proposals_schema.py` (RLS own-rows select, insert check, `proposal_mark` kind-aware transitions, counts function, dedupe index and note rows, `agent_written` trigger); `test_agent_store.py`; `test_agent_write_note.py` (create, unchanged retry, lost response after commit then retry, update needs `base_commit`, stale `base_commit`, not-yours incl. same login different sub, id in use incl. a human file in the tree, audience not held, no notes repo, n8n refused, no email, domain not allowed, limit 20, size, failed-write retry, trailers and author, nothing written to a canonical repo); `test_agent_propose_doc.py` (path and layout, type and owner, labels, requester status on the branch head posted before the PR, branch prefix, nothing on `main`, idempotent retry, adoption of a pending proposal whose PR exists, a young pending proposal without a PR, a foreign commit between branch creation and write, the `(domain, repo)` limit counting candidates while `propose_change` ignores agent rows, per-requester limit, citation refusals); `test_agent_propose_edit.py`; `test_agent_status.py` (own proposal, foreign and missing ids give the same answer, checks from the expected posters only, approvals, requester approval flagged, merged and indexed); `test_agent_proposal_events.py`; `test_agent_tools_mcp.py` (all five tools through `mcp_client`); `test_wiring.py`; `test_sync.py` (requester exclusion in the trust walk, T1 duplicate rule); `test_search_ranking.py`, `test_tool_get_doc.py`, `test_rebuild.py` (marking, `NORMATIVE`, drift); the leak matrix cases; `test_recompute.py`.
 
 ## 4. ADRs
 
@@ -610,14 +610,14 @@ phases:
       - .venv/bin/python -m ruff check src/knowledge_hub/tools/agent_notes.py tests/integration/test_agent_write_note.py passes
   - id: p6-propose-doc
     title: The propose_doc tool
-    depends_on: [p1-forgejo-client, p4-agent-store]
+    depends_on: [p1-forgejo-client, p4-agent-store, p8-governance]
     complexity: M
     touches:
       - src/knowledge_hub/tools/agent_proposals.py
       - tests/integration/test_agent_propose_doc.py
     brief: |
       Read first: docs/plans/16/plan.md sections 3.2 to 3.4, 3.6 to 3.8; src/knowledge_hub/tools/promote.py;
-      src/knowledge_hub/governance/owners.py (`load_owners`, `OwnersFile.domains`); src/knowledge_hub/agent/*;
+      src/knowledge_hub/approvals.py; src/knowledge_hub/proposals.py; src/knowledge_hub/governance/owners.py (`load_owners`, `OwnersFile.domains`); src/knowledge_hub/agent/*;
       tests/integration/test_propose_change.py; tests/integration/test_tool_get_doc.py lines 115-131.
       1. Create `tools/agent_proposals.py` with the shared helper `async def submit(call, *, tool, kind, repo,
          path, doc_key, domain, title, subject, text, rationale, requester, base_sha) -> dict` and `async def
@@ -641,7 +641,7 @@ phases:
          "pr_url", "existing": True}`; state `pending` is adopted when `pull = await bot.pull_for_head(repo,
          existing.branch)` is an open PR whose `user.login` is in `REQUESTER_POSTERS`, whose base ref is `main`
          and for which `requester_from_statuses(pull, await bot.commit_statuses(repo, pull["head"]["sha"]))`
-         returns `(requester.login,)` (then `mark(..., "pr_open", branch=existing.branch, commit_sha=pull["head"]
+         returns exactly one login that equals `requester.login` when both are case-folded (then `mark(..., "pr_open", branch=existing.branch, commit_sha=pull["head"]
          ["sha"], pr=(number, url))` and return it with `existing: True`); a `pending` row younger than five
          minutes that cannot be adopted raises `kh_error("proposal_failed", PROPOSAL_FAILED, tool=tool)`
          (another call may be running); an older one is marked `failed` and the call goes on as a new proposal;
@@ -669,7 +669,7 @@ phases:
          after `put_file` and before `open_pull`, that its sha equals the branch head, that the PR labels are
          exactly the two named, that no call touches `main`, and these cases: a person's commit pushed to the branch between `create_branch` and `put_file` (through
          `fake.on_put_file`) gives PROPOSAL_FAILED and no requester record; a `pending` row whose PR exists is
-         adopted; a `pending` row without a PR becomes `failed` and a new proposal uses a new branch; rows of
+         adopted; a `pending` row older than five minutes without a PR (the test ages it with `UPDATE kh.proposals SET created_at = now() - interval '10 minutes'` on the admin connection) becomes `failed` and a new proposal uses a new branch; a younger `pending` row without a PR gives PROPOSAL_FAILED and creates no branch; rows of
          `propose_doc` count toward the `(domain, repo)` limit of later agent proposals but a full agent count does
          not stop `propose_change` (call `propose_change` in the test).
       Stop: if `owners.domains` has no team for a default domain in the test `owners.yml`, stop with
