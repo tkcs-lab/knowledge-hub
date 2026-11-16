@@ -13,7 +13,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2b-forbid-stamp
 
-- pending
+- None.
 
 ## p3-trust-walk
 
