@@ -30,7 +30,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-validate-rules
 
-- pending
+- worker: none
+- review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check
 
 ## p6-validate-command
 
