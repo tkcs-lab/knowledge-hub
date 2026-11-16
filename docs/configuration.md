@@ -129,7 +129,8 @@ Unknown keys are refused. Every error text starts with `config:`.
 | `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. Unknown audiences are refused. |
 | `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
 | `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
-| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
+| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows, an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
+| `entities.<kind>.reference_audiences` | `[contracts, mgmt]` for `cus`, unset for the other default kinds | Repository audiences whose documents may cite the kind. Unset means any repository may cite it. Members must be in `audiences`, otherwise `config: entities <kind> has unknown reference audience ...`. Enforced by `kh validate`. See [entities](#entities). |
 | `governance.owner_teams` | `{}` | Map of audience to the Forgejo teams whose approval allows widening a PR into that audience (`kh domain-owners`). Keys must be in `audiences`; names match `^[a-z0-9][a-z0-9_-]{0,62}$`. Default: `owners-<audience>`, and the three domain teams for `all`. See [governance](governance.md). |
 | `forgejo_web_url` | null | Base URL for `source_link`; empty links when null. |
 
@@ -153,7 +154,7 @@ entities:
   prd: {table: Products, audiences: [all], label: product}
   cmp: {table: Components, audiences: [all], label: component}
   ver: {table: Versions, audiences: [all], label: version}
-  cus: {table: Customers, audiences: [contracts], label: customer}
+  cus: {table: Customers, audiences: [contracts], label: customer, reference_audiences: [contracts, mgmt]}
   # a home install might use only kinds such as this one
   # fam: {table: Family, audiences: [all], label: family member}
 forgejo_web_url: https://forgejo.example.invalid
