@@ -189,15 +189,19 @@ def test_doc_changed_compares_instants_not_strings():
     from knowledge_hub.indexer.sync_plan import _doc_changed
 
     row = {"path": "a.md", "content_sha": "c", "commit_sha": "k", "status": "current",
-           "approved_by": ["bob"], "approved_at": "2026-11-02T10:00:00Z", "merge_pr": 1}  # fmt: skip
+           "approved_by": ["bob"], "approved_at": "2026-11-02T10:00:00Z", "merge_pr": 1,
+           "agent_written": False}  # fmt: skip
     base = dict(
-        path="a.md", content_sha="c", commit_sha="k", status="current", approved_by=["bob"], merge_pr=1
+        path="a.md", content_sha="c", commit_sha="k", status="current", approved_by=["bob"], merge_pr=1,
+        agent_written=False,
     )
     same = SimpleNamespace(**base, approved_at="2026-11-02T11:00:00.600+01:00")
     other = SimpleNamespace(**base, approved_at="2026-11-02T10:00:01Z")
     assert not _doc_changed(row, same)
     assert _doc_changed(row, other)
     assert _doc_changed(row, SimpleNamespace(**base, approved_at=None))
+    flagged = dict(base, agent_written=True)
+    assert _doc_changed(row, SimpleNamespace(**flagged, approved_at="2026-11-02T10:00:00Z"))
 
 
 async def test_dot_path_markdown_is_skipped():
@@ -207,3 +211,32 @@ async def test_dot_path_markdown_is_skipped():
     p = await plan({"canonical-all": r})
     assert [u.doc_key for u in p.upserts] == ["a"]
     assert not any(a.path == ".forgejo/x.md" for a in p.alerts)
+
+
+async def test_agent_written_marks_agent_path_and_type_in_t1_only():
+    files = {
+        "agent/a.md": doc("a", "type: agent-note\n"),
+        "agent/b.md": doc("b"),  # the type key was removed: the path still marks it
+        "c.md": doc("c", "type: agent-note\n"),
+        "d.md": doc("d"),
+    }
+    r = FakeRepo([FakeCommit("n1", [], files)])
+    p = await plan({"notes-all": r}, repo="notes-all")
+    assert {u.doc_key: u.agent_written for u in p.upserts} == {"a": True, "b": True, "c": True, "d": False}
+    t0 = repo_of([merged("m1", "a0", {"agent/a.md": doc("a", "type: agent-note\n")}, 1)])
+    p0 = await plan({"canonical-all": t0})
+    assert up(p0, "a").agent_written is False
+
+
+async def test_squatted_id_keeps_the_human_note_in_t1():
+    files = {"agent/d.md": doc("d", "type: agent-note\n"), "notes/d.md": doc("d")}
+    r = FakeRepo([FakeCommit("n1", [], files)])
+    p = await plan({"notes-all": r}, repo="notes-all", existing={"d": {"path": "agent/d.md"}})
+    assert [(u.path, u.agent_written) for u in p.upserts] == [("notes/d.md", False)]
+    assert any(a.path == "agent/d.md" and "duplicate id d" in a.message for a in p.alerts)
+    assert p.removals == []
+    # Two human files, or two agent files, are all rejected as before.
+    r2 = FakeRepo([FakeCommit("n1", [], {"a/d.md": doc("d"), "b/d.md": doc("d")})])
+    assert (await plan({"notes-all": r2}, repo="notes-all")).upserts == []
+    r3 = FakeRepo([FakeCommit("n1", [], {"agent/d.md": doc("d"), "agent/e.md": doc("d")})])
+    assert (await plan({"notes-all": r3}, repo="notes-all")).upserts == []

@@ -59,6 +59,7 @@ class DocUpsert:
     pr_url: str | None
     required_audiences: list[str]
     allowed_emails: list[str] | None
+    agent_written: bool = False
     changed: bool = True  # differs from the existing row
 
 
@@ -143,6 +144,11 @@ def _last_commit_for(
     return default
 
 
+def _is_agent_written(tier: str, path: str, doc: ParsedDoc) -> bool:
+    """A T1 file under ``agent/`` or of type ``agent-note``; removing the type key does not unmark it."""
+    return tier == "T1" and (path.startswith("agent/") or doc.type == "agent-note")
+
+
 def _approved(f: _File) -> bool:
     return f.verdict is not None and f.verdict.status == TRUSTED
 
@@ -158,11 +164,14 @@ def _doc_changed(row: Mapping[str, Any] | None, up: DocUpsert) -> bool:
         ("approved_by", up.approved_by),
         ("approved_at", up.approved_at),
         ("merge_pr", up.merge_pr),
+        ("agent_written", up.agent_written),
     )
     for key, value in pairs:
         old = row.get(key)
         if key == "approved_by":
             old = list(old or [])
+        if key == "agent_written":
+            old = bool(old)
         if key == "approved_at":
             old, value = parse_forgejo_ts(old), parse_forgejo_ts(value)
             old = old and old.replace(microsecond=0)
@@ -289,8 +298,14 @@ async def build_sync_plan(
             # The one file last changed by an approved merge could stay, but only when no other
             # file with the id was also approved; with two or more approved all are rejected.
             approved = [f for f in group if _approved(f)]
+            human = [f for f in group if not _is_agent_written(rc.tier, f.path, f.doc)]
+            keep = None
             if len(approved) == 1:
                 keep = approved[0]
+            elif rc.tier == "T1" and len(human) == 1:
+                # A squatted id cannot remove a human note: keep it, reject only the agent notes.
+                keep = human[0]
+            if keep is not None:
                 rejected_paths.remove(keep.path)
                 files[doc_id] = keep
         else:
@@ -336,6 +351,7 @@ async def build_sync_plan(
             pr_url=v.pr_url if v is not None else None,
             required_audiences=[rc.audience],
             allowed_emails=None,
+            agent_written=_is_agent_written(rc.tier, f.path, d),
         )
         row = existing_docs.get(key)
         up.changed = _doc_changed(row, up)

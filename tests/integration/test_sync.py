@@ -188,3 +188,31 @@ async def test_proposal_without_record_is_disputed_in_sync(fresh_db, indexer_poo
     fake = ForgejoFake({"canonical-all": proposal_repo(["carol"])})
     await sync_repo(indexer_pool, fake, CFG, "canonical-all", FakeEmbedder())
     assert rows(fresh_db, "SELECT status FROM kh.documents") == [("disputed",)]
+
+
+NOTES_CFG = parse_config({"repos": {"notes-all": {"tier": "T1", "audience": "all"}}})
+
+
+async def _sync_notes(pool, repo_obj):
+    return await sync_repo(pool, ForgejoFake({"notes-all": repo_obj}), NOTES_CFG, "notes-all", FakeEmbedder())
+
+
+async def test_agent_notes_are_flagged_and_a_squatted_id_keeps_the_human_note(fresh_db, indexer_pool):
+    files = {
+        "agent/n.md": doc("n", "type: agent-note\n"),
+        "agent/m.md": doc("m"),  # type key removed: still flagged by path
+        "h.md": doc("h"),
+    }
+    await _sync_notes(indexer_pool, FakeRepo([FakeCommit("n1", [], files)]))
+    flags = {k: v for k, v in rows(fresh_db, "SELECT doc_key, agent_written FROM kh.documents")}
+    assert flags == {"n": True, "m": True, "h": False}
+    assert set(rows(fresh_db, "SELECT DISTINCT c.agent_written FROM kh.chunks c JOIN kh.documents d"
+                              " ON d.id = c.document_id WHERE d.doc_key = 'n'")) == {(True,)}
+    # An agent squats the id of the human note: the human note stays, the agent file is rejected.
+    squat = dict(files, **{"agent/h.md": doc("h", "type: agent-note\n")})
+    chain = [FakeCommit("n1", [], files), FakeCommit("n2", ["n1"], squat)]
+    plan = await _sync_notes(indexer_pool, FakeRepo(chain))
+    assert any(a.path == "agent/h.md" and "duplicate id h" in a.message for a in plan.alerts)
+    assert rows(fresh_db, "SELECT path, agent_written FROM kh.documents WHERE doc_key = 'h'") == [
+        ("h.md", False)
+    ]
