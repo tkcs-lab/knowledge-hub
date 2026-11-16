@@ -2,7 +2,8 @@
 
 Reads return Forgejo's JSON shapes as plain dicts and lists (the shapes ``indexer/trust.py`` consumes).
 Errors carry a fixed text with the method, path and status only: never the token, never the body.
-Every write calls ``_guard_ref`` on its target ref before sending anything.
+Every write calls ``_guard_ref`` on its target ref before sending anything; status posts are guarded by
+``_guard_context`` instead of a ref.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ BOT_REF_PREFIX = "bot/promote/"
 _PAGE = 50
 _TREE_PAGE = 1000
 _MAX_PAGES = 1000
+STATUS_CONTEXTS = ("kh/validate", "kh/domain-owners")
+STATUS_STATES = ("success", "failure", "error", "pending")
 
 
 class ForgejoError(Exception):
@@ -33,6 +36,11 @@ def _guard_ref(ref: str) -> str:
     if ".." in ref or "//" in ref:
         raise ForgejoRefused("write refused: ref must start with bot/promote/")
     return ref
+
+
+def _guard_context(context: str, state: str) -> None:
+    if context not in STATUS_CONTEXTS or state not in STATUS_STATES:
+        raise ForgejoRefused("write refused: not a kh status")
 
 
 def _q(part: str) -> str:
@@ -175,6 +183,56 @@ class ForgejoClient:
         data = await self._get_json(f"{self._repo(repo)}/compare/{_q(base)}...{_q(head)}")
         return [f["filename"] for f in data.get("files") or []]
 
+    async def compare_files(self, repo: str, base: str, head: str) -> list[dict[str, Any]]:
+        """Files changed between ``base`` and ``head``: ``filename``, ``status``, ``previous_filename``."""
+        data = await self._get_json(f"{self._repo(repo)}/compare/{_q(base)}...{_q(head)}")
+        out: list[dict[str, Any]] = []
+        for f in data.get("files") or []:
+            item: dict[str, Any] = {"filename": f["filename"], "status": f.get("status")}
+            if f.get("previous_filename"):
+                item["previous_filename"] = f["previous_filename"]
+            out.append(item)
+        return out
+
+    async def head_sha_or_none(self, repo: str, branch: str) -> str | None:
+        """Head sha of ``branch``; HTTP 404 means the branch does not exist."""
+        url = f"{self._repo(repo)}/branches/{quote(branch, safe='/')}"
+        try:
+            resp = await self._http.get(url)
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+        try:
+            return resp.json()["commit"]["id"]
+        except (ValueError, KeyError, TypeError):
+            raise ForgejoError("branch response has no commit id") from None
+
+    async def team_id(self, name: str) -> int | None:
+        """Id of the org team called ``name``, or ``None``."""
+        for page in range(1, _MAX_PAGES + 1):
+            data = await self._get_json(f"/orgs/{_q(self.org)}/teams", {"page": page, "limit": _PAGE})
+            for team in data:
+                if team.get("name") == name:
+                    return team.get("id")
+            if len(data) < _PAGE:
+                break
+        return None
+
+    async def is_team_member(self, team_id: int, login: str) -> bool:
+        url = f"/teams/{team_id}/members/{_q(login)}"
+        try:
+            resp = await self._http.get(url)
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code in (200, 204):
+            return True
+        if resp.status_code == 404:
+            return False
+        raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+
     async def path_exists(self, repo: str, path: str, ref: str) -> bool:
         """Whether ``path`` exists at ``ref`` (a read: not guarded). HTTP 404 means no."""
         url = f"{self._repo(repo)}/contents/{quote(path, safe='/')}"
@@ -201,6 +259,14 @@ class ForgejoClient:
             return resp.json()
         except ValueError:
             raise ForgejoError(f"{method} {path} failed: invalid JSON") from None
+
+    async def post_status(self, repo: str, sha: str, context: str, state: str, description: str) -> None:
+        _guard_context(context, state)
+        await self._send(
+            "POST",
+            f"{self._repo(repo)}/statuses/{_q(sha)}",
+            {"context": context, "state": state, "description": description[:140]},
+        )
 
     async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
         _guard_ref(name)
