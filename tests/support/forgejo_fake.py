@@ -11,6 +11,7 @@ The fake does not guard: the guard lives in the real client and is tested there.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,8 +33,18 @@ class FakeRepo:
     reviews: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
 
 
-def pr(number: int, merge_sha: str, head_sha: str, author: str = "alice") -> dict[str, Any]:
-    return {
+def pr(
+    number: int,
+    merge_sha: str,
+    head_sha: str,
+    author: str = "alice",
+    *,
+    merged_by: str | None = None,
+    merged_at: str | None = None,
+    author_id: int | None = None,
+    merged_by_id: int | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
         "number": number,
         "html_url": f"https://forgejo.test/kh/repo/pulls/{number}",
         "merged": True,
@@ -42,6 +53,15 @@ def pr(number: int, merge_sha: str, head_sha: str, author: str = "alice") -> dic
         "base": {"ref": "main"},
         "head": {"sha": head_sha},
     }
+    if author_id is not None:
+        out["user"]["id"] = author_id
+    if merged_by is not None:
+        out["merged_by"] = {"login": merged_by}
+        if merged_by_id is not None:
+            out["merged_by"]["id"] = merged_by_id
+    if merged_at is not None:
+        out["merged_at"] = merged_at
+    return out
 
 
 def approval(head_sha: str, user: str = "bob", at: str = "2026-11-02T10:00:00Z") -> dict[str, Any]:
@@ -56,8 +76,14 @@ def approval(head_sha: str, user: str = "bob", at: str = "2026-11-02T10:00:00Z")
 
 
 class ForgejoFake:
-    def __init__(self, repos: dict[str, FakeRepo], read_only: bool = False) -> None:
+    def __init__(
+        self,
+        repos: dict[str, FakeRepo],
+        read_only: bool = False,
+        teams: dict[str, set[str]] | None = None,
+    ) -> None:
         self.repos = repos
+        self.teams = teams or {}
         # A read-only fake stands for the indexer client: a write is recorded in ``refused_writes``
         # and fails, so a test can assert no promotion write went through it.
         self.read_only = read_only
@@ -112,8 +138,13 @@ class ForgejoFake:
     async def list_tree(self, repo: str, sha: str) -> list[dict[str, Any]]:
         self.calls.append("list_tree")
         return [
-            {"path": p, "type": "blob", "sha": f"blob-{i}", "size": len(t)}
-            for i, (p, t) in enumerate(sorted(self._snapshot(repo, sha).items()))
+            {
+                "path": p,
+                "type": "blob",
+                "sha": "blob-" + hashlib.sha1(t.encode()).hexdigest(),
+                "size": len(t),
+            }
+            for p, t in sorted(self._snapshot(repo, sha).items())
         ]
 
     async def get_raw(self, repo: str, path: str, sha: str) -> str:
@@ -154,6 +185,16 @@ class ForgejoFake:
         self.calls.append("changed_files")
         a, b = self._snapshot(repo, base), self._snapshot(repo, head)
         return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
+
+    async def team_id(self, name: str) -> int | None:
+        self.calls.append("team_id")
+        names = list(self.teams)
+        return names.index(name) + 1 if name in names else None
+
+    async def is_team_member(self, team_id: int, login: str) -> bool:
+        self.calls.append("is_team_member")
+        names = list(self.teams)
+        return 1 <= team_id <= len(names) and login in self.teams[names[team_id - 1]]
 
     # -- write side ----------------------------------------------------------------------------
 
