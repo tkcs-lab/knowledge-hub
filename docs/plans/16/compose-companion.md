@@ -29,5 +29,5 @@ Every new flag defaults to false, so converging with these changes creates and e
 ## Open points for the compose plan
 
 - The `kh_team_members` rule that a Forgejo login is the lower-cased email local part is now a contract with the hub (it computes the requester login the same way). A person whose login differs is not excluded by name; keep the rule or tell the hub.
-- Whether `kh-notes-bot` also needs `read:organization`; the hub reads through the indexer token, so the plan assumes no.
+- The notes bot reads its own repos with its own `write:repository` token and needs no other scope; the hub checks organisation membership with the `kh-indexer` token (`read:organization`), so no bot token gains the `read:user` scope.
 - `propose_change` PRs have the same requester gap; a follow-up in the hub can post the same status for them.

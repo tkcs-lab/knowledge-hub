@@ -6,7 +6,7 @@
 
 **Use it:** An agent calls `kh_write_note` to save an unreviewed note in `notes-<audience>` (one commit straight to `main`, author `kh-notes-bot`), or `kh_propose_doc` and `kh_propose_edit` to open a T0 pull request for people to review in Forgejo. `kh_pr_status` shows a proposal's state, its checks and who approved; `kh_list_my_proposals` lists the caller's own. Both write families are off until `KH_AGENT_NOTES_ENABLED` and `KH_AGENT_PROPOSALS_ENABLED` are set (each also needs `KH_AGENT_EMAIL_DOMAINS`), and PrivacyFence asks for an explicit tick on the three write tools.
 
-**Scope:** knowledge-hub only: five tools, the table `kh.proposals`, three Forgejo client roles, limits, search marking of agent notes, the `kh/domain-owners` and trust-walk change, the declaration example and docs. The compose repo work (bot user, token, team, flags, template, tests) is in the companion note `docs/plans/16/compose-companion.md` and gets its own plan. `kh_propose_change` keeps its behaviour except that it counts toward the same daily limit; `kh-hub-bot`'s rights and branch protection do not change.
+**Scope:** knowledge-hub only: five tools, the table `kh.proposals`, three Forgejo client roles, limits, search marking of agent notes, the `kh/domain-owners` and trust-walk change, the declaration example and docs. The compose repo work (bot user, token, team, flags, template, tests) is in the companion note `docs/plans/16/compose-companion.md` and gets its own plan. `kh_propose_change` keeps its behaviour; `kh-hub-bot`'s rights and branch protection do not change.
 
 **Security:** T1 becomes writable by agents, so an agent that read hostile text can put it into the index without review. The hub marks every agent note (path `agent/`, `type: agent-note`, `owner` the requester), ranks it like T2, never counts it as a normative answer, lets only its author update it, refuses hidden Unicode and HTML comments, caps size and daily writes, and records the requester in every commit. For T0 the bot is the PR author, so the requester could approve their own proposal: the hub posts a `kh/requested-by` status as `kh-hub-bot` on the PR head, bound to the proposal id, and both `kh domain-owners` and the trust walk ignore that person's approval and fail closed without a valid record. Forgejo itself still lets `kh-notes-bot` write any path of a notes repo; only the hub's client restricts it.
 
@@ -67,10 +67,10 @@ New texts live in `src/knowledge_hub/agent/texts.py` (local constants, as `promo
 |---|---|---|
 | `disabled_notes` | `agent notes are not enabled on this server` | flag off |
 | `disabled_proposals` | `agent proposals are not enabled on this server` | flag off |
-| `no_forgejo` | `agent notes are not available: no Forgejo notes connection is configured`; for proposals the text of `promote.NO_FORGEJO` | client missing |
+| `no_forgejo` | `agent notes are not available: no Forgejo notes connection is configured`; for proposals the text of `promote.NO_FORGEJO` | `forgejo_notes` and `forgejo` (notes), or `forgejo_bot` and `forgejo` (proposals), missing |
 | `person_only` | `agent writes are limited to people with a verified email address` | `principal_type` not `claude_client`, or no email |
-| `bad_login` | `your email address cannot be mapped to a Forgejo login` | email domain not in `KH_AGENT_EMAIL_DOMAINS`, local part fails `[a-z0-9][a-z0-9._-]{0,38}`, or Forgejo has no such user |
-| `audience_not_held` | `your token does not hold the audience {a}` | `audience` not among the caller's audiences (checked first, never inferred from content) |
+| `bad_login` | `your email address cannot be mapped to a Forgejo login` | email domain not in `KH_AGENT_EMAIL_DOMAINS`, local part fails `[a-z0-9][a-z0-9._-]{0,38}`, or the login is not a member of the Forgejo organisation |
+| `audience_not_held` | `your token does not hold the audience {a}` | `audience` not among the caller's audiences (checked before any repo or content check, never inferred from content) |
 | `no_notes_repo` / `no_repo` | `no notes repository is configured for audience {a}` / `errors.NO_REPO` | no T1 / T0 repo for the audience |
 | `bad_domain` | `domain must be one of ...` | not in `config.domains` |
 | `bad_id_format` | `id must be lowercase letters, digits and single hyphens, at most 80 characters` | |
@@ -78,6 +78,7 @@ New texts live in `src/knowledge_hub/agent/texts.py` (local constants, as `promo
 | `bad_review_by` | `review_by must be a date (YYYY-MM-DD) after today and within 730 days` | |
 | `bad_entity` | `entities must be at most 20 ids of the form kind:key for the kinds this repository may cite` | format, count or `entity_kind_allowed` |
 | `bad_text` | `text must not contain control, hidden or bidirectional characters or HTML comments` | any text argument (3.10) |
+| `bad_markup` | `note text must not contain HTML tags or link reference definitions` | `write_note` title or body with `<` followed by a letter, `/`, `!` or `?`, or a line `[label]: target` (notes are not reviewed, so hidden markup is refused outright) |
 | `bad_body` | `body must be 1 to {n} bytes and must not start with a frontmatter block` | |
 | `bad_rationale` | `rationale must be 1 to 2000 characters` | empty or too long |
 | `bad_commit` | `base_commit must be a commit sha` | not empty and not 40 or 64 lower-case hex characters |
@@ -88,11 +89,11 @@ New texts live in `src/knowledge_hub/agent/texts.py` (local constants, as `promo
 | `id_in_use` | `the id {id} is already used in {repo}` | a visible document of the repo has this `doc_key` at another path, or (notes) a `.md` file outside `agent/` has this stem |
 | `not_editable` | `this document cannot be changed through agent proposals` | `propose_edit` target is T1, outside the layout, `glossary.md`, or its file is gone from `main` |
 | `no_change` | `no change: the proposed content equals the current document` | parsed title, `review_by`, entities and body equal |
-| `not_yours` | `only your own agent notes can be updated` | existing file is not `type: agent-note` with `owner` the requester login, or no note row of this caller wrote it |
+| `not_yours` | `only your own agent notes can be updated` | existing file is not `type: agent-note` with `owner` the requester login, or no `committed` or `failed` note row of this caller covers it |
 | `note_exists` | `a note with this id exists; pass base_commit, the commit_sha you read` | update without `base_commit` |
 | `note_missing` | `no note with this id exists; leave base_commit empty to create it` | |
 | `note_changed` | `note changed since you read it (now {sha})` | `base_commit` differs from the last commit of the file |
-| `limit` | `errors.LIMIT` (T0 per `(domain, repo)`, shared with `propose_change`); `daily agent proposal limit ({n}) reached; try again after {time} UTC` (per requester); `daily agent note limit ({n}) reached; try again after {time} UTC` (per requester) | counts since 00:00 UTC |
+| `limit` | `errors.LIMIT` (T0 per `(domain, repo)`, counting `propose_change` candidates as well); `daily agent proposal limit ({n}) reached; try again after {time} UTC` (per requester); `daily agent note limit ({n}) reached; try again after {time} UTC` (per requester) | counts since 00:00 UTC |
 | `bad_limit` | `limit must be 1 to 50` | |
 | `note_failed` / `proposal_failed` | `could not write the note; call write_note again with the same arguments` / `could not open the pull request; call {tool} again with the same arguments to retry` | Forgejo error after the row exists |
 | `not_found` | `errors.NOT_FOUND` | unknown, hidden or foreign `target_id` or `proposal_id`; identical for all |
@@ -101,21 +102,21 @@ Widening: no tool sets the `widen-audience` label or writes a `Reason for wideni
 
 ### 3.4 T0 documents
 
-`propose_doc` builds `path = <domain>/<product>/[<component>/]<kind>/<id>.md`, requires `parse_layout(path, config.domains)` to return a layout whose `domain` equals the argument and which is neither an ADR nor the glossary, and `id_from_path` to equal `id`. `type` is `expected_type(layout)`; `owner` is `owners.domains[domain]` from `owners.yml` read at the head of `main` of the target repo (a missing file or domain is an internal error). Entities must satisfy `entity_kind_allowed(config, kind, repo_audience)`; the existence of entities, `product` and `component` is left to `kh/validate` (Grist). The hub runs `parse_document` over the rendered file and refuses anything it rejects, before any write. Labels are `promotion` and `domain/<domain>` (the same as `propose_change`, so the compose repo needs no new label). Base is `main`; the branch is `bot/propose/<proposal-uuid>`.
+`propose_doc` builds `path = <domain>/<product>/[<component>/]<kind>/<id>.md`, requires `parse_layout(path, config.domains)` to return a layout whose `domain` equals the argument and which is neither an ADR nor the glossary, and `id_from_path` to equal `id`. `type` is `expected_type(layout)`; `owner` is `owners.domains[domain]` from `owners.yml` read at the head of `main` of the target repo (a missing file or domain is an internal error). Entities must satisfy `entity_kind_allowed(config, kind, repo_audience)`; the existence of entities, `product` and `component` is left to `kh/validate` (Grist). The hub runs `parse_document` over the rendered file and refuses anything it rejects, before any write. Labels are `promotion` and `domain/<domain>` (the same as `propose_change`, so the compose repo needs no new label). Base is `main`; the branch is `bot/propose/<proposal-uuid>`. The hub writes a branch only in the call that creates it: `put_file` returns the new commit sha and its parents, the hub requires the single parent to be the base sha and `compare_files(base, sha)` to list exactly the one path, posts the requester record on that sha only, and requires `head_sha(branch)` to still equal it before opening the PR. A foreign commit pushed to the branch in between makes the attempt fail and nothing is posted.
 
 ### 3.5 T1 notes and the Forgejo client roles
 
 `ForgejoClient` gets `role: Literal["read","bot","notes"] = "bot"` and `notes_repos: Collection[str] = ()`. `make_forgejo` (the indexer client) uses `read`. Roles `read` and `notes` raise `ForgejoRefused` on `create_branch`, `put_file`, `open_pull`, `post_status` and `post_requester`; role `read` also on `put_note`. Role `bot` keeps its writes, accepts the ref prefixes `bot/promote/` and `bot/propose/`, and refuses `put_note`. The CI status client keeps role `bot`, and only `post_status` is reachable from the CLI.
 
-`put_note(repo, path, content, message, prev_blob)` (role `notes`): repo must be in `notes_repos`, path must fullmatch `agent/[a-z0-9]+(-[a-z0-9]+)*\.md`, branch is fixed `main`; `prev_blob` `None` creates (POST), a blob sha updates (PUT with `sha`, so Forgejo rejects a concurrent change); it returns the new commit sha. New reads on every role: `last_commit(repo, path, ref)`, `blob_sha(repo, path, ref)`, `commit_statuses(repo, sha)`, `pull_for_head(repo, branch)` (`GET /pulls/main/{branch}`, 404 gives `None`), `user_exists(login)`. New bot write `post_requester(repo, sha, login, proposal_id)` posting context `kh/requested-by`, state `success`, description `<login> <proposal-uuid>` (both checked by `fullmatch`). The documented shape of a Forgejo commit status is `{id, status, context, description, creator: {login}}`; the client reduces it to `{context, state, description, creator}`. `_guard_context` for CI statuses is unchanged, so the CI token cannot post a requester record.
+`put_note(repo, path, content, message, prev_blob)` (role `notes`): repo must be in `notes_repos`, path must fullmatch `agent/[a-z0-9]+(-[a-z0-9]+)*\.md`, branch is fixed `main`; `prev_blob` `None` creates (POST), a blob sha updates (PUT with `sha`, so Forgejo rejects a concurrent change); it returns the new commit sha. New reads on every role: `last_commit(repo, path, ref)`, `blob_sha(repo, path, ref)`, `commit_statuses(repo, sha)`, `pull_for_head(repo, branch)` (`GET /pulls/main/{branch}`, 404 gives `None`), `org_member(login)`. New bot write `post_requester(repo, sha, login, proposal_id)` posting context `kh/requested-by`, state `success`, description `<login> <proposal-uuid>` (both checked by `fullmatch`). The documented shape of a Forgejo commit status is `{id, status, context, description, creator: {login}}`; the client reduces it to `{context, state, description, creator}`. `_guard_context` for CI statuses is unchanged, so the CI token cannot post a requester record.
 
 What Forgejo itself allows: `kh-notes-bot` has team write on the notes repos, so a leaked token can write any path or branch there, and force-push an unprotected `main`; the path and branch restriction exists only in the hub's client. The indexer's `REWRITTEN` alert detects a rewritten `main`; the compose plan may protect `main` of notes repos against force-push.
 
-`write_note` reads through `deps.forgejo_notes` (the notes token can read its repos) and writes through it. Flow after the guards of 3.3: render the file with `agent/render.py` and verify it round-trips through `parse_document`; read the head of `main`; `list_tree` at the head must hold no `.md` blob outside `agent/` with the same stem as `id`; `kh.documents` must hold no row of the repo with this `doc_key` at another path. If the file exists: it must parse, be `type: agent-note` with `owner` the requester login and be recorded as written by this caller's `sub` (`not_yours` otherwise); identical content returns `unchanged: true` with the last commit (no row, no write, no limit use); else `base_commit` must equal the last commit of the path (`note_exists`, `note_changed`). A missing file with a `base_commit` is `note_missing`. Then the per-requester daily note limit, the `kh.proposals` row `pending` (no dedupe key for notes), `put_note`, and the mark `committed`. A failed write is marked `failed`; a retry finds the file as it is (unchanged, or its author's update) and inserts a new row. Two creators of one id: the second POST fails in Forgejo, the retry meets the existing file and gets `not_yours`.
+`write_note` reads through `deps.forgejo_notes` (the notes token can read its repos) and writes through it. Flow after the guards of 3.3: render the file with `agent/render.py` and verify it round-trips through `parse_document`; read the head of `main`; `list_tree` at the head must hold no `.md` blob outside `agent/` with the same stem as `id` (advisory: the indexer keys on the frontmatter id, and its duplicate rule in 3.9 is the control); `kh.documents` must hold no row of the repo with this `doc_key` at another path. If the file exists: it must parse, be `type: agent-note` with `owner` the requester login and be recorded as written by this caller's `sub` (`not_yours` otherwise); identical content returns `unchanged: true` with the last commit (no row, no write, no limit use); else `base_commit` must equal the last commit of the path (`note_exists`, `note_changed`). A missing file with a `base_commit` is `note_missing`. Then the per-requester daily note limit, the `kh.proposals` row `pending` (no dedupe key for notes), `put_note`, and the mark `committed`. A failed write is marked `failed`; a retry finds the file as it is. A lost response can leave a committed note with a `failed` row, so ownership accepts the author's `committed` or `failed` rows, and an unchanged retry marks the matching `failed` row `committed`. Otherwise a retry inserts a new row. Two creators of one id: the second POST fails in Forgejo, the retry meets the existing file and gets `not_yours`.
 
 ### 3.6 Identity and audit
 
-The requester comes from the verified claim: `sub`, `email` (only `claude_client` has one) and `login = email.split("@")[0].lower()`, the rule `forgejo_kh` uses to name team members. Accepted only when the email domain is in `KH_AGENT_EMAIL_DOMAINS` (a comma list; both write flags refuse to start without it), the login fullmatches `[a-z0-9][a-z0-9._-]{0,38}`, and Forgejo knows the user (`user_exists`). Logins are compared case-folded everywhere. Every commit message and PR body ends with these lines (exact format, produced by `agent/render.py`):
+The requester comes from the verified claim: `sub`, `email` (only `claude_client` has one) and `login = email.split("@")[0].lower()`, the rule `forgejo_kh` uses to name team members. Accepted only when the email domain is in `KH_AGENT_EMAIL_DOMAINS` (a comma list; both write flags refuse to start without it), the login fullmatches `[a-z0-9][a-z0-9._-]{0,38}`, and the login is a member of the Forgejo organisation (`org_member`, `GET /orgs/{org}/members/{login}`, read through `deps.forgejo` whose token has `read:organization`; the user-lookup endpoint would need a scope no bot has). People who are in no organisation team cannot use the write tools. Logins are compared case-folded everywhere. Every commit message and PR body ends with these lines (exact format, produced by `agent/render.py`):
 
 ```
 Written-by: agent via knowledge-hub (<tool>)
@@ -130,9 +131,9 @@ The git author is the token's user: `kh-notes-bot` for T1, `kh-hub-bot` for T0. 
 The bot is the PR author, so `current_approvals` already ignores the bot but not the person who asked. Change:
 
 1. New module `src/knowledge_hub/proposals.py` (one home for the constants, created in the first phase): `PROPOSE_REF_PREFIX = "bot/propose/"`, `REQUESTER_CONTEXT = "kh/requested-by"`, `REQUESTER_POSTERS = ("kh-hub-bot",)` (separate from `BOT_LOGINS` so widening one never widens the other), `NO_REQUESTER = "agent proposal has no valid requester record from kh-hub-bot"`.
-2. `approvals.py`: `current_approvals(pr, reviews, bot_logins, exclude_logins=())` also skips reviews by `exclude_logins`, comparing case-folded; `is_proposal(pr)` is true when `(pr.get("head") or {}).get("ref", "")` starts with the prefix; `requester_from_statuses(pr, statuses)` takes the statuses of `pr.head.sha` only and returns `(login, None)` when exactly one distinct login has a `success` `kh/requested-by` status created by a login in `REQUESTER_POSTERS` whose description is `<login> <uuid>` with the uuid equal to the head ref suffix, else `(None, NO_REQUESTER)`. A commit pushed by a person onto the branch moves the head, so the record is missing and the PR fails closed; the proposal must be closed and made again.
-3. `governance/ci.py` `_domain_owners`: for a proposal PR read `commit_statuses(repo, head_sha)` (one call), call `requester_from_statuses`, pass the login as `exclude_logins`, and add `NO_REQUESTER` to the output lines when there is no record, so the status is `failure`. `kh validate` is unchanged.
-4. `indexer/trust.py` and `sync_plan.py` (`_gather_trust`): for a merged proposal PR read the statuses of its `head.sha`; `_merge_verdict` excludes the requester and returns `DISPUTED` with reason `no requester record` when there is none. Other PRs are unchanged.
+2. `approvals.py`: `current_approvals(pr, reviews, bot_logins, exclude_logins=())` also skips reviews by `exclude_logins`, comparing case-folded; `is_proposal(pr)` is true when `(pr.get("head") or {}).get("ref", "")` starts with the prefix; `requester_from_statuses(pr, statuses)` takes the statuses of `pr.head.sha` only and returns `(login, None)` when exactly one distinct login has a `success` `kh/requested-by` status created by a login in `REQUESTER_POSTERS` whose description is `<login> <uuid>` with the uuid equal to the head ref suffix, else `(None, NO_REQUESTER)`. For a PR whose head ref is not a proposal ref, the same function returns `(login, None)` when the head carries a valid record from a poster (the uuid binding is not applicable) and `(None, None)` otherwise, so a hub commit merged through another branch still excludes its requester. A commit pushed by a person onto a proposal branch moves the head, so the record is missing and the PR fails closed; the proposal must be closed and made again. Pagination of `commit_statuses` is bounded (20 pages of 50); a head with more statuses is treated as having no record.
+3. `governance/ci.py` `_domain_owners`: read `commit_statuses(repo, head_sha)` for every PR (one extra call), call `requester_from_statuses`, pass the login as `exclude_logins`, and add `NO_REQUESTER` to the output lines when the PR is a proposal and the function reports a problem, so the status is `failure`. `kh validate` is unchanged.
+4. `indexer/trust.py` and `sync_plan.py` (`_gather_trust`): for every merged PR read the statuses of its `head.sha` (one extra call); `_merge_verdict` excludes the requester and returns `DISPUTED` with reason `no requester record` for a proposal PR without a valid record. Other PRs keep their verdict unless a poster's record names an approver.
 
 Authority: the trust walk is the authoritative control; the `kh/domain-owners` status is advisory, because a person with write access can post any status context and Forgejo does not stop a requester approving a bot-authored PR. A requester who approves, posts a fake `kh/domain-owners: success` and merges leaves the document `disputed` in the index and raises the existing alert `file <path> on <repo>/main has no approved merge PR`. The CI status token must not belong to `kh-hub-bot`, or the record would be forgeable.
 
@@ -140,13 +141,13 @@ Authority: the trust walk is the authoritative control; the `kh/domain-owners` s
 
 Migration `0007_proposals.sql`:
 
-- `kh.proposals(id uuid PK, kind text NOT NULL CHECK in ('note','doc','edit'), state text NOT NULL CHECK in ('pending','committed','pr_open','merged','closed','failed'), repo text NOT NULL, path text NOT NULL, doc_key text NOT NULL, domain text NOT NULL, title text NOT NULL, content_sha text NOT NULL, dedupe_key text, branch text, base_sha text, commit_sha text, pr_number int, pr_url text, requester_login text NOT NULL, created_by_sub text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), decided_at timestamptz, error text, required_audiences text[] NOT NULL, allowed_emails text[], CHECK kh_no_open_rows, CHECK ((kind = 'note') = (dedupe_key IS NULL)))`; unique index on `dedupe_key` where `dedupe_key IS NOT NULL AND state IN ('pending','pr_open','failed')`.
+- `kh.proposals(id uuid PK, kind text NOT NULL CHECK in ('note','doc','edit'), state text NOT NULL CHECK in ('pending','committed','pr_open','merged','closed','failed'), repo text NOT NULL, path text NOT NULL, doc_key text NOT NULL, domain text NOT NULL, title text NOT NULL, content_sha text NOT NULL, dedupe_key text, branch text, base_sha text, commit_sha text, pr_number int, pr_url text, requester_login text NOT NULL, created_by_sub text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), decided_at timestamptz, error text, required_audiences text[] NOT NULL, allowed_emails text[], CHECK kh_no_open_rows, CHECK ((kind = 'note') = (dedupe_key IS NULL)))`; unique index on `dedupe_key` where `dedupe_key IS NOT NULL AND state IN ('pending','pr_open')`.
 - RLS as `candidates` with one change: `kh_app` select `USING (created_by_sub = kh.caller_sub() AND kh.visible(required_audiences, allowed_emails))`, insert `WITH CHECK (created_by_sub = kh.caller_sub() AND state = 'pending' AND pr_number IS NULL AND kh.visible(...))`; `kh_indexer` select and update of `state, decided_at, pr_number, pr_url, required_audiences`. `kh_app` has no UPDATE: `kh.proposal_mark(id, state, branch, commit_sha, pr_number, pr_url, error)` is a `SECURITY DEFINER` function like `kh.candidate_mark`, requiring `created_by_sub = kh.caller_sub()`, from `pending|failed` only, and kind-aware: a note goes to `committed` or `failed`, a doc or edit to `pr_open` or `failed`.
-- `kh.count_proposals_today(kinds text[], domain text, repo text, login text, since timestamptz) RETURNS int`, `SECURITY DEFINER`, returns only a number: rows of the given kinds since `since`, filtered by the non-null arguments, that `kh.visible` (so other callers' proposals are counted for the shared limit and never shown).
+- `kh.count_proposals_today(kinds text[], domain text, repo text, login text, since timestamptz) RETURNS int`, `SECURITY DEFINER`, returns only a number: rows of the given kinds since `since`, filtered by the non-null arguments, with no visibility filter, so a token scoped to fewer audiences cannot multiply a person's daily limit; `EXECUTE` is revoked from public and granted to `kh_app` only.
 - `kh.documents.agent_written` and `kh.chunks.agent_written` (`boolean NOT NULL DEFAULT false`); `chunks_inherit_owner` copies it from the document.
 - `jobs/recompute.py` rewrites `kh.proposals.required_audiences` to `[config.repos[repo].audience]`.
 
-Limits (all counted since 00:00 UTC, failed attempts count): T0 per `(domain, repo)` is `kh.candidates` rows plus `count_proposals_today(['doc','edit'], domain, repo, null)` against `KH_PROMOTION_DAILY_LIMIT`, and `propose_change` now uses the same count; T0 per requester is `count_proposals_today(['doc','edit'], null, null, login)` against `KH_AGENT_PROPOSAL_DAILY_LIMIT` (default 5), so one person cannot exhaust a shared limit; notes per requester are `count_proposals_today(['note'], null, null, login)` against `KH_AGENT_NOTE_DAILY_LIMIT` (default 20). Idempotency of doc and edit: `dedupe_key = sha256(sub, repo, path, kind, content_sha)` (per caller, so no caller learns of another's proposals); an existing `pr_open` row returns its PR with `existing: true`; a `pending` or `failed` row resumes with the same id and branch, looks for an already open PR of the branch (`pull_for_head`) before opening one, and skips `put_file` when the branch file already has the right git blob; a unique violation re-reads the key. Notes use the content check of 3.5 instead.
+Limits (all counted since 00:00 UTC, failed attempts count): T0 per `(domain, repo)` is `kh.candidates` rows plus `count_proposals_today(['doc','edit'], domain, repo, null)` against `KH_PROMOTION_DAILY_LIMIT` for the agent tools (so the existing limit applies to them), while `propose_change` keeps counting candidates only, so agents can never exhaust the workflows' budget; T0 per requester is `count_proposals_today(['doc','edit'], null, null, login)` against `KH_AGENT_PROPOSAL_DAILY_LIMIT` (default 5), so one person cannot exhaust a shared limit; notes per requester are `count_proposals_today(['note'], null, null, login)` against `KH_AGENT_NOTE_DAILY_LIMIT` (default 20). Idempotency of doc and edit: `dedupe_key = sha256(sub, repo, path, kind, content_sha)` (per caller, so no caller learns of another's proposals); an existing `pr_open` row returns its PR with `existing: true`; a `pending` row (a crash) is adopted only when `pull_for_head` finds an open PR of its branch whose author is in `REQUESTER_POSTERS`, whose base is `main` and whose head sha equals the row's `commit_sha` (then it is marked `pr_open` and returned), otherwise it is marked `failed` and the call makes a new proposal with a new id and branch; a branch is never reused or resumed; a unique violation re-reads the key. Notes use the content check of 3.5 instead.
 
 Settings (all default off or safe; the validator refuses to start when a flag lacks its token, URL or `KH_AGENT_EMAIL_DOMAINS`): `KH_AGENT_NOTES_ENABLED=false`, `KH_AGENT_PROPOSALS_ENABLED=false`, `KH_FORGEJO_NOTES_TOKEN_FILE`, `KH_AGENT_EMAIL_DOMAINS=""`, `KH_AGENT_NOTE_DAILY_LIMIT=20`, `KH_AGENT_PROPOSAL_DAILY_LIMIT=5`, `KH_AGENT_MAX_BODY_BYTES=131072` (new: `KH_MAX_RAW_BYTES` is for raw bodies up to 1 MiB, too large for a note a person must review), `KH_CI_STATUS_LOGINS="kh-ci"` (accounts whose `kh/validate` and `kh/domain-owners` statuses `pr_status` reports).
 
@@ -179,7 +180,7 @@ Metrics: `kh_agent_write_failures_total{tool,reason}` with `reason` `refused` (a
 
 Unit: `tests/unit/test_agent_rules.py` (ids, titles incl. markup, `review_by` window, entities, text hygiene by Unicode category with one case per class incl. a tag-character payload, variation selector, soft hyphen, `<!--`, NFC, body size, body starting `---`, rationale bounds, `base_commit` format, login mapping and allowed domains, path building and `parse_layout` agreement, `..`, `//`, glossary, `.forgejo`, citation extraction incl. upper-case ids, day start and next-day text); `test_agent_render.py` (frontmatter round trip through `parse_document`, forbidden keys never rendered, deterministic output, trailers, PR body fence and `Title:` line, git blob sha); `test_agent_guards.py` (audience and repo lookups, failure metric); `test_forgejo_write.py`/`test_forgejo_client.py` (prefixes, roles `read` and `notes` refuse every branch write, `put_note` path and repo guards incl. a trailing newline, `post_requester` guard, the five new reads); `test_approvals.py` (exclusion, case-folding, `requester_from_statuses`: valid, missing, status from a non-poster, uuid of another proposal, two logins); `test_domain_owners.py` (requester approval ignored, another owner counted, no record fails, human commit on top fails, other PRs unaffected); `test_trust.py`; `test_settings.py` (flags default false, validator).
 
-Integration (fake Forgejo and test Postgres): `test_agent_proposals_schema.py` (RLS own-rows select, insert check, `proposal_mark` kind-aware transitions, counts function, dedupe index and note rows, `agent_written` trigger); `test_agent_store.py`; `test_agent_write_note.py` (create, unchanged retry, update needs `base_commit`, stale `base_commit`, not-yours incl. same login different sub, id in use incl. a human file in the tree, audience not held, no notes repo, n8n refused, no email, domain not allowed, limit 20, size, failed-write retry, trailers and author, nothing written to a canonical repo); `test_agent_propose_doc.py` (path and layout, type and owner, labels, requester status on the branch head posted before the PR, branch prefix, nothing on `main`, idempotent retry, resume after failure with an existing PR, daily limits shared with `propose_change`, per-requester limit, citation refusals); `test_agent_propose_edit.py`; `test_agent_status.py` (own proposal, foreign and missing ids give the same answer, checks from the expected posters only, approvals, requester approval flagged, merged and indexed); `test_agent_proposal_events.py`; `test_agent_tools_mcp.py` (all five tools through `mcp_client`); `test_wiring.py`; `test_sync.py` and `test_pr_outcomes.py` (requester exclusion in the trust walk, T1 duplicate rule); `test_search_ranking.py`, `test_tool_get_doc.py`, `test_rebuild.py` (marking, `NORMATIVE`, drift); the leak matrix cases; `test_recompute.py`.
+Integration (fake Forgejo and test Postgres): `test_agent_proposals_schema.py` (RLS own-rows select, insert check, `proposal_mark` kind-aware transitions, counts function, dedupe index and note rows, `agent_written` trigger); `test_agent_store.py`; `test_agent_write_note.py` (create, unchanged retry, lost response after commit then retry, update needs `base_commit`, stale `base_commit`, not-yours incl. same login different sub, id in use incl. a human file in the tree, audience not held, no notes repo, n8n refused, no email, domain not allowed, limit 20, size, failed-write retry, trailers and author, nothing written to a canonical repo); `test_agent_propose_doc.py` (path and layout, type and owner, labels, requester status on the branch head posted before the PR, branch prefix, nothing on `main`, idempotent retry, adoption of a pending proposal whose PR exists, a foreign commit between branch creation and write, the `(domain, repo)` limit counting candidates while `propose_change` ignores agent rows, per-requester limit, citation refusals); `test_agent_propose_edit.py`; `test_agent_status.py` (own proposal, foreign and missing ids give the same answer, checks from the expected posters only, approvals, requester approval flagged, merged and indexed); `test_agent_proposal_events.py`; `test_agent_tools_mcp.py` (all five tools through `mcp_client`); `test_wiring.py`; `test_sync.py` and `test_pr_outcomes.py` (requester exclusion in the trust walk, T1 duplicate rule); `test_search_ranking.py`, `test_tool_get_doc.py`, `test_rebuild.py` (marking, `NORMATIVE`, drift); the leak matrix cases; `test_recompute.py`.
 
 ## 4. ADRs
 
@@ -197,7 +198,7 @@ None. Everything is built against fakes.
 1. Build the hub image from `feature/agent-writes` (the CI image of the branch, or `docker build`), set it as the hub image in the compose repo (`images_track`, then `scripts/pin-images.sh`) and converge. You see the hub restart with all flags still false.
 2. Set `kh_notes_bot_enabled: true` and converge. You see the user `kh-notes-bot` in Forgejo, member of the team `bots-notes` with write on every `notes-*` repo and nothing else, and the file `kh_notes_bot_token` with mode 0400.
 3. Probe the status API: with the `kh-hub-bot` token send `POST /api/v1/repos/kh/canonical-all/statuses/<sha>` (context `kh/requested-by`, state `success`, description `alice 00000000-0000-0000-0000-000000000000`) for a commit of a test branch, then `GET /api/v1/repos/kh/canonical-all/commits/<sha>/statuses`. You must see `creator.login` equal to `kh-hub-bot` in the answer. Report the JSON keys you see; D2 stops here if the creator is missing.
-4. Probe the contents API: with the `kh-notes-bot` token create `agent/probe.md` in `notes-all` (expect 201), `POST` it again (report the status code), `PUT` it with a wrong `sha` (report the status code), `PUT` with the right `sha` (expect 200). Delete the file afterwards.
+4. Probe the organisation endpoint: with the `kh-indexer` token `GET /api/v1/orgs/kh/members/<your login>` must answer 204 and, for a login that is not a member, 404; report both. Then probe the contents API: with the `kh-notes-bot` token create `agent/probe.md` in `notes-all` (expect 201), `POST` it again (report the status code), `PUT` it with a wrong `sha` (report the status code), `PUT` with the right `sha` (expect 200). Delete the file afterwards.
 5. Set `kh_agent_notes_enabled` and `kh_agent_proposals_enabled` to true plus `kh_agent_email_domains`, converge, restart PrivacyFence with the new declaration, and create a scoped token with the three write tools ticked. You see the five `kh_*` tools in the PrivacyFence tool list.
 6. Call `kh_write_note` (create, then update with `base_commit`), then `kh_propose_doc`. In Forgejo open the PR and confirm the three statuses on its head. Approve it as the requester: `kh/domain-owners` stays red. Approve as another owner: it turns green; merge; confirm the document is T0 and not `disputed` after `kh rebuild --repo canonical-all` (this also proves the merged PR's head statuses are still readable). Then, on a second proposal, post a fake `kh/domain-owners: success` as the requester, approve and merge as the requester: confirm the indexed document is `disputed` with the alert `file <path> on canonical-all/main has no approved merge PR`.
 7. With the `kh-notes-bot` token try `git push` of a commit to `main` of `canonical-all`; it must fail (no team on that repo). Report that a push to another path of `notes-all` succeeds: the path limit is only in the hub.
@@ -207,12 +208,14 @@ Report back: pass or fail for each of the seven steps, with the answers asked fo
 
 - **Status creator (high).** D2 needs Forgejo's commit-status API to name the creating user. Not verified here. Mitigation: ma1 step 3 before anything is enabled; if it fails, D2 needs another design and the plan stops there.
 - **Forgejo write scope of the notes bot (high, accepted).** Forgejo grants `kh-notes-bot` write on whole notes repos; only the hub's client confines it to `agent/<id>.md` on `main`. A leaked token can rewrite human notes. Mitigation: token file mode 0400, rotation runbook, indexer `REWRITTEN` alert, optional force-push protection of `main` in the compose plan.
-- **Login mapping (medium).** The requester login is the email local part, as `forgejo_kh` names members. Mitigations: allowed email domains, the Forgejo user must exist, case-folded comparison, note ownership also keyed on `sub`. A person whose Forgejo login differs from the mapping is still not excluded by name.
+- **Login mapping (medium).** (`org_member` proves only that an account of that name exists, not that it is the person; a team-membership test was rejected because people outside a team would be refused.) The requester login is the email local part, as `forgejo_kh` names members. Mitigations: allowed email domains, the Forgejo user must exist, case-folded comparison, note ownership also keyed on `sub`. A person whose Forgejo login differs from the mapping is still not excluded by name.
 - **Same gap in `propose_change` (medium).** Its PRs have the same requester problem. Left unchanged (D8); follow-up: post the same record from `propose_change` for new PRs only.
 - **Fail closed (medium).** A bot/propose PR without a valid record cannot be approved or trusted, and a person's commit on the branch voids it; the runbook says to close it and propose again. If Forgejo drops commit statuses the indexer marks the merged document `disputed`.
 - **Merge-time authority (medium).** Forgejo does not stop the requester approving; the trust walk catches it after the merge (3.7).
 - **Hub-bot token reuse (medium).** If the CI status token belonged to `kh-hub-bot`, any workflow author could forge the record. The companion and `docs/governance.md` forbid it; a compose test checks it.
 - **T1 id clash (low).** The `kh.documents` and tree checks are only as fresh as the index and the tree read; the indexer's duplicate rule keeps the human note.
+- **Reopened proposal PR (low).** A closed proposal PR that is reopened keeps its record and its requester exclusion, but its `kh.proposals` row stays `closed` until the merge event.
+- **Asymmetric limit (low).** Agents are limited by `propose_change` candidates; workflows are not limited by agents.
 - **Search weight (low).** `agent_written` uses the `T2` weight from `KH_TIER_WEIGHTS`.
 - **Body limit (low).** 128 KiB is a guess; `KH_AGENT_MAX_BODY_BYTES` changes it without code.
 - **Edit race (low).** `propose_edit` replaces the whole document from the `main` version read a moment earlier; a human change in those seconds is overwritten in the PR and visible in its diff.
@@ -284,12 +287,12 @@ phases:
          `stat=false`, `verification=false`, `files=false`; an empty list gives None; returns `[0]["sha"]`),
          `blob_sha(repo, path, ref) -> str | None` (public wrapper of `_existing_blob_sha` for the contents
          endpoint with `ref`), `commit_statuses(repo, sha) -> list[dict]` (`/commits/{sha}/statuses`, paged like
-         `pull_reviews`; each item reduced to `{"context", "state", "description", "creator"}`, where `state` is
+         `pull_reviews` but at most 20 pages of 50 (more raises `ForgejoError("too many statuses")`); each item reduced to `{"context", "state", "description", "creator"}`, where `state` is
          the item's `status` or `state` value and `creator` is `creator.login` or None),
          `pull_for_head(repo, branch) -> dict | None` (`/pulls/main/{branch}` with the branch quoted by
-         `quote(branch, safe="/")`; 404 gives None), `user_exists(login) -> bool` (`/users/{login}`; 200 true,
+         `quote(branch, safe="/")`; 404 gives None), `org_member(login) -> bool` (`/orgs/{org}/members/{login}`; 204 true,
          404 false, other statuses raise `ForgejoError`).
-      6. client.py new writes: `post_requester(repo, sha, login, proposal_id)` (role bot only; `login` must
+      6. client.py: `put_file` now returns `{"sha": resp["commit"]["sha"], "parents": [p["sha"] for p in resp["commit"].get("parents", [])]}` (an answer without `commit.sha` raises `ForgejoError("commit response has no sha")`; `promote.py` ignores the value as before). New writes: `post_requester(repo, sha, login, proposal_id)` (role bot only; `login` must
          `re.fullmatch` `[a-z0-9][a-z0-9._-]{0,38}` and `proposal_id` a lower-case uuid; posts context
          `kh/requested-by`, state `success`, description `f"{login} {proposal_id}"` through `_send`) and
          `put_note(repo, path, content, message, prev_blob)` (role notes only; repo in `self.notes_repos`; path
@@ -305,15 +308,18 @@ phases:
          it too. mcp/server.py: add `forgejo_notes: Any = None` to `Deps` after `forgejo_bot`; change nothing
          else there.
       8. tests/support/forgejo_fake.py (extend `ForgejoFake`): `head_sha(repo, branch)` returns
-         `self.branches[(repo, branch)]` when that branch exists, else the newest commit of the repo;
-         `put_file` additionally appends a `FakeCommit(f"b{n}", parents=[<branch head>], files={path:
-         content})` to the repo's commits and sets `self.branches[(repo, branch)]` to its sha (the fake tree
-         lookup for a ref that is a branch name includes it) and records the message in `self.messages`
-         (a list of `(repo, ref, path, message)`); `open_pull` sets `head` to `{"ref": head, "sha":
-         self.branches[(repo, head)]}` and fills `self.pull_commit_shas[(repo, number)]`; `blob_sha(repo, path,
+         `self.branches[(repo, branch)]` when that branch exists, else the newest commit of `repos[repo].commits`
+         (the main chain);
+         `put_file` stores the commit it makes in a separate list `self.branch_commits[repo]` (a `FakeCommit(f"b{n}",
+         parents=[<branch head>], files={path: content})`, found by `_commit` and by the tree lookup for a ref that
+         is a branch name, never part of `repos[repo].commits`, so `main` does not move), sets
+         `self.branches[(repo, branch)]` to its sha, records the message in `self.messages` (a list of `(repo,
+         ref, path, message)`) and returns `{"sha": <sha>, "parents": [<parent sha>]}`; a test may set
+         `self.on_put_file` to a callable run between the branch creation and the write (to push a foreign commit);
+         `open_pull` sets `head` to `{"ref": head, "sha": self.branches[(repo, head)]}`; `blob_sha(repo, path,
          ref)` returns the git blob sha1 (`sha1(b"blob %d\0" % len + content)`) of the file or None;
          `last_commit(repo, path, ref)` walks first parents from `ref` and returns the newest commit whose
-         `files` holds `path`; `put_note(repo, path, content, message, prev_blob)` raises
+         `files` holds `path`; `put_note(repo, path, content, message, prev_blob)` commits as below and then, when `self.fail_after_commit` (a bool, False by default) is true, raises `ForgejoError("PUT contents failed: timeout")`; it raises
          `ForgejoError("POST contents failed: HTTP 422")` when `prev_blob` is None and the file exists and
          `ForgejoError("PUT contents failed: HTTP 409")` when `prev_blob` differs from the current blob,
          otherwise appends `FakeCommit(f"n{n}", parents=[<main head>], files={path: content})` to the repo,
@@ -321,7 +327,7 @@ phases:
          `commit_statuses(repo, sha)` returns `self.statuses.get((repo, sha), [])`; `post_requester` appends
          `{"context": "kh/requested-by", "state": "success", "description": f"{login} {proposal_id}",
          "creator": "kh-hub-bot"}` to `self.statuses[(repo, sha)]`; `pull_for_head(repo, branch)` returns the
-         PR of `self.repos[repo].pulls` whose `head["ref"]` equals `branch`, or None; `user_exists(login)` is
+         PR of `self.repos[repo].pulls` whose `head["ref"]` equals `branch`, or None; `org_member(login)` is
          true unless `login` is in `self.unknown_users` (a set, empty by default). Every write method calls
          `self._write(name)` first and so obeys `read_only`.
       9. Tests: `test_forgejo_write.py` (both prefixes accepted, other refs refused, roles read and notes refuse
@@ -334,7 +340,7 @@ phases:
          `deps.forgejo`, closed by `close_deps`).
       Do not edit any file outside `touches`.
     acceptance:
-      - .venv/bin/python -m pytest tests/unit/test_forgejo_write.py tests/unit/test_forgejo_client.py tests/unit/test_forgejo_status.py tests/unit/test_settings.py tests/integration/test_wiring.py -q passes
+      - .venv/bin/python -m pytest tests/unit/test_forgejo_write.py tests/unit/test_forgejo_client.py tests/unit/test_forgejo_status.py tests/unit/test_settings.py tests/integration/test_wiring.py tests/integration/test_propose_change.py -q passes
       - .venv/bin/python -m ruff check . passes
       - grep -n "PROPOSE_REF_PREFIX" src/knowledge_hub/proposals.py src/knowledge_hub/forgejo/client.py matches
   - id: p2-proposals-migration
@@ -365,14 +371,14 @@ phases:
       2. In the same file `kh.proposal_mark(id uuid, new_state text, branch text, commit_sha text, pr_number
          int, pr_url text, error text) RETURNS boolean`, SQL, VOLATILE, SECURITY DEFINER, search_path
          `kh, pg_temp`, shaped like `candidate_mark`: update the row where `id = $1`, `created_by_sub =
-         kh.caller_sub()`, `state IN ('pending', 'failed')` and `(kind = 'note' AND $2 IN ('committed',
-         'failed')) OR (kind <> 'note' AND $2 IN ('pr_open', 'failed'))`; `coalesce` for branch, commit_sha,
+         kh.caller_sub()`, `state IN ('pending', 'failed')` and `((kind = 'note' AND $2 IN
+         ('committed', 'failed')) OR (kind <> 'note' AND $2 IN ('pr_open', 'failed')))` (the whole disjunction in
+         one pair of parentheses so the other conditions bind it); `coalesce` for branch, commit_sha,
          pr_number, pr_url; `REVOKE ... FROM PUBLIC`, `GRANT EXECUTE ... TO kh_app`.
       3. In the same file `kh.count_proposals_today(kinds text[], p_domain text, p_repo text, p_login text,
          since timestamptz) RETURNS int`, SQL, STABLE, SECURITY DEFINER, same search_path, counting rows of
-         `kh.proposals` with `kind = ANY(kinds)`, `created_at >= since`, `kh.visible(required_audiences,
-         allowed_emails)`, and each of `p_domain`, `p_repo`, `p_login` equal to its column when not null;
-         REVOKE and GRANT as above.
+         `kh.proposals` with `kind = ANY(kinds)`, `created_at >= since`, and each of `p_domain`, `p_repo`,
+         `p_login` equal to its column when not null (no visibility filter); REVOKE and GRANT as above.
       4. In the same file: `ALTER TABLE kh.documents ADD COLUMN agent_written boolean NOT NULL DEFAULT false`,
          the same on `kh.chunks`, and `CREATE OR REPLACE FUNCTION kh.chunks_inherit_owner()` with the document
          branch also selecting `d.agent_written INTO NEW.agent_written` (raw and derived branches set `false`);
@@ -382,8 +388,9 @@ phases:
          (rows whose repo is no longer in config keep their value), inside the same transaction.
       6. Tests: new `test_agent_proposals_schema.py` (kh_app inserts its own row and reads only its own, cannot
          insert for another sub or with a state other than pending, cannot update directly, `proposal_mark`
-         transitions per kind and refusal for another sub, `count_proposals_today` counts other callers' rows
-         without showing them and honours each filter, the check `(kind = 'note') = (dedupe_key IS NULL)`, the
+         transitions per kind, refusal for another sub, and marking one doc row leaves another caller's doc row
+         unchanged, `count_proposals_today` counts other callers' rows (also those the token cannot see) without
+         showing them and honours each filter, the check `(kind = 'note') = (dedupe_key IS NULL)`, the
          dedupe index allows a second row after `merged` or `closed`, indexer update of `state`); extend
          `test_schema_tables.py`, `test_rls_tables.py`, `test_rls_policies.py` where they list tables or
          policies by name (grep for `candidates`), `test_recompute.py` (proposal audiences follow config),
@@ -412,7 +419,7 @@ phases:
          table in section 3.3 that is not reused from `errors`, with the exact text (upper-case names:
          `DISABLED_NOTES`, `DISABLED_PROPOSALS`, `NO_NOTES_FORGEJO`, `PERSON_ONLY`, `BAD_LOGIN`,
          `AUDIENCE_NOT_HELD`, `NO_NOTES_REPO`, `BAD_ID_FORMAT`, `BAD_TITLE`, `BAD_REVIEW_BY`, `BAD_ENTITY`,
-         `BAD_TEXT`, `BAD_BODY`, `BAD_RATIONALE`, `BAD_COMMIT`, `BAD_KIND`, `BAD_SEGMENT`, `BAD_PATH`,
+         `BAD_TEXT`, `BAD_MARKUP`, `BAD_BODY`, `BAD_RATIONALE`, `BAD_COMMIT`, `BAD_KIND`, `BAD_SEGMENT`, `BAD_PATH`,
          `DOC_EXISTS`, `ID_IN_USE`, `NOT_EDITABLE`, `NO_CHANGE`, `NOT_YOURS`, `NOTE_EXISTS`, `NOTE_MISSING`,
          `NOTE_CHANGED`, `NOTE_LIMIT`, `PROPOSAL_LIMIT`, `BAD_LIMIT`, `NOTE_FAILED`, `PROPOSAL_FAILED`), with
          `{name}` placeholders as written in the table.
@@ -424,8 +431,8 @@ phases:
          `check_id(value) -> str` (`ID_RE` fullmatch, at most 80 characters, else BAD_ID_FORMAT);
          `clean_text(value, *, multiline) -> str` (NFC-normalises with `unicodedata.normalize("NFC", value)`,
          then refuses with BAD_TEXT any character whose `unicodedata.category` is Cf, Co, Cs, Cn, Zl or Zp, or
-         Cc other than newline and tab, or whose code point is in U+FE00-U+FE0F or U+E0100-U+E01EF, or the
-         substring `<!--`; with `multiline=False` also any newline; returns the normalised text);
+         Cc other than newline and tab, or whose code point is in U+FE00-U+FE0F, U+E0100-U+E01EF, U+180B-U+180D, U+180F,
+         U+17B4-U+17B5 or U+2800, or is one of U+034F, U+115F, U+1160, U+3164, U+FFA0, or the substring `<!--`; with `multiline=False` also any newline; returns the normalised text);
          `check_title(value) -> str` (`clean_text` single line, stripped length 1 to 200, no `<` followed by an
          ASCII letter, `!`, `?` or `/`, else BAD_TITLE);
          `check_review_by(value, today: date) -> date` (`date.fromisoformat`, then `today < d <= today +
@@ -433,6 +440,8 @@ phases:
          `check_entities(values, config, repo_audience) -> list[str]` (at most 20, each fullmatches
          `<kind>:[a-z0-9.-]+` for a kind in `config.entities` and passes `entity_kind_allowed`, deduplicated in
          order, else BAD_ENTITY);
+         `check_markup(value) -> str` (BAD_MARKUP when the text has `<` followed by an ASCII letter, `/`, `!`
+         or `?`, or a line matching `\s*\[[^\]]+\]:\s*\S`; used for notes only);
          `check_body(value, max_bytes) -> str` (`clean_text` multiline, CRLF to LF and trailing whitespace
          stripped per line like `promote.normalise`, 1 to `max_bytes` UTF-8 bytes, first non-blank line not
          `---`, else BAD_BODY with `n=max_bytes`);
@@ -498,7 +507,7 @@ phases:
          `allowed_domains(settings) -> list[str]` (the lower-cased, stripped, non-empty entries of
          `settings.agent_email_domains.split(",")`); `async require_requester(call, client) -> Requester`
          (`requester_from_caller(call.caller, allowed_domains(call.deps.settings))`, then `await
-         client.user_exists(login)` false gives BAD_LOGIN); `async check_citations(conn, config, repo, *texts)`
+         client.org_member(login)` false gives BAD_LOGIN); `async check_citations(conn, config, repo, *texts)`
          (ids from `cited_ids`; more than 50 gives `errors.TOO_MANY_SOURCES`; none returns; else the
          `kh.strict_visibility(%s::text[])` query of `promote.py:193-196`; when `n_resolved` is 0 return;
          otherwise `route_target_repo([Visibility(...)], config, repo)`, which raises the existing
@@ -509,13 +518,14 @@ phases:
          `agent_write_failure(tool, reason)`, cleared in `reset()`, rendered like `kh_webhook_events_total`.
       3. `agent/store.py` (functions take `conn` for reads and `deps`, `caller` for committed writes, as
          `promote.py` does): `@dataclass(frozen=True) class Existing: id, state, branch, commit_sha, pr_number,
-         pr_url`; `async find_by_key(conn, key) -> Existing | None` (rows of the caller in state `pending`,
-         `pr_open` or `failed` with that `dedupe_key`, newest first, first row);
+         pr_url`; `async find_by_key(conn, key) -> Existing | None` (rows of the caller in state `pending` or
+         `pr_open` with that `dedupe_key`, newest first, first row);
          `async count_today(conn, *, kinds, now, domain=None, repo=None, login=None) -> int` (calls
          `kh.count_proposals_today` with `day_start(now)`); `async count_candidates_today(conn, domain, repo,
          now) -> int` (the `kh.candidates` count of `promote.py:244-248`); `async note_written_by(conn, repo,
-         path, sub) -> bool` (a row of kind `note`, state `committed`, that repo and path, created by `sub`
-         exists);
+         path, sub) -> bool` (a row of kind `note`, state `committed` or `failed`, that repo and path, created by
+         `sub` exists); `async find_unsettled_note(conn, repo, path, sub, content_sha) -> uuid.UUID | None` (the
+         newest `failed` or `pending` note row of the caller with that repo, path and `content_sha`);
          `async insert_proposal(deps, caller, *, id, kind, repo, path, doc_key, domain, title, content_sha,
          requester_login, dedupe_key=None, branch=None, base_sha=None)` (own `caller_tx`, state `pending`,
          `required_audiences` the one-element list of `deps.config.repos[repo].audience`, `allowed_emails`
@@ -552,11 +562,11 @@ phases:
          agent/, owned by you, and is ranked below reviewed documents. To update, pass the commit_sha you read
          as base_commit."
       2. Checks in this order, each refusal the `KhError` of section 3.3: `settings.agent_notes_enabled` else
-         DISABLED_NOTES; `deps.forgejo_notes` present else NO_NOTES_FORGEJO; `requester = await
-         require_requester(call, deps.forgejo_notes)`; `require_audience`; `repo = t1_repo`; domain in
-         `config.domains` (the text of `promote.py:169`); `check_id`, `check_title`, `check_review_by(review_by,
+         DISABLED_NOTES; `deps.forgejo_notes` and `deps.forgejo` present else NO_NOTES_FORGEJO; `requester = await
+         require_requester(call, deps.forgejo)`; `require_audience`; `repo = t1_repo`; domain in
+         `config.domains` (the text of `promote.py:169`); `check_id`, `check_title` and `check_markup(title)`, `check_review_by(review_by,
          datetime.now(UTC).date())`, `check_entities(entities, config, config.repos[repo].audience)`,
-         `check_body(body, settings.agent_max_body_bytes)`, `check_commit(base_commit)`;
+         `check_body(body, settings.agent_max_body_bytes)` and `check_markup(body)`, `check_commit(base_commit)`;
          `check_citations(call.conn, config, repo, title, body)`.
       3. `path = note_path(id)`; `text = render_file(..., type="agent-note", owner=requester.login, ...)`;
          `verify_roundtrip`. Reads all go through `notes = deps.forgejo_notes`: `head = await
@@ -567,9 +577,10 @@ phases:
       4. Existing file (`await notes.path_exists(repo, path, head)`): `current = await notes.get_raw(repo,
          path, head)`; `parse_document(current, path, config.domains)` must not be `Rejected`, `type` must be
          `agent-note`, `owner` must equal `requester.login` and `await note_written_by(call.conn, repo, path,
-         caller.sub)` must be true, else NOT_YOURS. Then `current == text` returns `{"proposal_id": "",
-         "repo", "path", "commit_sha": last_commit, "created": False, "unchanged": True, "indexed": "after the
-         next index run"}` (no row, no write, no limit use). Else `base_commit` empty gives NOTE_EXISTS and a
+         caller.sub)` must be true, else NOT_YOURS. Then `current == text` first settles a leftover row (`find_unsettled_note`, then
+         `mark(..., "committed", commit_sha=last_commit)`) and returns `{"proposal_id": "", "repo", "path",
+         "commit_sha": last_commit, "created": False, "unchanged": True, "indexed": "after the next index run"}`
+         (no new row, no write, no limit use). Else `base_commit` empty gives NOTE_EXISTS and a
          value different from `await notes.last_commit(repo, path, head)` gives NOTE_CHANGED with that sha.
          Missing file with a non-empty `base_commit` gives NOTE_MISSING.
       5. Limit: `await count_today(call.conn, kinds=["note"], now=now, login=requester.login) >=
@@ -589,22 +600,21 @@ phases:
          `notes-all`, `notes-hr` and `canonical-all` serves as `deps.forgejo_notes`; build the settings with
          `app_settings.model_copy(update={"agent_notes_enabled": True, "agent_email_domains":
          "example.org"})`; `Config(repos=...)` lists both notes repos. Assert the trailers in
-         `fake.messages`, that `written_refs` holds only "main" entries of notes repos, and that a repeated
-         call writes nothing.
+         `fake.messages`, that every `fake.messages` entry names a notes repo and that `written_refs` holds only
+         "main", and that a repeated call writes nothing; one test sets `fake.fail_after_commit` (the note is
+         committed, the call fails, the retry returns `unchanged` and the row becomes `committed`).
       Stop: if `put_note` of `tests/support/forgejo_fake.py` cannot express a case, stop with `status=blocked`
       and quote what is missing; do not edit files outside `touches`.
     acceptance:
       - .venv/bin/python -m pytest tests/integration/test_agent_write_note.py -q passes
       - .venv/bin/python -m ruff check src/knowledge_hub/tools/agent_notes.py tests/integration/test_agent_write_note.py passes
   - id: p6-propose-doc
-    title: The propose_doc tool and the shared limit
+    title: The propose_doc tool
     depends_on: [p1-forgejo-client, p4-agent-store]
     complexity: M
     touches:
       - src/knowledge_hub/tools/agent_proposals.py
-      - src/knowledge_hub/tools/promote.py
       - tests/integration/test_agent_propose_doc.py
-      - tests/integration/test_propose_change.py
     brief: |
       Read first: docs/plans/16/plan.md sections 3.2 to 3.4, 3.6 to 3.8; src/knowledge_hub/tools/promote.py;
       src/knowledge_hub/governance/owners.py (`load_owners`, `OwnersFile.domains`); src/knowledge_hub/agent/*;
@@ -616,8 +626,8 @@ phases:
          the audience, domain, product, optional component, kind and id explicitly; the hub builds the path,
          type and owner. The proposal is reviewed in Forgejo by owners other than you.").
       2. `propose_doc` checks in this order: `settings.agent_proposals_enabled` else DISABLED_PROPOSALS;
-         `deps.forgejo_bot` present else the text of `promote.NO_FORGEJO`; `require_requester(call,
-         deps.forgejo_bot)`; `require_audience`; `repo = t0_repo`; domain; `check_id`, `check_title`,
+         `deps.forgejo_bot` and `deps.forgejo` present else the text of `promote.NO_FORGEJO`; `require_requester(call,
+         deps.forgejo)`; `require_audience`; `repo = t0_repo`; domain; `check_id`, `check_title`,
          `check_review_by`, `check_body`, `check_rationale`, `check_entities`; `path, layout = doc_path(...)`;
          `check_citations(call.conn, config, repo, title, body, rationale)`; `bot = deps.forgejo_bot`; `head =
          await bot.head_sha(repo, "main")`; `await bot.path_exists(repo, path, head)` true gives DOC_EXISTS; the
@@ -628,36 +638,37 @@ phases:
          then `submit(..., kind="doc", subject=f"Propose {path}", base_sha=head)`.
       3. `submit` in this order: `key = dedupe_key(sub, repo, path, kind, content_sha(text))`; `existing =
          await find_by_key(call.conn, key)`; state `pr_open` returns `{"proposal_id", "branch", "pr_number",
-         "pr_url", "existing": True}`; state `pending` or `failed` resumes with its id and branch (no limit
-         check, no insert); otherwise the limits (per requester: `count_today(kinds=["doc","edit"],
-         login=...)` against `settings.agent_proposal_daily_limit` gives PROPOSAL_LIMIT; per `(domain, repo)`:
+         "pr_url", "existing": True}`; state `pending` is adopted when `pull = await bot.pull_for_head(repo,
+         existing.branch)` is an open PR whose `user.login` is in `REQUESTER_POSTERS`, whose base ref is `main`
+         and whose `head.sha` equals `existing.commit_sha` (then `mark(..., "pr_open", pr=(number, url))` and
+         return it with `existing: True`), otherwise it is marked `failed` and the call goes on as a new
+         proposal; a branch is never reused. Limits: per requester `count_today(kinds=["doc","edit"],
+         login=...)` against `settings.agent_proposal_daily_limit` gives PROPOSAL_LIMIT; per `(domain, repo)`
          `count_candidates_today` plus `count_today(kinds=["doc","edit"], domain=domain, repo=repo)` against
-         `settings.promotion_daily_limit` gives `errors.LIMIT` with `d`, `repo`, `n`, `time`), a new `uuid4()`,
-         branch `PROPOSE_REF_PREFIX + id`, `insert_proposal(..., dedupe_key=key, branch=branch,
-         base_sha=base_sha)`; a `UniqueViolation` there re-runs `find_by_key` and returns or resumes that row.
-         Then in order: `create_branch(repo, branch, base_sha)` (an error on a resumed row is ignored, as
-         `promote.py:306-308`); `put_file(repo, branch, path, text, commit_message(subject, tool, requester,
-         id))` unless the row is resumed and `await bot.blob_sha(repo, path, branch)` equals
-         `git_blob_sha(text)`; `sha = await bot.head_sha(repo, branch)`; on a resumed row, when the row has a
-         `commit_sha` that differs from `sha` raise `kh_error("proposal_failed", PROPOSAL_FAILED, tool=tool)`
-         (a person pushed to the branch); the requester record `await bot.post_requester(repo, sha,
-         requester.login, str(id))`; `pull = await bot.pull_for_head(repo, branch)` on a resumed row, else
-         None; when None, `open_pull(repo, branch, "main", title, pr_body(...), ["promotion",
+         `settings.promotion_daily_limit` gives `errors.LIMIT` with `d`, `repo`, `n`, `time`. Then a new
+         `uuid4()`, branch `PROPOSE_REF_PREFIX + id`, `insert_proposal(..., dedupe_key=key, branch=branch,
+         base_sha=base_sha)` (a `UniqueViolation` re-runs `find_by_key` and returns that row). Then in order:
+         `create_branch(repo, branch, base_sha)`; `written = await bot.put_file(repo, branch, path, text,
+         commit_message(subject, tool, requester, id))`; `sha = written["sha"]`; require `written["parents"] ==
+         [base_sha]`, `await bot.compare_files(repo, base_sha, sha)` to list exactly one entry whose `filename`
+         is `path`, and `await bot.head_sha(repo, branch) == sha`, else raise `kh_error("proposal_failed",
+         PROPOSAL_FAILED, tool=tool)` without posting anything; `await bot.post_requester(repo, sha,
+         requester.login, str(id))`; `open_pull(repo, branch, "main", title, pr_body(...), ["promotion",
          f"domain/{domain}"])`; `mark(..., "pr_open", branch=branch, commit_sha=sha, pr=(number, url))`. Any
          `ForgejoError`, `KeyError`, `TypeError`, `ValueError` goes through `record_write_failure`,
          `mark(..., "failed", branch=branch, commit_sha=<sha when known else None>, error=str(exc)[:500])` and
          `kh_error("proposal_failed", PROPOSAL_FAILED, tool=tool)`.
-      4. `promote.py`: in `propose_change` replace the candidate count (`:244-248`) by the sum of
-         `count_candidates_today(conn, domain, repo, now)` and `count_today(conn, kinds=["doc","edit"], now=now,
-         domain=domain, repo=repo)`; change nothing else in that file.
+      4. `promote.py` is not touched: `propose_change` keeps counting `kh.candidates` only, so agent proposals
+         can never exhaust the budget of the workflows.
       5. Tests in `test_agent_propose_doc.py` for every `propose_doc` test of section 3.13, calling the tool
          as in `write_note` step 7 (settings with `agent_proposals_enabled` and `agent_email_domains`); the
          fake repos hold an `owners.yml` at `main`; assert from `fake.calls` that `post_requester` happens
          after `put_file` and before `open_pull`, that its sha equals the branch head, that the PR labels are
-         exactly the two named, that no call touches `main`, and the resume cases (failed after `put_file`;
-         failed after `open_pull` found through `pull_for_head`; a person's commit on the branch).
-         `test_propose_change.py`: one new test that rows of `propose_doc` count toward the limit of
-         `propose_change` and the reverse.
+         exactly the two named, that no call touches `main`, and these cases: a person's commit pushed to the branch between `create_branch` and `put_file` (through
+         `fake.on_put_file`) gives PROPOSAL_FAILED and no requester record; a `pending` row whose PR exists is
+         adopted; a `pending` row without a PR becomes `failed` and a new proposal uses a new branch; rows of
+         `propose_doc` count toward the `(domain, repo)` limit of later agent proposals but a full agent count does
+         not stop `propose_change` (call `propose_change` in the test).
       Stop: if `owners.domains` has no team for a default domain in the test `owners.yml`, stop with
       `status=blocked` and quote the file.
     acceptance:
@@ -723,28 +734,30 @@ phases:
          `exclude_logins`; the author and bot comparisons are case-folded too; `is_proposal(pr) -> bool` is
          `((pr.get("head") or {}).get("ref") or "").startswith(PROPOSE_REF_PREFIX)` (the fake `pr()` helper has
          no `ref`); `requester_from_statuses(pr, statuses) -> tuple[str | None, str | None]` takes the statuses
-         of `pr["head"]["sha"]` and implements the rule of section 3.7 item 2: only items with context
+         of `pr["head"]["sha"]` and implements the rule of section 3.7 item 2 (for a PR that is not a proposal: `(login, None)` when a valid
+         poster record is on the head, else `(None, None)`): only items with context
          `REQUESTER_CONTEXT`, state `success`, `creator` in `REQUESTER_POSTERS` and a description that splits
          into `<login> <uuid>` where the uuid equals the head ref after the prefix count; one distinct login
          gives `(login, None)`; none or several give `(None, NO_REQUESTER)`.
-      2. ci.py `_domain_owners`: when `is_proposal(pr)`: `statuses = await read.commit_statuses(repo,
+      2. ci.py `_domain_owners`: for every PR: `statuses = await read.commit_statuses(repo,
          pr["head"]["sha"])`; `requester, problem = requester_from_statuses(pr, statuses)`; `counted =
          current_approvals(pr, reviews, BOT_LOGINS, exclude_logins=(requester,) if requester else ())`; when
-         `problem` is set append it to the lines `check_owners` returned and sort, so the result fails. Other
-         PRs: no extra reads.
+         `problem` is set append it to the lines `check_owners` returned and sort, so the result fails.
       3. trust.py: `evaluate_chain` and `_merge_verdict` gain an optional `requesters: Mapping[int, tuple[str |
          None, str | None]] | None = None`; for a PR number present with a problem the verdict is
          `Verdict(DISPUTED, merge_pr=number, pr_url=pr.get("html_url"), reason="no requester record")`; with a
-         login it is passed as `exclude_logins`. sync_plan.py `_gather_trust` fills the mapping for merged PRs
-         with `is_proposal(pull)` using `forgejo.commit_statuses(repo, pull["head"]["sha"])` and passes it on.
+         login it is passed as `exclude_logins`. sync_plan.py `_gather_trust` fills the mapping for every merged PR
+         using `forgejo.commit_statuses(repo, pull["head"]["sha"])` and passes it on; a PR with `(None, None)`
+         has no entry.
       4. Tests: extend `test_approvals.py` (exclusion, case-folding, `is_proposal` on a PR without `ref`, every
          `requester_from_statuses` case: valid, missing, status from a non-poster, uuid of another proposal,
          two logins); `test_domain_owners.py` (requester's approval does not count, another owner's does, no
-         record fails with `NO_REQUESTER`, a human commit on top fails, a PR from another branch unaffected);
+         record fails with `NO_REQUESTER`, a human commit on top fails, a PR from another branch unaffected unless a valid record names an approver, then that approver is excluded);
          `test_trust.py` (proposal PR verdicts); `test_sync.py` (a merged proposal PR with the requester as the
          only approver is `disputed`, with another approver trusted; the PRs are built inline with the p1 fake
          statuses).
-      Stop: if the CI check needs more than one extra API call for a PR, stop with `status=blocked`.
+      Stop: if the CI check or the trust walk needs more than one extra API call for a PR, stop with
+      `status=blocked`.
     acceptance:
       - .venv/bin/python -m pytest tests/unit/test_approvals.py tests/unit/test_domain_owners.py tests/unit/test_trust.py tests/integration/test_sync.py -q passes
       - .venv/bin/python -m ruff check src/knowledge_hub/approvals.py src/knowledge_hub/governance src/knowledge_hub/indexer passes
@@ -808,8 +821,8 @@ phases:
          row with `pr_number` NULL and `branch` equal to the head ref adopts the event: set `pr_number` and
          `pr_url` (`pull["html_url"]`) and go on; a different repo or number writes the alert `pull request
          <repo>#<n> does not match proposal <id>` through `_alert` and returns; merged sets `state = 'merged',
-         decided_at = now()` where state is `pr_open`, `closed` or `failed`; closed unmerged sets `state =
-         'closed', decided_at = now()` where state is `pr_open`; a merged proposal stays merged.
+         decided_at = now()` where state is `pending`, `pr_open`, `closed` or `failed`; closed unmerged sets
+         `state = 'closed', decided_at = now()` where state is `pending` or `pr_open`; a merged proposal stays merged.
       3. Tests in the new file: merged, closed, reopened then merged, mismatch alert, adoption of a row without
          a PR number, a replayed event; add one case to `test_webhook_worker.py` proving a `bot/propose/` event
          reaches the new handler.
@@ -946,8 +959,8 @@ phases:
       5. README.md: the tool names in the intro sentence and the T1 row of the tier table.
       6. CHANGELOG.md under `## [Unreleased]`: Added (the five tools, settings, table `kh.proposals`, the
          metric), Changed (`kh domain-owners` and the trust walk ignore the requester's approval of agent
-         proposals, search ranks and flags agent notes, `propose_change` shares the daily limit with agent
-         proposals, the declaration example).
+         proposals, search ranks and flags agent notes, agent proposals count `propose_change` candidates toward the daily
+         limit, the declaration example).
       Report a doc that grows past 400 lines. Do not edit any file outside `touches`.
     acceptance:
       - grep -n "kh_agent_write_failures_total" docs/runbook.md docs/configuration.md matches
