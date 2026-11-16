@@ -13,6 +13,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - worker: none
 - review: worker ran no tld step (tld unavailable); orchestrator ran roles required (none required) and the scope check; full pytest -q not runnable here (no pgvector), unit tests and ruff pass
+- retry: final review fix-1: added reference_audiences to the cus entry of deploy/kh.example.yaml and docs/configuration.md, a config-table row for it, and a test that the example entities match the defaults
 
 ## p4-forgejo-client
 
