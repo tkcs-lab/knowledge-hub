@@ -1,0 +1,110 @@
+world:
+  ids_in_repo:
+    old-req:
+    - product/alpha/requirements/old-req.md
+    taken-here:
+    - product/alpha/requirements/copy-of-taken.md
+    sup-self:
+    - product/alpha/requirements/sup-self.md
+  ids_elsewhere:
+  - taken-else
+  entity_keys:
+    prd:
+    - prd:alpha
+    - prd:gateway
+    cmp:
+    - cmp:api
+    ver: []
+    cus:
+    - cus:acme
+  repo_audience: all
+cases:
+  pass-product-requirement:
+    path: product/alpha/requirements/pay-limits.md
+    expect: []
+  pass-component-spec:
+    path: technical/gateway/api/specs/rate-limits.md
+    expect: []
+  pass-adr:
+    path: technical/gateway/api/adr/0001-use-grpc.md
+    expect: []
+  pass-glossary:
+    path: glossary.md
+    expect: []
+  fail-layout:
+    path: notes/random.md
+    expect:
+    - LAYOUT
+  fail-parse-disputed:
+    path: product/alpha/requirements/disputed-doc.md
+    expect:
+    - PARSE
+  fail-unknown-key:
+    path: product/alpha/requirements/extra-key.md
+    expect:
+    - UNKNOWN_KEY
+  fail-domain:
+    path: product/alpha/requirements/wrong-domain.md
+    expect:
+    - DOMAIN
+  fail-id-format:
+    path: product/alpha/requirements/bad-id.md
+    expect:
+    - ID_FORMAT
+  fail-id-filename:
+    path: product/alpha/requirements/file-name.md
+    expect:
+    - ID_FILENAME
+  fail-id-in-repo:
+    path: product/alpha/requirements/taken-here.md
+    expect:
+    - ID_IN_USE
+  fail-id-elsewhere:
+    path: product/alpha/requirements/taken-else.md
+    expect:
+    - ID_IN_USE
+  fail-type-missing:
+    path: product/alpha/requirements/no-type.md
+    expect:
+    - TYPE_MISSING
+  fail-type-wrong:
+    path: product/alpha/requirements/wrong-type.md
+    expect:
+    - TYPE_PATH
+  fail-owner-missing:
+    path: product/alpha/requirements/no-owner.md
+    expect:
+    - OWNER_MISSING
+  fail-owner-wrong:
+    path: product/alpha/requirements/wrong-owner.md
+    expect:
+    - OWNER
+  fail-entity-format:
+    path: product/alpha/requirements/bad-entity.md
+    expect:
+    - ENTITY_FORMAT
+  fail-entity-not-allowed:
+    path: product/alpha/requirements/cus-not-allowed.md
+    expect:
+    - ENTITY_NOT_ALLOWED
+  fail-entity-cus-missing:
+    path: product/alpha/requirements/cus-missing.md
+    expect:
+    - ENTITY_NOT_FOUND
+    repo_audience: contracts
+  fail-entity-prd-unknown:
+    path: product/alpha/requirements/prd-unknown.md
+    expect:
+    - ENTITY_NOT_FOUND
+  fail-folder-unknown:
+    path: product/ghost/requirements/ghost-doc.md
+    expect:
+    - FOLDER_UNKNOWN
+  fail-supersedes-unknown:
+    path: product/alpha/requirements/sup-unknown.md
+    expect:
+    - SUPERSEDES
+  fail-supersedes-self:
+    path: product/alpha/requirements/sup-self.md
+    expect:
+    - SUPERSEDES
