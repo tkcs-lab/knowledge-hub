@@ -87,7 +87,7 @@ def test_old_rows_are_converted_to_clauses(migrated_db):
     assert migrate(dsn, stop_after="0006_strict_visibility.sql")[-1] == "0006_strict_visibility.sql"
     i = seed_old_rows(migrated_db.admin_dsn(DB))
 
-    assert migrate(dsn) == ["0007_any_of_audiences.sql"]
+    assert migrate(dsn, stop_after="0007_any_of_audiences.sql") == ["0007_any_of_audiences.sql"]
 
     with psycopg.connect(migrated_db.admin_dsn(DB)) as conn:
         def req(table: str, key: str):

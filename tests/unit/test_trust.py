@@ -132,3 +132,17 @@ def test_unparsable_anchor_date_is_disputed():
     r = run("all_approved", commits=d["commits"])
     assert r.anchor_verdict.status == DISPUTED
     assert any("no readable commit date" in a for a in r.alerts)
+
+
+def test_stamps_and_judged_verdicts():
+    r = run("all_approved")
+    assert r.file_verdicts["a.md"].stamp == r.file_verdicts["b.md"].stamp == "reviewed"
+    assert set(r.judged) == {M1, M2}
+    r = run("anchor_semantics")
+    assert r.file_verdicts["a.md"].stamp == "anchor"  # changed by the anchor commit
+    assert r.verdict_for("never-touched.md").stamp == "anchor"
+    assert r.file_verdicts["b.md"].stamp == "reviewed"
+    assert M1 not in r.judged and set(r.judged) == {M2}
+    r = run("stale_head")
+    assert r.file_verdicts["b.md"].stamp is None
+    assert r.judged[M2].status == DISPUTED

@@ -131,6 +131,26 @@ def test_governance_validation():
         parse_config({"governance": {"owner_teams": {"hr": ["Bad Team"]}}})
 
 
+def test_self_merge_defaults_and_validation():
+    c = Config()
+    assert c.self_merge_teams == [] and c.bot_logins == ["kh-hub-bot"]
+    with pytest.raises(ConfigError, match="self_merge_teams team 'Bad Team' is not a valid team name"):
+        parse_config({"self_merge_teams": ["Bad Team"]})
+    with pytest.raises(ConfigError, match="bot_logins login '-x' is not a valid login"):
+        parse_config({"bot_logins": ["-x"]})
+    assert parse_config({"self_merge_teams": ["a", "b", "a"]}).self_merge_teams == ["a", "b"]
+
+
+def test_bots_property():
+    assert Config().bots == ("kh-hub-bot",)
+    assert parse_config({"bot_logins": ["x"]}).bots == ("kh-hub-bot", "x")
+    assert parse_config({"bot_logins": ["kh-hub-bot", "x"]}).bots == ("kh-hub-bot", "x")
+
+
+def test_config_hash_ignores_self_merge_teams():
+    assert config_hash(Config(self_merge_teams=["a"])) == config_hash(Config())
+
+
 def test_audience_names_are_validated():
     with pytest.raises(ConfigError) as e:
         parse_config({"audiences": ["all", "mgmt", "hr", "contracts", "a|b"]})
