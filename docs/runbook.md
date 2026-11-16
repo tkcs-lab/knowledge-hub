@@ -2,7 +2,7 @@
 
 For the operator. Names of variables and keys are in [configuration](configuration.md); the reasons behind the rules are in [design](design.md). Commands run as the `kh` user inside the container, with the `KH_*` environment of the service (see `deploy/compose.example.yaml`). Secrets are files, never variables, and nothing in this document is a real secret or host.
 
-Not run in the cloud, so yours to do and check by hand: the Dockerfile build, and the backup script's `pg_dump` against the protected tables (`deploy/backup-kh.sh`). Check both on the first deploy.
+Not run in the cloud, so yours to do and check by hand: the backup script's `pg_dump` against the protected tables (`deploy/backup-kh.sh`). Check it on the first deploy. The Dockerfile build runs in the `ci` workflow on every pull request.
 
 ## Install order
 
@@ -69,6 +69,35 @@ Notes:
 - The rate limiter (`KH_RATE_LIMIT_PER_MIN`) is per process: with several replicas each one counts alone.
 - `/metrics` exists only when `KH_METRICS_TOKEN_FILE` is set. It needs `Authorization: Bearer <token>` and reads the token file on every request.
 
+## Merge verdicts and `--rejudge`
+
+Each merge commit after the trust anchor is judged once, and the verdict (trusted or disputed) is stored in `kh.merge_verdicts`. Every later sync and rebuild reuses it; only `kh rebuild --repo R --rejudge` (or `kh rebuild --rejudge` for all repos) deletes and judges again. A merge whose pull request Forgejo does not yet report as merged is not stored and is judged again on the next sync.
+
+Consequences:
+
+- A person leaving a team does not turn their earlier self-merges disputed.
+- Enabling `self_merge_teams` does not bless history that was already judged; `--rejudge` does that on purpose.
+- A disputed merge stays disputed until `--rejudge`, even if an approval is added afterwards.
+- Older version rows that were disputed stay disputed after a rejudge even when the merge is now trusted, because the original per-file status is not stored; only the current document row changes.
+- Changing `bot_logins` or `self_merge_teams`, an account compromise, or a reviewer later found unfit all need `kh rebuild --repo R --rejudge`.
+- The first sync after upgrading to 0.2.0 judges the whole history once. Run `kh rebuild` right after `kh migrate`.
+
+Use `--rejudge` after an account compromise, after changing `bot_logins` or `self_merge_teams`, after a team was cleaned up when you want history judged by today's membership, and consciously after a restore (see below).
+
+`kh.merge_verdicts` is not in the backup script: it is derived from git like the other index tables. After a restore, `kh rebuild` judges the history again with today's team membership; run `kh rebuild --rejudge` knowingly.
+
+Behaviour changes:
+
+- A review dismissed after the merge no longer disputes the document: verdicts are fixed at first judgement.
+- `kh rebuild` no longer re-judges; only `--rejudge` does.
+- Team membership is read when a merge is first judged, not when it was merged.
+- The indexer token needs `read:organization` when `self_merge_teams` is set, and the indexer user may need to be a member of the organisation for team reads.
+- Upgrade the CI runner image before adding `self_merge_teams` or `bot_logins` to `kh.yaml`: older images refuse unknown keys.
+- The walk accepts only real merge commits of the PR head. Allow only the plain merge style on canonical repositories; squash, rebase and fast-forward merges are non-merge commits and untrust the repository as before.
+- `kh-admins` in `self_merge_teams` lets admins self-merge `owners.yml`. That is the owner's decision.
+
+A mistyped team in `self_merge_teams` shows up as a failing sync: a repository with a self-merge-shaped merge is retried with `team X does not exist in Forgejo` in `index_jobs.last_error`. Fix the name in `kh.yaml` and restart.
+
 ## Alerts
 
 `index_alerts` is readable only by the indexer role. Read it as the Postgres superuser, or as `kh_indexer`:
@@ -84,7 +113,7 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `file <path> on <repo>/main has no approved merge PR` | A file was last changed by a commit that was not an approved pull request merge. The document is indexed as `disputed` and is not a normative answer. Find the commit in Forgejo. If the change is good, open a pull request that touches the file, have someone other than the author approve it and merge. If it is not, revert it by a pull request. Then `kh rebuild --repo <repo>`. |
 | `trust anchor <sha> is not on main of <repo>` | The configured `trust_anchor` is not on the first-parent chain of `main`, so the whole repo is untrusted and every document is `disputed`. Check the sha in `kh.yaml` for a typo. If `main` was rewritten, review the history first, then set the anchor to a commit you have verified, deploy the config, run `kh rebuild --repo <repo>` and `kh recompute-visibility`. |
 | `non-merge commit <sha> on main of <repo>` | Someone pushed straight to `main`. The repo is marked untrusted and its documents are `disputed` until you review. Turn on branch protection in Forgejo. Review the commit. When the history is acceptable, move `trust_anchor` in `kh.yaml` to the newest verified commit, deploy and run `kh rebuild --repo <repo>`. |
-| `frontmatter must not set <key>; the server decides tier and audience` | A file set `tier`, `audience`, `audiences`, `required_audiences`, `allowed_emails`, `visibility`, `approved_by`, `approved_at`, `generated_by` or `derived_from`. The file is not indexed and an earlier row of it is removed. Remove the key by a pull request. Other `frontmatter: ...` alerts (missing key, unknown domain, bad `review_by`, `status` not `current` or `superseded`) are fixed the same way. |
+| `frontmatter must not set <key>; the server decides tier and audience` | A file set `tier`, `audience`, `audiences`, `required_audiences`, `allowed_emails`, `visibility`, `approved_by`, `approved_at`, `stamp`, `generated_by` or `derived_from`. The file is not indexed and an earlier row of it is removed. Remove the key by a pull request. Other `frontmatter: ...` alerts (missing key, unknown domain, bad `review_by`, `status` not `current` or `superseded`) are fixed the same way. |
 | `main of <repo> was rewritten; run kh rebuild after review` | The new head of `main` does not continue from the last indexed sha. The index is unchanged. Inspect the force push in Forgejo. If it was intended, run `kh rebuild --repo <repo>`. If not, restore the branch from a clone. |
 | `duplicate id <id> in <repo>: <paths>` | Two files in one repo carry the same frontmatter `id`. Files without a single approved merge are rejected. Give one of them a new id. |
 | `supersedes/superseded_by must name a document in the same repo` | A reference points outside the repo. The file is `disputed`. Replace the reference or move the document. |
@@ -157,7 +186,7 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 Releases follow the `/tld:release` skill. The version lives only in `src/knowledge_hub/__init__.py`.
 
 1. Run `/tld:release`. It moves the `## [Unreleased]` changelog entries under a `## [X.Y.Z] - <date>` heading, bumps `__version__` and opens a `chore/release-<X-Y-Z>` pull request. Review and merge it.
-2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first. A dry run checks the changelog heading, that every other check on the commit is green, builds the arm64 image and runs `docker run --rm <image> --help`. It pushes nothing.
+2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first. The skill dispatches only once the `ci` workflow has finished on the merge commit; a dry run started earlier fails at **Require the ci checks on this commit**. A dry run checks the changelog heading, that every other check on the commit is green, that `lint`, `test (3.12)`, `test (3.13)` and `image` are among them, builds the arm64 image and runs `docker run --rm <image> --help`. It pushes nothing.
 3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes the image to GHCR by digest only.
 4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The workflow has no `skip_checks` input.
 5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.

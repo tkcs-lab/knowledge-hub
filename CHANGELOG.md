@@ -6,21 +6,36 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.
 - Agent writes (off by default): `write_note` saves an unreviewed note as `agent/<id>.md` in a `notes-*` repo, `propose_doc` and `propose_edit` open a T0 pull request on a `bot/propose/<uuid>` branch, `pr_status` and `list_my_proposals` read the state. Settings `KH_AGENT_NOTES_ENABLED`, `KH_AGENT_PROPOSALS_ENABLED`, `KH_FORGEJO_NOTES_TOKEN_FILE`, `KH_AGENT_EMAIL_DOMAINS`, `KH_AGENT_NOTE_DAILY_LIMIT`, `KH_AGENT_PROPOSAL_DAILY_LIMIT`, `KH_AGENT_MAX_BODY_BYTES` and `KH_CI_STATUS_LOGINS`.
-- Table `kh.proposals` (migration 0007_proposals), the `agent_written` flag on documents and chunks, three Forgejo client roles (`read`, `bot`, `notes`), the `kh/requested-by` commit status and the metric `kh_agent_write_failures_total`.
+- Table `kh.proposals` (migration 0009_proposals), the `agent_written` flag on documents and chunks, three Forgejo client roles (`read`, `bot`, `notes`), the `kh/requested-by` commit status and the metric `kh_agent_write_failures_total`.
+
+### Changed
+
+- `kh domain-owners` and the trust walk ignore the requester's approval of an agent proposal and fail closed (`agent proposal has no valid requester record from kh-hub-bot`) when its `kh/requested-by` record is missing or invalid; a requester named by such a record never passes as an owner self-merge.
+- Search ranks agent notes like T2, never counts them as a normative answer and flags them with `agent_written`; `get_doc` carries the flag.
+- Agent proposals count `propose_change` candidates toward the daily limit per `(domain, repo)`; `propose_change` itself still counts candidates only.
+- The PrivacyFence declaration example lists the five new tools; the three write tools need an explicit tick on each scoped token.
+
+## [0.2.0] - 2026-11-16
+
+### Added
+
 - Governance config: `reference_audiences` per entity kind (default for `cus`: contracts and mgmt), `governance.owner_teams` in `kh.yaml`, and the `owners.yml` model with `CODEOWNERS` rendering.
 - `kh governance render` writes the frontmatter JSON Schema, `owners.yml`, `CODEOWNERS`, the pull request template and the `kh` Forgejo workflow for a canonical repository.
 - Forgejo client: compare files, branch head lookup, team and membership reads, and `post_status` guarded to the `kh/validate` and `kh/domain-owners` contexts.
 - `kh validate --repo R --base B --head H` checks the markdown files a pull request changes in a canonical repository, prints one `path: reason` line per problem, exits 0, 1 or 2 and posts the `kh/validate` commit status. Ids are checked only across the repos the token can read (unreadable ones are skipped), no Grist table is read for a kind the repo may not cite, and errors never name another repository.
 - `kh governance render --runner-label` sets the runner label of the rendered workflow, so each audience can have its own runner (default `kh-validate:host`).
 - `kh domain-owners --repo R --pr N` checks that the teams named in `owners.yml` (and, for a `widen-audience/<audience>` label, the audience's owner teams) have approved the current head of a pull request, prints one line per missing approval and posts the `kh/domain-owners` commit status.
+- `self_merge_teams` in `kh.yaml`: a merged pull request is also trusted when its author, a member of a team that owns every touched path in `owners.yml`, merged it themselves. Such documents carry the new stamp `owner_merge`.
+- `stamp` (`reviewed`, `owner_merge`, `anchor` or empty) in `search` and `get_doc` results, next to `approved_by`; `stamp` is a forbidden frontmatter key.
+- Merge verdicts are stored in `kh.merge_verdicts` and reused by every sync and rebuild; `kh rebuild --rejudge` judges every merge afresh.
+- `bot_logins` in `kh.yaml` (default `[kh-hub-bot]`, which is always included): bots never self-merge and their approvals never count.
+- `kh domain-owners` passes a pull request whose author may self-merge as owner.
 
 ### Changed
 
-- `kh domain-owners` and the trust walk ignore the requester's approval of an agent proposal and fail closed (`agent proposal has no valid requester record from kh-hub-bot`) when its `kh/requested-by` record is missing or invalid.
-- Search ranks agent notes like T2, never counts them as a normative answer and flags them with `agent_written`; `get_doc` carries the flag.
-- Agent proposals count `propose_change` candidates toward the daily limit per `(domain, repo)`; `propose_change` itself still counts candidates only.
-- The PrivacyFence declaration example lists the five new tools; the three write tools need an explicit tick on each scoped token.
+- `kh domain-owners` prints the approval or self-merge that applied when it passes.
 - An audience list in `entities.<kind>.audiences` or `raw_audience_map` now means any one of the audiences may read the rows; derived records, candidates and conflicts still need every source. Check multi-audience lists before upgrading (migration 0007).
 - `generated_by` and `derived_from` are forbidden frontmatter keys, like the other keys the server writes.
 - The indexer skips paths with a dot-prefixed segment, so `.forgejo/pull_request_template.md` raises no alert.

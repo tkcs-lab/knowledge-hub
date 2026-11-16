@@ -22,7 +22,7 @@ _KINDS = ("doc", "raw", "derived")
 MAX_LIST_LIMIT = 50
 
 _DOC_SQL = """
-SELECT d.id, d.repo, d.path, d.body AS text, d.tier, d.domain, d.owner, d.approved_by, d.approved_at,
+SELECT d.id, d.repo, d.path, d.body AS text, d.tier, d.domain, d.owner, d.approved_by, d.approved_at, d.stamp,
        d.review_by, d.status, d.stale, d.entities, d.supersedes, s.id AS superseded_by,
        d.commit_sha, d.indexed_at, d.agent_written
   FROM kh.documents d
@@ -97,6 +97,7 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
             "owner": row["owner"] or "",
             "approved_by": list(row["approved_by"] or []),
             "approved_at": _iso(row["approved_at"]),
+            "stamp": row["stamp"] or "",
             "review_by": _iso(row["review_by"]),
             "status": row["status"],
             "stale": row["stale"],
@@ -119,6 +120,7 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
             "owner": "",
             "approved_by": [],
             "approved_at": None,
+            "stamp": "",
             "review_by": None,
             "status": "current",
             "stale": False,
@@ -137,7 +139,7 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
 
 
 _VERSION_SQL = """
-SELECT v.path, v.tier, v.status, v.approved_by, v.approved_at
+SELECT v.path, v.tier, v.status, v.approved_by, v.approved_at, v.stamp
   FROM kh.document_versions v WHERE v.document_id = %s AND v.commit_sha = %s
 """
 
@@ -160,6 +162,7 @@ async def _at_version(
         status=ver["status"],
         approved_by=list(ver["approved_by"] or []),
         approved_at=_iso(ver["approved_at"]),
+        stamp=ver["stamp"] or "",
         commit_sha=version,
         source_link=source_link(call.deps, row["repo"], version, ver["path"]),
     )

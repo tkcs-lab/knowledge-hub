@@ -78,6 +78,7 @@ MATRIX: dict[str, dict[str, dict[str, object]]] = {
     },
     "index_jobs": {"kh_indexer": ALL},
     "repo_state": {"kh_indexer": ALL},
+    "merge_verdicts": {"kh_indexer": ALL},
     "index_alerts": {"kh_indexer": ALL},
     "claim_jti": {"kh_indexer": {"select": "expired", "delete": "expired"}},
     "schema_migrations": {},
@@ -93,6 +94,7 @@ PROBE = {
     "derived_records": "title", "derived_sources": "version", "candidates": "title", "proposals": "title",
     "candidate_sources": "source_id", "conflicts": "note", "conflict_items": "item_id",
     "index_jobs": "last_error", "repo_state": "config_hash", "index_alerts": "message",
+    "merge_verdicts": "reason",
     "claim_jti": "expires_at", "schema_migrations": "sha256",
 }
 
@@ -146,6 +148,7 @@ def factories(p: dict[str, str]) -> dict:
                                    "item_id": uid(), **snap},
         "index_jobs": lambda: {"kind": "git_push", "repo": "canonical-all"},
         "repo_state": lambda: {"repo": uid()},
+        "merge_verdicts": lambda: {"repo": uid(), "merge_sha": uid(), "status": "disputed"},
         "index_alerts": lambda: {"repo": "canonical-all", "message": "m"},
         "claim_jti": lambda: {"jti": uid(), "expires_at": NOW + timedelta(hours=1)},
         "schema_migrations": lambda: {"name": uid(), "sha256": "x"},

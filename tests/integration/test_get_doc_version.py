@@ -35,8 +35,8 @@ async def indexed(fresh_db, indexer_pool, deps):
     with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
         ids = dict(conn.execute("SELECT doc_key, id FROM kh.documents").fetchall())
         conn.execute(
-            "INSERT INTO kh.document_versions (document_id, commit_sha, path, tier, status)"
-            " VALUES (%s, 'm1', 'a.md', 'T0', 'current')",
+            "INSERT INTO kh.document_versions (document_id, commit_sha, path, tier, status, stamp)"
+            " VALUES (%s, 'm1', 'a.md', 'T0', 'current', 'owner_merge')",
             (ids["a"],),
         )
     deps.config, deps.forgejo = CFG, fake
@@ -49,6 +49,7 @@ async def test_indexed_older_sha_returns_that_content(fresh_db, indexer_pool, de
     assert not res.is_error, res.text
     assert res.data["text"] == V1
     assert res.data["commit_sha"] == "m1"
+    assert res.data["stamp"] == "owner_merge"
     current = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{ids['a']}"})
     assert current.data["commit_sha"] == "m2" and current.data["text"].startswith("Body of a")
 

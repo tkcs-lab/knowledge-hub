@@ -7,7 +7,7 @@ The hub ships the two required checks of every `kh/canonical-*` repository and t
 | Command | What it does | Exit |
 |---|---|---|
 | `kh validate --repo R --base SHA --head SHA` | Checks every `.md` file the pull request adds or changes (compare `base...head`, files read at `--head`, `owners.yml` read at `--base`). Prints one `path: reason` line per problem and posts the commit status `kh/validate` on `--head`. | 0 pass, 1 problems, 2 error |
-| `kh domain-owners --repo R --pr N` | Checks that every owner team named by `owners.yml` for the changed paths has a counted approval. Prints one `<pattern>: approval from <team> required` line per gap and posts `kh/domain-owners` on the PR head. A PR that is not open prints `pull request is not open`, exits 0 and posts nothing. | 0 pass, 1 gaps, 2 error |
+| `kh domain-owners --repo R --pr N` | Checks that every owner team named by `owners.yml` for the changed paths has a counted approval, or that the author may self-merge (see below). Prints one `<pattern>: approval from <team> required` line per gap, or the one line that applied when it passes (`approved by …`, `self-merge by owner …`), and posts `kh/domain-owners` on the PR head. A PR that is not open prints `pull request is not open`, exits 0 and posts nothing. | 0 pass, 1 gaps, 2 error |
 | `kh governance render --repo R --audience A --out DIR` | Writes the seed files of a repository's first commit (below). | 0 written, 2 error |
 
 Flags. `validate`: `--forgejo-url`, `--forgejo-org`, `--token-file` (required), `--status-token-file`, `--grist-url`, `--grist-key-file`, `--grist-doc-id`, `--config`, `--no-status`. `domain-owners`: `--forgejo-url`, `--forgejo-org`, `--token-file` (required), `--status-token-file`, `--config`, `--no-status`. `governance render`: `--org` (`kh`), `--portfolio-team`, `--product-team`, `--technical-team`, `--owner-team` (default `owners-<audience>`), `--admin-team` (`kh-admins`), `--review-trigger`, `--runner-label` (default `kh-validate:host`; a name with an optional `:host`, and `runs-on` gets the name).
@@ -20,7 +20,11 @@ Messages come from a closed set of texts. No line names another repository, a pa
 
 A PR that moves content into a wider audience carries the label `widen-audience/<audience>` (the audience must be in `audiences`) and a body line `Reason for widening: <text>` with real text (text starting with `<` is the template placeholder and fails). `kh domain-owners` then also requires one counted approval from a member of an owner team of the destination audience (`governance.owner_teams`, else `owners-<audience>`; for `all` the three domain teams). A bare `widen-audience` label fails with `widen-audience needs a destination label widen-audience/<audience>`.
 
-A counted approval is the trust rule's: `APPROVED`, official, not dismissed, on the current head commit, not by the author or `kh-hub-bot`. A reviewer in two teams counts for both.
+A counted approval is the trust rule's: `APPROVED`, official, not dismissed, on the current head commit, not by the author or a bot (`bot_logins`, `kh-hub-bot` always). A reviewer in two teams counts for both.
+
+### Self-merge
+
+When `self_merge_teams` is set, `kh domain-owners` also passes a PR whose author belongs to a self-merge team that owns every changed path (the author is taken as the merger). The check prints `self-merge by owner <author>`. Self-merge replaces only the owner-approval requirement: the widen rules stay, and a PR with a `widen-audience` label never self-merges. The check is not tried when approvals already satisfy the owners.
 
 ## Agent proposals
 
@@ -55,7 +59,7 @@ The hub is the source of truth; the compose repo's `docs/knowledge-hub.md` secti
 | D2 | `status` may be `draft` or `disputed` | Hub keeps `current` and `superseded`. `draft` is rejected (an open PR is the draft); `disputed` is server-assigned. |
 | D3 | `type` enum tied to the path | Gate only: `type` required and tied to the path. Parser unchanged. |
 | D4 | `owner` is the folder's owner team | Gate only: `owner` must equal the domain's team in `owners.yml` at the base commit. |
-| D5 | `generated_by`, `derived_from` forbidden | Parser change: both added to the forbidden keys (10 in total). |
+| D5 | `generated_by`, `derived_from` forbidden | Parser change: both added to the forbidden keys. `stamp` is forbidden too (11 keys in total). |
 | D6 | `additionalProperties: false` | Gate rejects unknown keys; the parser stays tolerant so an upgrade cannot drop live T0 documents. |
 | D7 | `id` matches `^[a-z0-9-]+$` | Gate requires `^[a-z0-9]+(-[a-z0-9]+)*$`. |
 | D8 | filename is `<id>.md`; ADR id `adr-<component>-NNNN` | Gate only. |
@@ -70,7 +74,7 @@ The hub is the source of truth; the compose repo's `docs/knowledge-hub.md` secti
 
 ## Status contexts, tokens and triggers
 
-Forgejo names a job's status `<workflow> / <job> (<event>)`, so branch protection cannot require `kh/validate` from the job. The commands post `kh/validate` and `kh/domain-owners` themselves (`failure` with "<n> problems", `error` with "check could not run", `success` with "all checks passed"); the client accepts only those two contexts. The workflow's derived contexts (`kh / validate (pull_request_target)`) are extra; do not require them.
+Forgejo names a job's status `<workflow> / <job> (<event>)`, so branch protection cannot require `kh/validate` from the job. The commands post `kh/validate` and `kh/domain-owners` themselves (`failure` with "<n> problems", `error` with "check could not run", `success` with "all checks passed" for `kh/validate`; `kh/domain-owners` uses the approval or self-merge message instead); the client accepts only those two contexts. The workflow's derived contexts (`kh / validate (pull_request_target)`) are extra; do not require them.
 
 | Token | Scopes |
 |---|---|
@@ -113,6 +117,8 @@ The workflow runs the base branch's definition, has no checkout step, passes PR 
 - Do not seed a `README.md` (`auto_init`): the indexer raises an alert for it and the gate fails any PR touching it.
 - Build the runner image `FROM` the hub image so `kh` is on the path; register one runner per audience with the label `kh-validate-<audience>:host` and render with `--runner-label` of the same value; the runner needs `KH_CONFIG_FILE` in its environment when `kh.yaml` is not the default.
 - Apply branch protection with the contexts `kh/validate` and `kh/domain-owners`.
+- For repositories whose owners self-merge, set required approvals to 0 in branch protection: a required approval would stop an owner from merging alone. `kh/domain-owners` does the enforcing; its pass message says which rule applied (`approved by …` or `self-merge by owner …`).
+- Known gap: the indexer's walk is authoritative. The check judges the author as merger and `owners.yml` at the PR base; if another person merges the PR, or `owners.yml` on `main` changes meanwhile, the indexer disputes the merge although CI was green.
 
 ## Golden files
 

@@ -20,7 +20,8 @@ def run(name: str, requesters=None, **override) -> TrustResult:
     changed = {sha: files_from_compare(c) for sha, c in d["compare"].items()}
     reviews = {int(k): v for k, v in d["reviews"].items()}
     return evaluate_chain(
-        d["repo"], d["commits"], d["pulls"], reviews, changed, d["bot_logins"], d["anchor"], requesters
+        d["repo"], d["commits"], d["pulls"], reviews, changed, d["bot_logins"], d["anchor"],
+        requesters=requesters,
     )
 
 
@@ -148,3 +149,17 @@ def test_requester_approval_is_excluded():
     assert r.file_verdicts["a.md"].status == DISPUTED
     assert r.file_verdicts["a.md"].reason == "no approval of the final head"
     assert run("all_approved", requesters={1: (("carol",), None)}).file_verdicts["a.md"].status == TRUSTED
+
+
+def test_stamps_and_judged_verdicts():
+    r = run("all_approved")
+    assert r.file_verdicts["a.md"].stamp == r.file_verdicts["b.md"].stamp == "reviewed"
+    assert set(r.judged) == {M1, M2}
+    r = run("anchor_semantics")
+    assert r.file_verdicts["a.md"].stamp == "anchor"  # changed by the anchor commit
+    assert r.verdict_for("never-touched.md").stamp == "anchor"
+    assert r.file_verdicts["b.md"].stamp == "reviewed"
+    assert M1 not in r.judged and set(r.judged) == {M2}
+    r = run("stale_head")
+    assert r.file_verdicts["b.md"].stamp is None
+    assert r.judged[M2].status == DISPUTED

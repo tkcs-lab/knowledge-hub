@@ -58,10 +58,10 @@ def _migrate(settings: Settings) -> int:
     return 0
 
 
-def _rebuild(settings: Settings, config: Config, repo: str | None) -> int:
+def _rebuild(settings: Settings, config: Config, repo: str | None, rejudge: bool = False) -> int:
     from knowledge_hub.indexer.rebuild import rebuild
 
-    done = asyncio.run(_with_deps(settings, config, lambda d: rebuild(d, repo)))
+    done = asyncio.run(_with_deps(settings, config, lambda d: rebuild(d, repo, rejudge)))
     for name in done:
         print(f"rebuilt {name}")
     return 0
@@ -269,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--port", type=int, default=8080)
         if name == "rebuild":
             p.add_argument("--repo")
+            p.add_argument("--rejudge", action="store_true")
     gov = sub.add_parser("governance").add_subparsers(dest="governance_command", required=True)
     render = gov.add_parser("render")
     for flag in ("--repo", "--audience", "--out"):
@@ -332,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         return _migrate(settings)
     try:
         if args.command == "rebuild":
-            return _rebuild(settings, config, args.repo)
+            return _rebuild(settings, config, args.repo, args.rejudge)
         if args.command == "daily":
             return _daily(settings, config)
         if args.command == "recompute-visibility":

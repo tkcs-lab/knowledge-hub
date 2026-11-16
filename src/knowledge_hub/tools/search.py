@@ -49,6 +49,7 @@ def _hit(deps: Deps, row: dict[str, Any]) -> dict[str, Any]:
         "owner": (row["doc_owner"] or "") if kind == "doc" else "",
         "approved_by": list(row["doc_approved_by"] or []) if kind == "doc" else [],
         "approved_at": _iso(row["doc_approved_at"]) if kind == "doc" else None,
+        "stamp": (row["doc_stamp"] or "") if kind == "doc" else "",
         "review_by": _iso(row["doc_review_by"]) if kind == "doc" else None,
         "status": row["status"],
         "stale": row["stale"],

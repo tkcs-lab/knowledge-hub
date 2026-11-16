@@ -18,6 +18,7 @@ class FakeForgejoHttp:
     Every request lands in ``requests``; every ``POST .../statuses/<sha>`` body in ``statuses``
     (its target in ``status_targets``). ``fail`` maps a path substring to an HTTP status to return.
     A repo may also hold ``pulls`` (``{number: pull}``) and ``reviews`` (``{number: [review]}``).
+    ``trees`` (``{sha: {path: blob_sha}}``) serves ``git/trees/<sha>`` when the sha is in it.
     ``teams`` maps a team name to its member logins; team ids are 1-based in insertion order.
     """
 
@@ -94,7 +95,12 @@ class FakeForgejoHttp:
                 return httpx.Response(404, json={})
             return httpx.Response(200, json={"commit": {"id": world["sha"]}})
         if rest.startswith("git/trees/"):
-            tree = [{"path": p, "type": "blob", "sha": "x"} for p in sorted(world["tree"])]
+            tsha = unquote(rest[len("git/trees/") :])
+            if tsha in world.get("trees", {}):
+                blobs = sorted(world["trees"][tsha].items())
+                tree = [{"path": p, "type": "blob", "sha": b} for p, b in blobs]
+            else:
+                tree = [{"path": p, "type": "blob", "sha": "x"} for p in sorted(world["tree"])]
             return httpx.Response(200, json={"tree": tree, "total_count": len(tree)})
         if rest.startswith("raw/"):
             text = world["tree"].get(unquote(rest[len("raw/") :]))

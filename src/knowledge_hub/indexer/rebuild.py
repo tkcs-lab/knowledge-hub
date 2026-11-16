@@ -68,7 +68,7 @@ class CheckReport:
         return out
 
 
-async def _sync(deps: Any, name: str) -> Any:
+async def _sync(deps: Any, name: str, rejudge: bool = False) -> Any:
     return await sync_repo(
         deps.indexer_pool,
         deps.forgejo,
@@ -76,10 +76,11 @@ async def _sync(deps: Any, name: str) -> Any:
         name,
         deps.embedder,
         chunker_version=deps.settings.chunker_version,
+        rejudge=rejudge,
     )
 
 
-async def rebuild(deps: Any, repo: str | None = None) -> list[str]:
+async def rebuild(deps: Any, repo: str | None = None, rejudge: bool = False) -> list[str]:
     """Re-walk trust and sync each configured repo's head; documents absent from the tree are deleted."""
     if deps.forgejo is None:
         raise ValueError("KH_FORGEJO_URL is required")
@@ -87,14 +88,14 @@ async def rebuild(deps: Any, repo: str | None = None) -> list[str]:
     if repo is not None and repo not in deps.config.repos:
         raise ValueError(f"repo {repo} is not listed in config")
     for name in repos:
-        plan = await _sync(deps, name)
+        plan = await _sync(deps, name, rejudge)
         if plan.refused:
             # Rebuild is the operator's answer to a rewritten main: forget the old head and index anew.
             async with deps.indexer_pool.connection() as conn:
                 await conn.execute(
                     "UPDATE kh.repo_state SET last_indexed_sha = NULL WHERE repo = %s", (name,)
                 )
-            await _sync(deps, name)
+            await _sync(deps, name, rejudge)
     return repos
 
 

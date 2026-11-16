@@ -34,6 +34,7 @@ def check_owners(
     widen: tuple[str, Collection[str]] | None,
     widen_reason_ok: bool,
     widen_label_problem: str | None,
+    owner_approval_waived: bool = False,
 ) -> list[str]:
     """Output lines of the unsatisfied requirements, sorted and de-duplicated; empty means pass."""
     reviewers = _logins(counted)
@@ -51,7 +52,7 @@ def check_owners(
         matched.setdefault(id(rule), (rule, []))[1].append(path)
     problems: list[OwnersProblem] = []
     for rule, touched in matched.values():
-        if approved_by(rule.team):
+        if owner_approval_waived or approved_by(rule.team):
             continue
         pattern = next(p for p in rule.paths if any(glob_to_regex(p).fullmatch(t) for t in touched))
         problems.append(OwnersProblem(pattern, rule.team, f"{pattern}: approval from {rule.team} required"))
