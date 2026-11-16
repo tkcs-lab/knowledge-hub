@@ -32,7 +32,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-propose-edit
 
-- pending
+- worker: A T1 or glossary target is refused with NOT_EDITABLE by mapping the bad_path error of promote._target_doc to it.
 
 ## p8-governance
 
