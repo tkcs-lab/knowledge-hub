@@ -73,7 +73,8 @@ async def test_product_owner_does_not_unlock_technical_but_technical_does():
     path = "technical/x/design/a.md"
     result = await run(make([path], [ok("bob")]))
     assert not result.ok and result.lines == ["technical/**: approval from owners-technical required"]
-    assert (await run(make([path], [ok("carol")]))).ok
+    carol = await run(make([path], [ok("carol")]))
+    assert carol.ok and carol.lines == ["approved by carol"]
 
 
 async def test_author_and_bot_do_not_count():
@@ -139,7 +140,7 @@ async def test_status_posted_to_head():
     fake = make(["product/a.md"], [ok("bob")])
     await run(fake)
     assert fake.statuses == [
-        {"context": "kh/domain-owners", "state": "success", "description": "all checks passed"}
+        {"context": "kh/domain-owners", "state": "success", "description": "approved by bob"}
     ]
     assert fake.status_targets == [("canonical-all", "h1")]
     fail = make(["product/a.md"])
@@ -240,3 +241,80 @@ def test_check_owners_text():
         "widen-audience needs a destination label widen-audience/<audience>",
         "x/y.md: no owner in owners.yml",
     ]
+
+
+SELF = Config(self_merge_teams=["owners-product"])
+SELF_TEAMS = {**TEAMS, "owners-product": ["bob", "alice"]}
+
+
+async def test_self_merge_by_owner_passes_and_says_so():
+    fake = make(["product/a.md"], teams=SELF_TEAMS)
+    result = await run(fake, config=SELF)
+    assert result.ok and result.lines == ["self-merge by owner alice"]
+    assert fake.statuses == [
+        {"context": "kh/domain-owners", "state": "success", "description": "self-merge by owner alice"}
+    ]
+
+
+async def test_owner_approvals_pass_without_a_team_call_for_the_author():
+    fake = make(["product/a.md"], [ok("bob")], teams=SELF_TEAMS)
+    result = await run(fake, config=SELF)
+    assert result.ok and result.lines == ["approved by bob"]
+    members = [p for p in fake.paths("members") if p.endswith("/alice")]
+    assert members == []
+
+
+async def test_no_paths_needs_no_approval():
+    result = await run(make([]))
+    assert result.ok and result.lines == ["no owner approval needed"]
+
+
+async def test_self_merge_does_not_cover_another_teams_path():
+    fake = make(["product/a.md", "technical/b.md"], teams=SELF_TEAMS)
+    result = await run(fake, config=SELF)
+    assert not result.ok
+    assert result.lines == [
+        "product/**: approval from owners-product required",
+        "technical/**: approval from owners-technical required",
+    ]
+
+
+async def test_widen_label_never_passes_through_self_merge():
+    config = Config(
+        governance={"owner_teams": {"hr": ["owners-hr"]}}, self_merge_teams=["owners-product"]
+    )
+    fake = make(["product/a.md"], labels=["widen-audience/hr"], body=REASON, teams=SELF_TEAMS)
+    result = await run(fake, config=config)
+    assert not result.ok
+    assert "widen-audience needs approval from one of: owners-hr" in result.lines
+    assert not [p for p in fake.paths("members") if p.endswith("/alice")]
+
+
+def test_unknown_self_merge_team_exits_two(monkeypatch, tmp_path, capsys):
+    teams = {k: v for k, v in SELF_TEAMS.items() if k != "owners-product"}
+    fake = make(["product/a.md"], teams=teams)
+    monkeypatch.setattr(
+        cli, "_make_forgejo", lambda u, t, o: ForgejoClient(u, t, o, transport=fake.transport)
+    )
+    token = tmp_path / "t"
+    token.write_text("tok")
+    cfg = tmp_path / "kh.yaml"
+    cfg.write_text("self_merge_teams: [owners-product]\n")
+    argv = [
+        "domain-owners", "--repo", "canonical-all", "--pr", "7", "--forgejo-url", "http://f",
+        "--token-file", str(token), "--no-status", "--config", str(cfg),
+    ]
+    assert cli.main(argv) == 2
+    assert "team owners-product does not exist in Forgejo" in capsys.readouterr().err
+
+
+async def test_self_merge_disabled_keeps_the_approval_lines():
+    result = await run(make(["product/a.md"], teams=SELF_TEAMS))
+    assert result.lines == ["product/**: approval from owners-product required"]
+
+
+async def test_bot_author_cannot_self_merge():
+    fake = make(["product/a.md"], teams={**TEAMS, "owners-product": ["kh-hub-bot"]})
+    fake.repos["canonical-all"]["pulls"][7]["user"] = {"login": "kh-hub-bot"}
+    result = await run(fake, config=SELF)
+    assert not result.ok and result.lines == ["product/**: approval from owners-product required"]
