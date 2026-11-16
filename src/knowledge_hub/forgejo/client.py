@@ -9,15 +9,23 @@ Every write calls ``_guard_ref`` on its target ref before sending anything; stat
 from __future__ import annotations
 
 import base64
-from typing import Any
+import re
+from collections.abc import Collection
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+
+from knowledge_hub.proposals import PROPOSE_REF_PREFIX, REQUESTER_CONTEXT
 
 BOT_REF_PREFIX = "bot/promote/"
 _PAGE = 50
 _TREE_PAGE = 1000
 _MAX_PAGES = 1000
+_STATUS_PAGES = 20
+_LOGIN_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,38}")
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_NOTE_PATH_RE = re.compile(r"agent/[a-z0-9]+(-[a-z0-9]+)*\.md")
 STATUS_CONTEXTS = ("kh/validate", "kh/domain-owners")
 STATUS_STATES = ("success", "failure", "error", "pending")
 
@@ -31,10 +39,13 @@ class ForgejoRefused(ForgejoError):
 
 
 def _guard_ref(ref: str) -> str:
-    if not isinstance(ref, str) or not ref.startswith(BOT_REF_PREFIX) or len(ref) == len(BOT_REF_PREFIX):
-        raise ForgejoRefused("write refused: ref must start with bot/promote/")
+    msg = "write refused: ref must start with bot/promote/ or bot/propose/"
+    if not isinstance(ref, str):
+        raise ForgejoRefused(msg)
+    if not any(ref.startswith(p) and len(ref) > len(p) for p in (BOT_REF_PREFIX, PROPOSE_REF_PREFIX)):
+        raise ForgejoRefused(msg)
     if ".." in ref or "//" in ref:
-        raise ForgejoRefused("write refused: ref must start with bot/promote/")
+        raise ForgejoRefused(msg)
     return ref
 
 
@@ -56,8 +67,12 @@ class ForgejoClient:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 30.0,
+        role: Literal["read", "bot", "notes"] = "bot",
+        notes_repos: Collection[str] = (),
     ) -> None:
         self.org = org
+        self.role = role
+        self.notes_repos = frozenset(notes_repos)
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/api/v1",
             headers={"Authorization": f"token {token}", "Accept": "application/json"},
@@ -246,6 +261,72 @@ class ForgejoClient:
             raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
         return True
 
+    async def last_commit(self, repo: str, path: str, ref: str) -> str | None:
+        """Sha of the newest commit at ``ref`` that touched ``path``; ``None`` when there is none."""
+        data = await self._get_json(
+            f"{self._repo(repo)}/commits",
+            {"path": path, "sha": ref, "limit": 1, "stat": "false", "verification": "false",
+             "files": "false"},
+        )
+        if not data:
+            return None
+        try:
+            return data[0]["sha"]
+        except (KeyError, TypeError, IndexError):
+            raise ForgejoError("commit list has no sha") from None
+
+    async def blob_sha(self, repo: str, path: str, ref: str) -> str | None:
+        """Git blob sha of ``path`` at ``ref``; ``None`` when the file does not exist."""
+        return await self._existing_blob_sha(f"{self._repo(repo)}/contents/{quote(path, safe='/')}", ref)
+
+    async def commit_statuses(self, repo: str, sha: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for page in range(1, _STATUS_PAGES + 1):
+            batch = await self._get_json(
+                f"{self._repo(repo)}/commits/{_q(sha)}/statuses", {"page": page, "limit": _PAGE}
+            )
+            for item in batch:
+                creator = item.get("creator")
+                out.append(
+                    {
+                        "context": item.get("context"),
+                        "state": item.get("status") or item.get("state"),
+                        "description": item.get("description"),
+                        "creator": creator.get("login") if isinstance(creator, dict) else None,
+                    }
+                )
+            if len(batch) < _PAGE:
+                return out
+        raise ForgejoError("too many statuses")
+
+    async def pull_for_head(self, repo: str, branch: str) -> dict[str, Any] | None:
+        """The pull request whose head is ``branch`` and base ``main``; ``None`` on HTTP 404."""
+        url = f"{self._repo(repo)}/pulls/main/{quote(branch, safe='/')}"
+        try:
+            resp = await self._http.get(url)
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+        try:
+            return resp.json()
+        except ValueError:
+            raise ForgejoError(f"GET {url} failed: invalid JSON") from None
+
+    async def org_member(self, login: str) -> bool:
+        url = f"/orgs/{_q(self.org)}/members/{_q(login)}"
+        try:
+            resp = await self._http.get(url)
+        except httpx.HTTPError as exc:
+            raise ForgejoError(f"GET {url} failed: {type(exc).__name__}") from None
+        if resp.status_code == 204:
+            return True
+        if resp.status_code == 404:
+            return False
+        raise ForgejoError(f"GET {url} failed: HTTP {resp.status_code}")
+
     # -- writes: every one calls ``_guard_ref`` on the branch it writes before sending ---------
 
     async def _send(self, method: str, path: str, body: dict[str, Any]) -> Any:
@@ -260,7 +341,12 @@ class ForgejoClient:
         except ValueError:
             raise ForgejoError(f"{method} {path} failed: invalid JSON") from None
 
+    def _require_branch_writer(self) -> None:
+        if self.role != "bot":
+            raise ForgejoRefused("write refused: this client cannot write branches or statuses")
+
     async def post_status(self, repo: str, sha: str, context: str, state: str, description: str) -> None:
+        self._require_branch_writer()
         _guard_context(context, state)
         await self._send(
             "POST",
@@ -269,13 +355,17 @@ class ForgejoClient:
         )
 
     async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
+        self._require_branch_writer()
         _guard_ref(name)
         await self._send(
             "POST", f"{self._repo(repo)}/branches", {"new_branch_name": name, "old_ref_name": from_sha}
         )
 
-    async def put_file(self, repo: str, branch: str, path: str, content: str, message: str) -> None:
-        """Create ``path`` on ``branch`` or, when it exists there, replace it."""
+    async def put_file(
+        self, repo: str, branch: str, path: str, content: str, message: str
+    ) -> dict[str, Any]:
+        """Create ``path`` on ``branch`` or, when it exists there, replace it; returns the commit."""
+        self._require_branch_writer()
         _guard_ref(branch)
         url = f"{self._repo(repo)}/contents/{quote(path, safe='/')}"
         body: dict[str, Any] = {
@@ -285,9 +375,56 @@ class ForgejoClient:
         }
         existing = await self._existing_blob_sha(url, branch)
         if existing is None:
-            await self._send("POST", url, body)
+            resp = await self._send("POST", url, body)
         else:
-            await self._send("PUT", url, {**body, "sha": existing})
+            resp = await self._send("PUT", url, {**body, "sha": existing})
+        commit = resp.get("commit") if isinstance(resp, dict) else None
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ForgejoError("commit response has no sha")
+        return {"sha": sha, "parents": [p["sha"] for p in commit.get("parents") or []]}
+
+    async def post_requester(self, repo: str, sha: str, login: str, proposal_id: str) -> None:
+        self._require_branch_writer()
+        if (
+            not isinstance(login, str)
+            or not isinstance(proposal_id, str)
+            or not _LOGIN_RE.fullmatch(login)
+            or not _UUID_RE.fullmatch(proposal_id)
+        ):
+            raise ForgejoRefused("write refused: not a requester record")
+        await self._send(
+            "POST",
+            f"{self._repo(repo)}/statuses/{_q(sha)}",
+            {"context": REQUESTER_CONTEXT, "state": "success", "description": f"{login} {proposal_id}"},
+        )
+
+    async def put_note(
+        self, repo: str, path: str, content: str, message: str, prev_blob: str | None
+    ) -> str:
+        """Write an agent note on ``main`` (role ``notes``); returns the new commit sha."""
+        if (
+            self.role != "notes"
+            or repo not in self.notes_repos
+            or not isinstance(path, str)
+            or not _NOTE_PATH_RE.fullmatch(path)
+        ):
+            raise ForgejoRefused("write refused: not an agent note write")
+        url = f"{self._repo(repo)}/contents/{quote(path, safe='/')}"
+        body: dict[str, Any] = {
+            "branch": "main",
+            "message": message,
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        }
+        if prev_blob is None:
+            resp = await self._send("POST", url, body)
+        else:
+            resp = await self._send("PUT", url, {**body, "sha": prev_blob})
+        commit = resp.get("commit") if isinstance(resp, dict) else None
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ForgejoError("commit response has no sha")
+        return sha
 
     async def _existing_blob_sha(self, url: str, branch: str) -> str | None:
         try:
@@ -325,6 +462,7 @@ class ForgejoClient:
     async def open_pull(
         self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
     ) -> dict[str, Any]:
+        self._require_branch_writer()
         _guard_ref(head)
         if base != "main":
             raise ForgejoRefused("write refused: pull request base must be main")

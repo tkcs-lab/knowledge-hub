@@ -22,6 +22,7 @@ class Deps:
     blobs: Any = None
     forgejo: Any = None  # read-only (indexer token)
     forgejo_bot: Any = None  # bot token; used only by propose_change
+    forgejo_notes: Any = None  # notes token; writes agent notes on T1 repos
     grist: Any = None
     verifier: Any = None
     ratelimiter: Any = None
