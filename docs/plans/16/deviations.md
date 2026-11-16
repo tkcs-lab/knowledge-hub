@@ -62,6 +62,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - None.
 - level: Main gained plans 12, 18 and owner-self-merge while this ran; merging it into the feature branch conflicts in 10 files, so a strong-level conflict worker (fix-1) did the merge instead of the standard worker level.
+- conflict: fix-1 merged main (plans 12 and 18, owner-self-merge) into the branch: the requester exclusion also applies under main merge rule (a requester named by a record never passes as an owner self-merge; a proposal without a valid record fails closed even when self-merge would pass).
+- conflict: fix-1 renamed migration 0007_proposals.sql to 0009_proposals.sql because main now has 0008_merge_verdicts.sql; references updated.
+- level: The fix-1 conflict worker ran at the strong level.
 
 ## Final review
 
