@@ -57,13 +57,17 @@ def test_tool_rules_follow_the_privacyfence_loader():
             assert name in WRITE_TOOLS, name
 
 
+def test_email_for_visibility():
+    assert UPSTREAM["email_for_visibility"] is True
+
+
 def test_upstream_fields():
     assert set(DECLARATION) <= {"version", "upstreams", "claim", "membership"}
     assert DECLARATION["version"] == 1
     assert len(DECLARATION["upstreams"]) == 1
     allowed = {
         "id", "label", "url", "audience", "tools", "identity_claim",
-        "claim_lifetime_seconds", "allowed_principal_types",
+        "claim_lifetime_seconds", "allowed_principal_types", "email_for_visibility",
     }
     assert set(UPSTREAM) <= allowed
     assert UPSTREAM["id"] == "kh" and re.fullmatch(r"[a-z][a-z0-9]{1,15}", UPSTREAM["id"])
