@@ -152,6 +152,23 @@ async def test_tightening_the_map_moves_everything_that_cites_the_row(admin, ind
     )
 
 
+AUDS = ["all", "mgmt", "hr", "contracts", "finance"]
+
+
+async def test_a_list_gives_one_clause_and_series_plus_folder_give_two(admin, indexer_pool):
+    one = parse_config({"audiences": AUDS, "raw_audience_map": {"series:s1": ["mgmt", "finance"]}})
+    two = parse_config({
+        "audiences": AUDS,
+        "raw_audience_map": {"series:s1": ["mgmt"], "folder:f1": ["finance"]},
+    })
+    r = mapped_raw(admin)
+    admin.execute("UPDATE kh.raw_records SET folder = 'f1' WHERE id = %s", (r,))
+    await recompute_visibility(indexer_pool, one)
+    assert vis(admin, "raw_records", r) == (["finance|mgmt"], None)
+    await recompute_visibility(indexer_pool, two)
+    assert vis(admin, "raw_records", r) == (["finance", "mgmt"], None)
+
+
 async def test_loader_without_a_stored_hash_loads_the_map_only(admin, indexer_pool):
     r = mapped_raw(admin)
     admin.execute("UPDATE kh.raw_records SET required_audiences = '{hr}' WHERE id = %s", (r,))

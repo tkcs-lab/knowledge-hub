@@ -52,6 +52,10 @@ EMAIL_SOURCES = (
     "cannot propose: a cited source is restricted to named people; no canonical repo is that narrow"
 )
 SPAN = "cannot propose: sources span audiences {a}, {b}; no canonical repo is restricted to all of them"
+AMBIGUOUS = (
+    "cannot propose: the sources fit both {repo_a} and {repo_b}; "
+    "pass target_id of a document in the repository to use"
+)
 NO_REPO = "cannot propose: no canonical repository is configured for audience {a}"
 WIDER = "cannot propose to {repo}: its audience {a} is wider than or different from the sources' audience {u}"
 BAD_PATH = (
