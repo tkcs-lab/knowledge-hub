@@ -110,7 +110,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: blocking: LabelsStep printed ! label <x>: used by N rows where plan 3.7 and docs say in use (the manifest line for p11 said used by <n> rows); fixed by fix-1 to print in use, test asserts prefix and object only
 
 ## Finishing
 
