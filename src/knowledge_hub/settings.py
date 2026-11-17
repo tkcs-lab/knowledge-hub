@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     stale_weight: float = 0.5
     search_max_offset: int = 100
     max_record_bytes: int = 1048576
+    propose_max_bytes: int = 131072
+    propose_max_open: int = 20
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
 
