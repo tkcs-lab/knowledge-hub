@@ -20,6 +20,7 @@ from knowledge_hub.blobs import BlobNotFound
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
+from knowledge_hub.usage import UsageEvent
 
 MAX_LIST_LIMIT = 50
 
@@ -84,6 +85,7 @@ async def get_doc(call: ToolCall, id: str) -> dict[str, Any]:
     kind, key = parsed
     if kind == "doc":
         row = await _one(call, _DOC_SQL, key)
+        call.events.append(UsageEvent.opened(f"doc:{row['id']}"))
         return {
             "id": f"doc:{row['id']}",
             "tier": "T0",
@@ -100,6 +102,7 @@ async def get_doc(call: ToolCall, id: str) -> dict[str, Any]:
             "source_link": source_link(call.deps, row["repo"], row["commit_sha"], row["path"]),
         }
     row = await _one(call, _REC_SQL, key)
+    call.events.append(UsageEvent.opened(f"rec:{row['id']}"))
     return {
         "id": f"rec:{row['id']}",
         "tier": "T3",
