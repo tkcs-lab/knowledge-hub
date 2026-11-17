@@ -3,44 +3,35 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
 
-FORBIDDEN_KEYS = (
-    "tier",
-    "audience",
-    "audiences",
-    "required_audiences",
-    "allowed_emails",
-    "visibility",
-    "approved_by",
-    "approved_at",
-    "generated_by",
-    "derived_from",
-    "stamp",
-)
-REQUIRED_KEYS = ("id", "title", "domain", "review_by")
-OPTIONAL_KEYS = ("type", "owner", "status", "entities", "supersedes", "superseded_by")
-ALLOWED_KEYS = REQUIRED_KEYS + OPTIONAL_KEYS
-ALLOWED_STATUS = ("current", "superseded")
+from knowledge_hub.config import LABEL_RE
+
+
+class _Loader(yaml.SafeLoader):
+    """Safe loader that leaves ``2027-01-31`` a string, so a bad date is ``invalid review_by``."""
+
+
+_Loader.yaml_implicit_resolvers = {
+    k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:timestamp"]
+    for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 @dataclass(frozen=True)
 class ParsedDoc:
-    path: str
     id: str
     title: str
-    domain: str
     review_by: dt.date
     body: str
-    owner: str | None = None
-    type: str | None = None
-    entities: list[str] = field(default_factory=list)
-    supersedes: list[str] = field(default_factory=list)
-    superseded_by: list[str] = field(default_factory=list)
-    status: str = "current"
+    labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -59,109 +50,49 @@ def _split(text: str) -> tuple[str, str] | None:
     return None
 
 
-def raw_keys(text: str) -> list[str] | None:
-    """The frontmatter keys as written, or None when the block is missing or not a mapping."""
-    split = _split(text)
-    if split is None:
-        return None
-    try:
-        data = yaml.safe_load(split[0])
-    except (yaml.YAMLError, ValueError):
-        return None
-    return list(data) if isinstance(data, dict) else None
+def _review_by(value: Any) -> dt.date | None:
+    if isinstance(value, str) and _DATE_RE.fullmatch(value):
+        try:
+            return dt.date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 
 
-def _str_list(value: Any, key: str) -> list[str] | str:
-    """Return a list of strings, or an error text."""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list) and all(isinstance(v, str) and v for v in value):
-        return list(value)
-    return f"frontmatter: {key} must be a string or a list of strings"
-
-
-def _opt_str(value: Any, key: str) -> str | None | Rejected:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    return Rejected(f"frontmatter: {key} must be a string")
-
-
-def parse_document(text: str, path: str, domains: list[str]) -> ParsedDoc | Rejected:
+def parse_document(text: str, path: str) -> ParsedDoc | Rejected:
+    """Parse one Markdown file. ``path`` is for the caller's messages; it takes no part in the rules."""
+    del path
     parts = _split(text)
     if parts is None:
-        return Rejected("frontmatter: missing or unterminated frontmatter block")
+        return Rejected("missing frontmatter")
     raw, body = parts
     try:
-        data = yaml.safe_load(raw)
+        data = yaml.load(raw, Loader=_Loader)  # noqa: S506 (safe subclass)
     except (yaml.YAMLError, ValueError):
-        return Rejected("frontmatter: invalid YAML or date")
+        return Rejected("invalid frontmatter")
     if not isinstance(data, dict):
-        return Rejected("frontmatter: must be a mapping")
+        return Rejected("invalid frontmatter")
 
-    for key in FORBIDDEN_KEYS:
-        if key in data:
-            return Rejected(f"frontmatter must not set {key}; the server decides tier and audience")
-
-    missing = [k for k in REQUIRED_KEYS if data.get(k) in (None, "")]
-    if missing:
-        return Rejected(f"frontmatter: missing required key {', '.join(missing)}")
+    for key in ("id", "title", "review_by"):
+        if data.get(key) is None:
+            return Rejected(f"missing {key}")
 
     doc_id = data["id"]
-    if isinstance(doc_id, int) and not isinstance(doc_id, bool):
-        doc_id = str(doc_id)
-    if not isinstance(doc_id, str) or not doc_id.strip():
-        return Rejected("frontmatter: id must be a string")
+    if not isinstance(doc_id, str) or not ID_RE.fullmatch(doc_id):
+        return Rejected("invalid id")
     title = data["title"]
     if not isinstance(title, str) or not title.strip():
-        return Rejected("frontmatter: title must be a string")
-    domain = data["domain"]
-    if not isinstance(domain, str) or domain not in domains:
-        return Rejected(f"frontmatter: unknown domain {domain}")
+        return Rejected("invalid title")
+    review_by = _review_by(data["review_by"])
+    if review_by is None:
+        return Rejected("invalid review_by")
 
-    rb = data["review_by"]
-    if isinstance(rb, dt.datetime):
-        return Rejected("frontmatter: review_by must be a date (YYYY-MM-DD)")
-    if isinstance(rb, str):
-        try:
-            rb = dt.date.fromisoformat(rb)
-        except ValueError:
-            return Rejected("frontmatter: review_by must be a date (YYYY-MM-DD)")
-    if not isinstance(rb, dt.date):
-        return Rejected("frontmatter: review_by must be a date (YYYY-MM-DD)")
+    labels = data.get("labels")
+    if labels is None:
+        labels = []
+    elif not isinstance(labels, list) or not all(
+        isinstance(x, str) and LABEL_RE.fullmatch(x) for x in labels
+    ):
+        return Rejected("invalid labels")
 
-    status = data.get("status", "current")
-    if status == "disputed":
-        return Rejected("frontmatter: status disputed cannot be set by a file")
-    if status not in ALLOWED_STATUS:
-        return Rejected("frontmatter: status must be current or superseded")
-
-    owner = _opt_str(data.get("owner"), "owner")
-    if isinstance(owner, Rejected):
-        return owner
-    typ = _opt_str(data.get("type"), "type")
-    if isinstance(typ, Rejected):
-        return typ
-
-    lists: dict[str, list[str]] = {}
-    for key in ("entities", "supersedes", "superseded_by"):
-        got = _str_list(data.get(key), key)
-        if isinstance(got, str):
-            return Rejected(got)
-        lists[key] = got
-
-    return ParsedDoc(
-        path=path,
-        id=doc_id.strip(),
-        title=title.strip(),
-        domain=domain,
-        review_by=rb,
-        body=body,
-        owner=owner,
-        type=typ,
-        status=status,
-        **lists,
-    )
+    return ParsedDoc(id=doc_id, title=title.strip(), review_by=review_by, body=body, labels=list(labels))
