@@ -105,7 +105,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p17-docs-retirement
 
-- pending
+- worker: runbook install order and first-deploy probe written from plan sections 3.7 and 5 without kh setup --help output to check against; added Backup and restore and Rotating secrets sections because the old text described removed things; README command table lists kh lint and the setup commands
+- review: CHANGELOG [Unreleased] reconciled into one Added, Changed, Removed set by the worker
 
 ## Final review
 
