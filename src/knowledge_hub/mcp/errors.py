@@ -1,7 +1,7 @@
-"""The fixed-text catalogue (plan 3.9) and ``tool_guard`` (plan 3.2).
+"""The fixed-text catalogue (plan 3.8) and ``tool_guard`` (plan 3.2).
 
 Every text a caller can see from a failed tool is one of the constants below. Later phases import
-them and never add to them, except ``RATE_LIMIT`` (phase p23).
+them and never add to them.
 """
 
 from __future__ import annotations
@@ -30,43 +30,21 @@ log = logging.getLogger("knowledge_hub.tools")
 
 NOT_FOUND = "not found"
 INTERNAL = "internal error (ref {ref})"
-CURSOR_FOREIGN = "cursor does not belong to this query"
-NORMATIVE = (
-    "cannot answer normatively from T2/T3 only: {n} lower-tier hits; "
-    'call search with min_tier="T3" to see them'
-)
-VERSION_NOT_INDEXED = "version {sha} is not an indexed version of this document"
-INGEST_FORBIDDEN = "ingest_raw is limited to workflow principals"
-INGEST_TOO_LARGE = "body too large (limit {n} bytes)"
-INGEST_NO_MAP = "cannot ingest: no audience mapping for series or folder and no participants"
-INGEST_AUDIENCE = "cannot ingest: your token does not hold the audience this series or folder maps to"
-ALREADY_INGESTED = "already ingested: {id}"
-BAD_ID = "malformed id {x}"
-BAD_KIND = "kind must be one of summary, extracted-fact, decision-candidate, changelog"
-BAD_CLAIMS = "claims_json must be a JSON list of objects with text, source_ids and a quote or timestamp"
-BAD_VERSION = "@version is only allowed on doc: ids"
-TOO_MANY_SOURCES = "at most 50 sources"
-VERSION_CHANGED = "source {id} changed since you read it (now {version})"
-DERIVED_SOURCES = "cannot write derived record: {k} cited sources are not found or not visible to you"
-EMAIL_SOURCES = (
-    "cannot propose: a cited source is restricted to named people; no canonical repo is that narrow"
-)
-SPAN = "cannot propose: sources span audiences {a}, {b}; no canonical repo is restricted to all of them"
-AMBIGUOUS = (
-    "cannot propose: the sources fit both {repo_a} and {repo_b}; "
-    "pass target_id of a document in the repository to use"
-)
-NO_REPO = "cannot propose: no canonical repository is configured for audience {a}"
-WIDER = "cannot propose to {repo}: its audience {a} is wider than or different from the sources' audience {u}"
-BAD_PATH = (
-    "new_path must be a new markdown file under portfolio/, product/ or technical/ in the given domain "
-    "(lowercase letters, digits, - _ /)"
-)
-DUPLICATE = "an identical proposal is already open: {id} (PR #{n})"
-LIMIT = "daily promotion limit for domain {d} in {repo} reached ({n}); try again after {time} UTC"
-BAD_CANDIDATE = "candidate_id must name one of your own failed proposals"
-PR_FAILED = "could not open the pull request; call propose_change again with candidate_id={id} to retry"
 RATE_LIMIT = "rate limit exceeded; retry in {n} seconds"
+CURSOR_FOREIGN = "cursor does not belong to this query"
+NORMATIVE = "only T3 records match; repeat with min_tier T3 to see them"
+BAD_ID = "id must be doc:<uuid> or rec:<uuid>"
+BAD_LABEL = "unknown label"
+BAD_ARG = "argument {name} is invalid"
+AUDIENCE_NOT_HELD = "audience is not held by this caller or not configured"
+TOO_LARGE = "body is too large"
+BAD_TEXT = "text contains forbidden characters"
+PATH_EXISTS = "path already exists; pass base_blob to edit it"
+BLOB_CHANGED = "the file changed since base_blob"
+ID_IN_USE = "id is used by another file in this repo"
+TOO_MANY_OPEN = "too many open proposals in this repo"
+NOT_CONFIGURED = "writes are not configured"
+PROPOSE_FAILED = "could not open the pull request"
 
 
 class KhError(Exception):

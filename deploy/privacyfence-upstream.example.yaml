@@ -1,7 +1,7 @@
 # PrivacyFence upstream declaration for the knowledge hub (docs/upstream-mcp.md in PrivacyFence).
 # Set PRIVACYFENCE_UPSTREAM_MCP_FILE on the PrivacyFence container to this file and restart it: the
 # declaration is read once at startup, and so is the hub's tool list. The tool names are the ones
-# `register_tools` registers (tests/unit/test_privacyfence_declaration.py checks that); there are none yet.
+# `register_tools` registers (tests/unit/test_privacyfence_declaration.py checks that).
 # Reads are `auto`, writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
 # private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
 # voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
@@ -16,4 +16,7 @@ upstreams:
     identity_claim: required
     email_for_visibility: true
     allowed_principal_types: [claude_client, n8n_workflow]
-    tools: {}
+    tools:
+      search:
+        gate: auto
+        verb: search

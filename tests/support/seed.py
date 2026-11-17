@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 
 import psycopg
 
+from knowledge_hub.embed.base import FakeEmbedder
 from tests.support.principals import KH_CONFIG, alice_all, bob_mgmt, carol_hr
 
 WHEN = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -57,6 +58,43 @@ def add_chunk(conn: psycopg.Connection, **fields) -> str:
     )
     row.update(fields)
     return _insert(conn, "chunks", row)
+
+
+def vector_literal(text: str) -> str:
+    """The fake embedder's vector for ``text`` as a pgvector literal."""
+    return "[" + ",".join(repr(x) for x in FakeEmbedder()._one(text)) + "]"
+
+
+def add_chunked_doc(
+    conn: psycopg.Connection, text: str, *, vector_of: str | None = None, embed: bool = True,
+    chunks: int = 1, **fields,
+) -> str:
+    """A document with ``chunks`` chunks (the first holds ``text``), each embedded by the fake embedder.
+
+    ``vector_of`` embeds some other text, so a chunk can match by vector only or by text only;
+    ``embed=False`` leaves the chunk without a vector (text only).
+    """
+    doc = add_doc(conn, **fields)
+    for n in range(chunks):
+        body = text if n == 0 else f"{text} part {n}"
+        vec = (
+            dict(embedding=vector_literal(vector_of if vector_of is not None else body),
+                 embedding_model=FakeEmbedder.model)
+            if embed else {}
+        )
+        add_chunk(conn, document_id=doc, ordinal=n, text=body, **vec)
+    return doc
+
+
+def add_chunked_record(
+    conn: psycopg.Connection, text: str, *, vector_of: str | None = None, **fields
+) -> str:
+    """A record with one chunk holding ``text``, embedded by the fake embedder."""
+    rec = add_record(conn, **fields)
+    add_chunk(conn, record_id=rec, text=text,
+              embedding=vector_literal(vector_of if vector_of is not None else text),
+              embedding_model=FakeEmbedder.model)
+    return rec
 
 
 def seed_rows(admin_dsn: str) -> dict[str, dict[str, str]]:
