@@ -40,7 +40,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6-rebuild-jobs-cli
 
-- pending
+- worker: cli.COMMANDS stays (serve, migrate) and a separate JOB_COMMANDS tuple was added, because test_settings.py asserts the old tuple and is outside touches; lint runs before settings load so it cannot exit 2
+- worker: rebuild deletes the repo_state row (last_indexed_sha is NOT NULL) and raises ValueError (CLI exit 2) for a repo in no group or when deps.reader is None
+- worker: check prints indexed nothing for never-indexed repos, skips blank-body documents for missing chunks, prints config says no group; requeue_embeddings skips records with a queued or running embed_record job
+- review: test_cli_has_only_serve_and_migrate in test_settings.py has a now-misleading name; rename in a later phase that owns the file
 
 ## p7-search-tool
 
