@@ -80,11 +80,11 @@ class LabelsStep:
         row = await cur.fetchone()
         used = int(row[0]) if row else 0
         if used:
-            return Change("!", f"label {name}: used by {used} rows")
+            return Change("!", f"label {name}: in use")
         try:
             await conn.execute("DELETE FROM kh.labels WHERE name = %s", (name,))
         except psycopg.Error as exc:
             if exc.sqlstate != IN_USE:
                 raise
-            return Change("!", f"label {name}: used by rows")
+            return Change("!", f"label {name}: in use")
         return Change("-", f"label {name}")
