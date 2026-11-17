@@ -4,53 +4,41 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+Breaking release: fresh install only. A database with the old migrations is refused (`database predates the baseline; a fresh install is required`), and the n8n tokens in PrivacyFence must be created again.
+
 ### Added
 
-- `kh setup plan|apply --config kh.yaml [--only STEP] [--prune] [--create-bucket]` runs the postgres, labels, forgejo, ollama and s3 setup steps; new settings `KH_SETUP_PG_ADMIN_DSN_FILE` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`. The serving app never imports the setup code.
+- Two tiers: T0 (Markdown on `main` of a group's Forgejo repo, merged by a pull request that one of the group's approvers merges) and T3 (raw records with `ingest_record`). Ids are `doc:<uuid>` and `rec:<uuid>`; tier weights default to `T0:1.0,T3:0.4`.
+- Groups: `kh.yaml` lists `people` (Forgejo login to verified email) and `groups` (members, approvers, optional repo). A person reads the groups that list their verified email; an n8n token carries group names as audiences. A change to `people` or a group needs a `kh serve` restart.
+- Labels: defined in `kh.yaml`, stored in `kh.labels`, checked on documents and records, and filterable in `search`; the new tool `list_labels` lists them.
+- `kh setup plan|apply --config kh.yaml [--only STEP] [--prune] [--create-bucket]` builds and checks the whole environment from `kh.yaml`: Postgres roles, database, extension and tables, groups, labels, Forgejo teams, repos, branch protection and org webhook (read back after every write), the Ollama model and the S3 bucket. `plan` exits 1 on drift and is meant to run on a schedule. New settings `KH_SETUP_PG_ADMIN_DSN_FILE` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`; the serving app never imports the setup code.
+- `kh lint FILE...` checks frontmatter offline (`id`, `title`, `review_by`, optional `labels`).
+- The tool `ingest_record` stores a raw record readable by a group the caller holds (body in S3 at `records/<uuid>`, 2000-character excerpt, repeat returns the existing id with `existed: true`). It replaces `ingest_raw`.
+- The tool `propose_doc` opens a pull request that proposes one document in a group's repo (checked path, text, labels and size; at most `KH_PROPOSE_MAX_OPEN` open proposals). New settings `KH_PROPOSE_MAX_BYTES` and `KH_PROPOSE_MAX_OPEN`.
+- The tools `search`, `get_doc` and `list_stale` return the new shapes (`min_tier` `T0` or `T3`, `labels` all-of, `audience`, 400-character snippets); `search` with `min_tier="T0"` fails with `only T3 records match; repeat with min_tier T3 to see them` when only records match.
+- The Forgejo push webhook queues a `git_push` job only for `refs/heads/main` of a repo that belongs to a group; the job worker syncs the tree of `main` (a `(path, blob_sha)` diff of `*.md` files) and embeds T3 records; failed jobs retry five times. `kh check` and `kh rebuild [--repo R]` work on the new tables, and `main` being rewritten raises the alert `main of <repo> was rewritten; run kh rebuild after review`.
+- Releases: the GitHub release carries the wheel, `SHA256SUMS` and `deploy/kh.example.yaml` next to the GHCR image, so an operator can install without Docker (`pip install knowledge_hub-<v>-py3-none-any.whl`, then `kh setup plan`). The `release.yml` change reaches `main` as a protected-change pull request.
+- CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.
 
 ### Changed
 
-- Deploy files: the compose example holds only the settings the hub still reads and no Grist secret; `backup-kh.sh` dumps only `kh.records` and its restore order is `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, S3 sync; the PrivacyFence declaration header explains that groups come from `people:` in `kh.yaml`.
+- Forgejo is the control for T0: the indexer reads `main` as Forgejo reports it, and branch protection (no direct push, merge whitelist the `<group>-approve` team) decides what is approved.
+- One migration, `0001_baseline.sql`, replaces the nine old ones: tables `groups`, `labels`, `documents`, `records`, `chunks` and the index tables, three roles, and one row-level rule `kh.can_read(audience)`. A record insert needs the audience and `created_by_sub = kh.caller_sub()`. A label is checked by a trigger (SQLSTATE `P0K05`) and a label in use cannot be deleted (`P0K06`).
+- A caller's groups come from the verified email and `people`; the audiences of a `claude_client` claim are format-checked but grant nothing, and `KH_DEV_IDENTITY.audiences` is ignored for a `claude_client`. An `n8n_workflow` keeps the claim audiences that are configured groups. The PrivacyFence declaration keeps `email_for_visibility: true`, and its Workspace-group mapping is no longer used for people.
+- `kh.yaml` is rewritten: `org`, `bot_login`, `indexer_login`, `forgejo_web_url`, `hub_url`, `people`, `groups` and `labels` replace `repos`, `audiences`, `entities` and the rest; unknown keys are refused. See `deploy/kh.example.yaml`.
+- Settings renamed or changed: `KH_FORGEJO_ORG` is now `org:` in `kh.yaml`, `KH_MAX_RAW_BYTES` is `KH_MAX_RECORD_BYTES`, the `KH_TIER_WEIGHTS` default is `T0:1.0,T3:0.4`, and an embedder's `may_embed` takes the audience name.
+- `kh daily` recomputes stale flags and purges expired claim ids; `kh requeue-embeddings` queues `embed_record` jobs.
+- Deploy files: the compose example holds only the settings the hub still reads; `backup-kh.sh` dumps only `kh.records` and its restore order is `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, S3 sync; the PrivacyFence declaration lists the six tools.
+- PrivacyFence: the changed tool gates void old approvals, so every n8n token is created again with group names as audiences and the gated tools `ingest_record` and `propose_doc` ticked.
+- Docs: README, design, configuration and runbook are rewritten for two tiers; `docs/governance.md` is deleted.
 
 ### Removed
 
-- Two-tier rewrite, step 1 (breaking, fresh install only): the old world is deleted: T1 notes, T2 derived records, candidates, conflicts, promotion, entities and Grist, the governance gates (`kh validate`, `kh domain-owners`, `kh governance`), the trust walk, the agent write tools, the webhook route and the worker. The server registers no tools until the new ones land. The CLI keeps `serve` and `migrate`.
-- Settings `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
-
-### Added
-
-- Two-tier rewrite, step 14: the `forgejo` setup step. Per group it keeps the teams `<group>` (write) and `<group>-approve` (read) with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and the branch protection of `main` (no direct push, merge whitelist the approve team, admins bound), read back after every write. It also keeps one org webhook to `<hub_url>/webhooks/forgejo` and rewrites its secret on every apply. It checks the bot and indexer accounts and tokens, lists the org owners who can bypass protection, and reports unmanaged teams and repos; `--prune` deletes unmanaged teams, never repos. The CLI wiring follows.
-- Two-tier rewrite, step 13: `ForgejoAdmin` (`knowledge_hub.forgejo.admin`), the admin client for `kh setup` (teams, repositories, collaborators, branch protection by rule name, org webhooks, identity checks). The `forgejo` step follows.
-- Two-tier rewrite, step 12: the `ollama` setup step (the embedding model is listed and returns `KH_EMBED_DIM` dimensions; apply pulls it) and the `s3` step (the bucket exists and takes a put, get and delete of a probe key; apply creates a missing bucket only with `--create-bucket`). The CLI wiring follows.
-- Two-tier rewrite, step 11: the `kh setup` framework (`knowledge_hub.setup`: change lines, step runner, exit codes) with the `postgres` step (roles, database, `vector` extension, pending migrations, `kh.groups` sync) and the `labels` step (labels sync, retry jobs after a label is added); `knowledge_hub.db.migrate.pending` lists unapplied migrations. The CLI wiring follows.
-- Two-tier rewrite, step 10: the `propose_doc` tool opens a pull request that proposes one document in a group's repository (checked path, text, labels and size; at most `KH_PROPOSE_MAX_OPEN` open proposals). New settings `KH_PROPOSE_MAX_BYTES` (131072) and `KH_PROPOSE_MAX_OPEN` (20); the PrivacyFence declaration lists the tool as a `popup` write.
-
-### Changed
-
-- Two-tier rewrite, step 2 (breaking, fresh install only): the nine migrations are replaced by one `0001_baseline.sql` with the tables `groups`, `labels`, `documents`, `records`, `chunks` and the index tables. Row-level security reads one rule, `kh.can_read(audience)`; a record insert needs the audience and `created_by_sub = kh.caller_sub()`. Labels are checked by a trigger (SQLSTATE `P0K05`) and a label in use cannot be deleted (`P0K06`). The role `kh_provenance` and `kh.email` are gone; `kh migrate` refuses a database that holds an older migration name (`database predates the baseline; a fresh install is required`).
-- A caller's groups now come from the verified email and the `people`/`groups` of `kh.yaml`; the audiences in a `claude_client` claim are format-checked but no longer grant anything. An `n8n_workflow` claim keeps only the audiences that are configured groups.
-- `kh.yaml` is rewritten: `people` (Forgejo login to verified email), `groups` (members, approvers, optional repo) and `labels` replace `repos`, `audiences`, `entities` and the rest; unknown keys are refused. See `deploy/kh.example.yaml`.
-- `KH_MAX_RAW_BYTES` is now `KH_MAX_RECORD_BYTES`; the `KH_TIER_WEIGHTS` default is `T0:1.0,T3:0.4`; an embedder's `may_embed` takes the audience name.
-
-### Added
-
-- Two-tier rewrite, step 3: the frontmatter parser takes `id`, `title`, `review_by` and optional `labels` and ignores other keys (rejections read `missing frontmatter`, `invalid frontmatter`, `missing <key>`, `invalid <key>`); a read-only Forgejo client for the indexer (`head_sha`, `list_tree`, `get_raw`, `is_ancestor`) and a bot client that can only write `bot/` branches and open pull requests to `main`.
-- Two-tier rewrite, step 4: the sync of `main` into `kh.documents` and `kh.chunks`: a tree diff by `(path, blob_sha)`, `*.md` files only (no dot-prefixed segment, not the root `README.md`, at most 1 MiB), rejection alerts `file rejected: unknown label <x>` and `file rejected: duplicate id <id>`, an alert when `main` was rewritten (`run kh rebuild after review`), and chunk reuse when the content and embedding model are unchanged.
-- Two-tier rewrite, step 5: the Forgejo push webhook (`POST /webhooks/forgejo`) queues a `git_push` job only for a push to `refs/heads/main` of a repo that belongs to a group of the configured org, and the job worker is back: `git_push` runs the sync, `embed_record` chunks and embeds a T3 record from its S3 body; failed jobs retry five times with a growing delay. The worker and the read-only Forgejo client start when `KH_FORGEJO_URL` is set.
-- Two-tier rewrite, step 6: `kh rebuild [--repo R]` forgets the indexed head and syncs again; `kh check` prints drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks` for records older than five minutes, `document <path> in <repo> has audience <a>, config says <b>`) and exits 1 when there is any; `kh daily` recomputes `stale` and purges expired replay-cache rows; `kh requeue-embeddings` queues an `embed_record` job for every record without chunks; `kh lint FILE...` checks frontmatter offline and exits 1 on a problem. Settings and config errors exit 2.
-- Two-tier rewrite, step 8: the tools `get_doc` (`doc:<uuid>` or `rec:<uuid>`; a missing and a hidden row both answer `not found`; record bodies come from S3), `list_stale` (stale documents, oldest `review_by` first, keyset cursor bound to the caller) and `list_labels`, all declared `auto`/`read` in the PrivacyFence upstream declaration.
-- Two-tier rewrite, step 9: the `ingest_record` tool stores a raw record (T3) readable by a group the caller holds: the body goes to S3 at `records/<uuid>`, the row keeps the first 2000 characters as its excerpt, `written_by` is the bot login, and a repeat of the same `(audience, source, source_ref)` returns the existing id with `existed: true`. A naive `occurred_at`, an oversized body, an unknown label and an audience the caller does not hold are refused. It is declared in the PrivacyFence example as a `popup` write.
-- Two-tier rewrite, step 7: the `search` tool is back. It takes `query`, `min_tier` (`T0` or `T3`), `labels` (all of), `audience`, `limit` and `cursor`, fuses vector and full-text lists over T0 documents and T3 records, and returns one best chunk per owner with a 400-character snippet. `min_tier="T0"` fails with `only T3 records match; repeat with min_tier T3 to see them` when only records match. `KH_TIER_WEIGHTS` must name exactly `T0` and `T3`. The error texts of `mcp/errors.py` are the new catalogue.
-- CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.
-- Agent writes (off by default): `write_note` saves an unreviewed note as `agent/<id>.md` in a `notes-*` repo, `propose_doc` and `propose_edit` open a T0 pull request on a `bot/propose/<uuid>` branch, `pr_status` and `list_my_proposals` read the state. Settings `KH_AGENT_NOTES_ENABLED`, `KH_AGENT_PROPOSALS_ENABLED`, `KH_FORGEJO_NOTES_TOKEN_FILE`, `KH_AGENT_EMAIL_DOMAINS`, `KH_AGENT_NOTE_DAILY_LIMIT`, `KH_AGENT_PROPOSAL_DAILY_LIMIT`, `KH_AGENT_MAX_BODY_BYTES` and `KH_CI_STATUS_LOGINS`.
-- Table `kh.proposals` (migration 0009_proposals), the `agent_written` flag on documents and chunks, three Forgejo client roles (`read`, `bot`, `notes`), the `kh/requested-by` commit status and the metric `kh_agent_write_failures_total`.
-
-### Changed
-
-- `kh domain-owners` and the trust walk ignore the requester's approval of an agent proposal and fail closed (`agent proposal has no valid requester record from kh-hub-bot`) when its `kh/requested-by` record is missing or invalid; a requester named by such a record never passes as an owner self-merge.
-- Search ranks agent notes like T2, never counts them as a normative answer and flags them with `agent_written`; `get_doc` carries the flag.
-- Agent proposals count `propose_change` candidates toward the daily limit per `(domain, repo)`; `propose_change` itself still counts candidates only.
-- The PrivacyFence declaration example lists the five new tools; the three write tools need an explicit tick on each scoped token.
+- T1 notes, T2 derived records, candidates, conflicts, promotion, domains, entities and Grist, `owners.yml` and the governance gates, the trust walk, the requester record (`kh/requested-by`), `allowed_emails`, any-of audiences and `raw_audience_map`.
+- The tools `ingest_raw`, `write_derived`, `write_note`, `propose_change`, `propose_edit`, `get_entity`, `pr_status`, `list_my_proposals` and the other old tools; the agent write tools and `kh.proposals`.
+- The commands `kh validate`, `kh domain-owners`, `kh governance`, `kh recompute-visibility` and `kh rebuild --rejudge`.
+- The role `kh_provenance`, `kh.email` and the nine old migrations.
+- Settings `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
 
 ## [0.2.0] - 2026-11-16
 
