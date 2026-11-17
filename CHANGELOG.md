@@ -11,6 +11,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- Two-tier rewrite, step 11: the `kh setup` framework (`knowledge_hub.setup`: change lines, step runner, exit codes) with the `postgres` step (roles, database, `vector` extension, pending migrations, `kh.groups` sync) and the `labels` step (labels sync, retry jobs after a label is added); `knowledge_hub.db.migrate.pending` lists unapplied migrations. The CLI wiring follows.
 - Two-tier rewrite, step 10: the `propose_doc` tool opens a pull request that proposes one document in a group's repository (checked path, text, labels and size; at most `KH_PROPOSE_MAX_OPEN` open proposals). New settings `KH_PROPOSE_MAX_BYTES` (131072) and `KH_PROPOSE_MAX_OPEN` (20); the PrivacyFence declaration lists the tool as a `popup` write.
 
 ### Changed
