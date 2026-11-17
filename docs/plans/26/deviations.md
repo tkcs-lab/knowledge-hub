@@ -47,7 +47,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-search-tool
 
-- pending
+- worker: tools/search.py omits from __future__ import annotations because pydantic could not resolve Literal with it
+- worker: min_tier T3 searches T0 and T3 together; min_tier T0 searches T0 with T3 as a second list used only for the NORMATIVE check; the cursor binds to a hash of query, min_tier, labels and audience
+- worker: settings validates KH_TIER_WEIGHTS with a field_validator; seed.py gained vector_literal, add_chunked_doc (embed, vector_of options) and add_chunked_record
+- worker: the vector list has no similarity threshold, so a query with no text match still returns the nearest embedded chunks (as the old design)
 
 ## p8-doc-tools
 
