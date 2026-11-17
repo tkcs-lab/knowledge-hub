@@ -21,7 +21,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-docs-and-retirement
 
-- pending
+- None.
 
 ## Final review
 
