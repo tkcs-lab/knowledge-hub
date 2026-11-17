@@ -15,17 +15,7 @@ from knowledge_hub.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "deploy" / "backup-kh.sh"
-TABLES = [
-    "raw_records",
-    "raw_audience_map",
-    "derived_records",
-    "derived_sources",
-    "candidates",
-    "proposals",
-    "candidate_sources",
-    "conflicts",
-    "conflict_items",
-]
+TABLES = ["records"]
 
 
 def test_example_config_loads():

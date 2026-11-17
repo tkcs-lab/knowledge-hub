@@ -5,8 +5,9 @@
 # Reads are `auto`, writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
 # private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
 # voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
-# email_for_visibility lets PrivacyFence put the verified email in the claim for this upstream (PrivacyFence
-# 8.0.0a3, ADR 0310); without it, meetings that are not mapped to an audience are visible to nobody.
+# A person's groups come from `people:` in kh.yaml through the verified email in the claim. An n8n token
+# carries group names as audiences.
+# email_for_visibility lets PrivacyFence put the verified email in the claim; without it no person's claim carries an email, so no person holds any group.
 version: 1
 upstreams:
   - id: kh

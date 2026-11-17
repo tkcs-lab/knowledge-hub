@@ -8,6 +8,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 - `kh setup plan|apply --config kh.yaml [--only STEP] [--prune] [--create-bucket]` runs the postgres, labels, forgejo, ollama and s3 setup steps; new settings `KH_SETUP_PG_ADMIN_DSN_FILE` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`. The serving app never imports the setup code.
 
+### Changed
+
+- Deploy files: the compose example holds only the settings the hub still reads and no Grist secret; `backup-kh.sh` dumps only `kh.records` and its restore order is `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, S3 sync; the PrivacyFence declaration header explains that groups come from `people:` in `kh.yaml`.
+
 ### Removed
 
 - Two-tier rewrite, step 1 (breaking, fresh install only): the old world is deleted: T1 notes, T2 derived records, candidates, conflicts, promotion, entities and Grist, the governance gates (`kh validate`, `kh domain-owners`, `kh governance`), the trust walk, the agent write tools, the webhook route and the worker. The server registers no tools until the new ones land. The CLI keeps `serve` and `migrate`.
