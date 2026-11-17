@@ -159,3 +159,36 @@ async def test_record_by_workflow_token_is_invisible_without_the_audience(mcp_cl
     # the same key in another audience is a different record, and the outsider learns nothing
     other = await mcp_client.call(bob_mgmt, "ingest_record", {**ARGS, "audience": "mgmt"})
     assert not other.is_error and other.data["existed"] is False
+
+
+async def test_nul_in_a_text_argument_is_refused(mcp_client, seeded_db, fresh_db, blobs):
+    for name in ("source", "source_ref", "title", "body", "source_url", "content_type"):
+        res = await mcp_client.call(alice_all, "ingest_record", {**ARGS, name: "a\x00b"})
+        assert res.is_error and res.text.endswith(BAD_ARG.format(name=name))
+    assert not blobs.objects
+    assert _rows(fresh_db, "SELECT count(*) FROM kh.records WHERE source = 'meet'") == [(0,)]
+
+
+async def test_nul_late_in_the_body_is_refused(mcp_client, seeded_db, blobs):
+    res = await mcp_client.call(alice_all, "ingest_record", {**ARGS, "body": "a" * 2500 + "\x00"})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="body"))
+    assert not blobs.objects
+
+
+async def test_nul_in_a_label_is_refused(mcp_client, seeded_db, blobs):
+    res = await mcp_client.call(alice_all, "ingest_record", {**ARGS, "labels": ["em\x00ber"]})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="labels"))
+    assert not blobs.objects
+
+
+async def test_nul_retry_of_an_existing_record_is_refused(mcp_client, seeded_db):
+    assert not (await mcp_client.call(alice_all, "ingest_record", ARGS)).is_error
+    res = await mcp_client.call(alice_all, "ingest_record", {**ARGS, "body": "x\x00"})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="body"))
+
+
+async def test_other_control_characters_are_kept(mcp_client, seeded_db, blobs):
+    body = "page\x0cbreak\x01end"
+    res = await mcp_client.call(alice_all, "ingest_record", {**ARGS, "body": body})
+    assert not res.is_error
+    assert blobs.objects[f"records/{res.data['id'][4:]}"] == (body.encode(), "text/plain")

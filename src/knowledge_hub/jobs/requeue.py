@@ -6,7 +6,7 @@ from typing import Any
 
 
 async def requeue_embeddings(indexer_pool: Any) -> int:
-    """Insert one job per record without chunks, skipping records with a job already waiting.
+    """Insert one job per record without chunks, skipping records with a queued job.
 
     Returns the number of jobs inserted.
     """
@@ -18,7 +18,7 @@ async def requeue_embeddings(indexer_pool: Any) -> int:
               FROM kh.records r
              WHERE NOT EXISTS (SELECT 1 FROM kh.chunks c WHERE c.record_id = r.id)
                AND NOT EXISTS (SELECT 1 FROM kh.index_jobs j
-                                WHERE j.kind = 'embed_record' AND j.state IN ('queued', 'running')
+                                WHERE j.kind = 'embed_record' AND j.state = 'queued'
                                   AND j.payload ->> 'id' = r.id::text)
              ORDER BY r.id
             """

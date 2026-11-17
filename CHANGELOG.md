@@ -4,6 +4,12 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Fixed
+
+- `ingest_record` refuses a NUL character in any text argument with `argument <name> is invalid` before storing anything; before, a NUL late in the body was stored and its embedding job failed on every attempt.
+- The `embed_record` job removes NUL characters from a stored body before chunking, so records stored before this fix can be indexed with `kh requeue-embeddings`.
+- `kh requeue-embeddings` no longer skips a record whose job was left `running` by a stopped worker.
+
 ## [0.3.0] - 2026-11-17
 
 Breaking release: fresh install only. A database with the old migrations is refused (`database predates the baseline; a fresh install is required`), and the n8n tokens in PrivacyFence must be created again.
