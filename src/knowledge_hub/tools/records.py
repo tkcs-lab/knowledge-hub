@@ -1,0 +1,97 @@
+"""``ingest_record``: store one raw record (tier T3) readable by the named group (plan 3.5, 3.8)."""
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from mcp.server.mcpserver import MCPServer
+from psycopg import errors as pg_errors
+
+from knowledge_hub.mcp import errors
+from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
+from knowledge_hub.mcp.server import Deps
+
+EXCERPT_CHARS = 2000
+
+_EXISTING_SQL = "SELECT id FROM kh.records WHERE audience = %s AND source = %s AND source_ref = %s"
+_INSERT_SQL = """
+INSERT INTO kh.records (id, audience, source, source_ref, source_url, title, blob_key, excerpt,
+                        content_type, occurred_at, labels, written_by, created_by_sub, created_by_type)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+
+async def _existing(call: ToolCall, audience: str, source: str, source_ref: str) -> str | None:
+    async with call.conn.cursor() as cur:
+        await cur.execute(_EXISTING_SQL, (audience, source, source_ref))
+        row = await cur.fetchone()
+    return f"rec:{row[0]}" if row else None
+
+
+async def ingest_record(
+    call: ToolCall,
+    source: str,
+    source_ref: str,
+    title: str,
+    body: str,
+    audience: str,
+    occurred_at: str,
+    labels: list[str] = [],  # noqa: B006 - the guard reads the default; it is never mutated
+    source_url: str = "",
+    content_type: str = "text/plain",
+) -> dict[str, Any]:
+    deps, caller = call.deps, call.caller
+    if audience not in caller.audiences or audience not in deps.config.groups:
+        raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
+    data = body.encode()
+    if len(data) > deps.settings.max_record_bytes:
+        raise kh_error("too_large", errors.TOO_LARGE)
+    try:
+        when = datetime.fromisoformat(occurred_at)
+    except ValueError:
+        raise kh_error("bad_arg", errors.BAD_ARG, name="occurred_at") from None
+    if when.tzinfo is None or when.utcoffset() is None:
+        raise kh_error("bad_arg", errors.BAD_ARG, name="occurred_at")
+    wanted = sorted(set(labels))
+    if wanted:
+        async with call.conn.cursor() as cur:
+            await cur.execute("SELECT name FROM kh.labels WHERE name = ANY(%s)", (wanted,))
+            known = {r[0] for r in await cur.fetchall()}
+        if known != set(wanted):
+            raise kh_error("bad_label", errors.BAD_LABEL)
+    found = await _existing(call, audience, source, source_ref)
+    if found is not None:
+        return {"id": found, "existed": True}
+
+    key = uuid.uuid4()
+    blob_key = f"records/{key}"
+    await deps.blobs.put(blob_key, data, content_type)
+    try:
+        async with call.conn.transaction():  # a savepoint: a unique violation must not abort the call
+            await call.conn.execute(
+                _INSERT_SQL,
+                (key, audience, source, source_ref, source_url, title, blob_key, body[:EXCERPT_CHARS],
+                 content_type, when, list(labels), deps.config.bot_login, caller.sub,
+                 caller.principal_type),
+            )
+    except pg_errors.UniqueViolation:
+        await deps.blobs.delete(blob_key)
+        found = await _existing(call, audience, source, source_ref)
+        if found is None:
+            raise
+        return {"id": found, "existed": True}
+    except pg_errors.Error:
+        await deps.blobs.delete(blob_key)
+        raise
+    return {"id": f"rec:{key}", "existed": False}
+
+
+def register(server: MCPServer, deps: Deps) -> None:
+    server.tool(
+        name="ingest_record",
+        description=(
+            "Store a raw record (a meeting note, message or similar) readable by the named audience, "
+            "which you must hold. Re-sending the same source and source_ref returns the existing id. "
+            "occurred_at is ISO 8601 with a timezone."
+        ),
+    )(tool_guard("ingest_record", deps)(ingest_record))
