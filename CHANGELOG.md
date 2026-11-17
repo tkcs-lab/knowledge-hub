@@ -31,6 +31,7 @@ Breaking release: fresh install only. A database with the old migrations is refu
 - Deploy files: the compose example holds only the settings the hub still reads; `backup-kh.sh` dumps only `kh.records` and its restore order is `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, S3 sync; the PrivacyFence declaration lists the six tools.
 - PrivacyFence: the changed tool gates void old approvals, so every n8n token is created again with group names as audiences and the gated tools `ingest_record` and `propose_doc` ticked.
 - Docs: README, design, configuration and runbook are rewritten for two tiers; `docs/governance.md` is deleted.
+- PrivacyFence setup: the group-to-audience map in PrivacyFence's `admin_config.json` stays for n8n tokens (people need none), and the administrators who create tokens must be members of the mapped groups through a `static` membership file or the default `snapshot` sync. The declaration example and the runbook say how.
 
 ### Removed
 
