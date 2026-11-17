@@ -7,6 +7,8 @@ from knowledge_hub.blobs.s3 import S3BlobStore
 from knowledge_hub.config import KhConfig
 from knowledge_hub.db.pool import make_app_pool, make_indexer_pool
 from knowledge_hub.embed.factory import make_embedder
+from knowledge_hub.forgejo import ForgejoReader
+from knowledge_hub.indexer.worker import Worker
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.ratelimit import RateLimiter
 from knowledge_hub.settings import Settings
@@ -27,6 +29,16 @@ def make_blob_store(settings: Settings) -> S3BlobStore | None:
         settings.s3_secret_key_file.read_text().strip(),
         settings.s3_region,
     )
+
+
+def make_reader(settings: Settings, config: KhConfig) -> ForgejoReader | None:
+    """The read-only Forgejo client of the indexer; None while ``KH_FORGEJO_URL`` is not set."""
+    if not settings.forgejo_url:
+        return None
+    if settings.forgejo_indexer_token_file is None:
+        raise ValueError("KH_FORGEJO_INDEXER_TOKEN_FILE is required when KH_FORGEJO_URL is set")
+    token = settings.forgejo_indexer_token_file.read_text().strip()
+    return ForgejoReader(settings.forgejo_url, token, config.org)
 
 
 def make_verifier(settings: Settings) -> ClaimVerifier | None:
@@ -51,6 +63,7 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
     verifier = make_verifier(settings)
     embedder = make_embedder(settings)
     blobs = make_blob_store(settings)
+    reader = make_reader(settings, config)
     app_pool = make_app_pool(settings)
     indexer_pool = make_indexer_pool(settings)
     try:
@@ -59,7 +72,14 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
     except BaseException:
         await app_pool.close()
         await indexer_pool.close()
+        if reader is not None:
+            await reader.aclose()
         raise
+    worker = None
+    if reader is not None:
+        worker = Worker(
+            indexer_pool, reader, embedder, config, blobs, chunker_version=settings.chunker_version
+        )
     return Deps(
         settings=settings,
         config=config,
@@ -69,10 +89,16 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
         blobs=blobs,
         verifier=verifier,
         ratelimiter=RateLimiter(settings.rate_limit_per_min),
+        reader=reader,
+        worker=worker,
     )
 
 
 async def close_deps(deps: Deps) -> None:
+    if deps.worker is not None:
+        deps.worker.stop()
+    if deps.reader is not None:
+        await deps.reader.aclose()
     if deps.indexer_pool is not None:
         await deps.indexer_pool.close()
     await deps.app_pool.close()
