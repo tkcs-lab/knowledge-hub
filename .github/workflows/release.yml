@@ -94,6 +94,23 @@ jobs:
           set -euo pipefail
           docker run --rm knowledge-hub:release-test --help
 
+      - name: Build and smoke-test the wheel
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/build-venv"
+          "$RUNNER_TEMP/build-venv/bin/pip" install build
+          "$RUNNER_TEMP/build-venv/bin/python" -m build --wheel --outdir dist
+          python3 -m venv "$RUNNER_TEMP/check-venv"
+          "$RUNNER_TEMP/check-venv/bin/pip" install dist/*.whl
+          "$RUNNER_TEMP/check-venv/bin/kh" --help
+          (cd dist && sha256sum ./*.whl > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/
+          if-no-files-found: error
+
       - name: Log in to GHCR
         if: inputs.dry_run == false
         uses: docker/login-action@v3
@@ -136,6 +153,11 @@ jobs:
           set -euo pipefail
           docker buildx imagetools create -t ghcr.io/${{ github.repository }}:$VERSION ghcr.io/${{ github.repository }}@$DIGEST
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+
       - name: Create tag and GitHub release
         env:
           GH_TOKEN: ${{ secrets.TLD_RELEASE_TOKEN }}
@@ -153,4 +175,5 @@ jobs:
             -f tag="v$VERSION" -f message="Release $VERSION" -f object="$SHA" -f type=commit \
             --jq .sha)
           gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$TAG_SHA"
-          gh release create "v$VERSION" --repo "$REPO" --verify-tag --title "v$VERSION" --notes-file release-notes.md
+          gh release create "v$VERSION" --repo "$REPO" --verify-tag --title "v$VERSION" --notes-file release-notes.md \
+            dist/*.whl dist/SHA256SUMS deploy/kh.example.yaml
