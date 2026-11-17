@@ -9,7 +9,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-event-logging
 
-- None.
+- worker: usage.py reads the cursor key file inside the try block, so an unreadable key counts as a dropped event and never raises; the plan code did not say where the read goes.
 
 ## p3-usage-tool
 
