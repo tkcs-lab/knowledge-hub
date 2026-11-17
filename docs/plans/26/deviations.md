@@ -95,7 +95,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p15-setup-cli
 
-- pending
+- worker: kh setup is intercepted in cli.main when argv[0] is setup; a setup subparser exists only so it shows in kh --help; --only builds just the selected steps
+- worker: missing KH_FORGEJO_URL or KH_OLLAMA_URL, or an unreadable credential file, prints setup: <ENV NAME> is not set and exits 2; a failing load_settings or load_config prints the error to stderr and exits 2
 
 ## p16-release-deploy
 
