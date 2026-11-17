@@ -18,7 +18,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-frontmatter-forgejo
 
-- pending
+- None.
+- review: is_ancestor uses the compare API as head...base and answers True when no commits come back; not verified against a real Forgejo (ma1 confirms)
+- review: an unquoted integer id in frontmatter is rejected as invalid id (the old parser accepted it)
+- review: FakeForgejo gained rewrite, head, files and fail_next helpers beyond the brief, for later phases
 
 ## p4-sync-core
 
