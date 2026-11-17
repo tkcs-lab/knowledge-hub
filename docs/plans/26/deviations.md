@@ -9,7 +9,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1b-claim-resolution
 
-- pending
+- worker: principals.py keeps a legacy hand-listed PRINCIPALS dict for test_rls_tables.py and seed.py; p2 should remove it
 
 ## p2-new-schema
 
