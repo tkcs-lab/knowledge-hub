@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-17
+
 Breaking release: fresh install only. A database with the old migrations is refused (`database predates the baseline; a fresh install is required`), and the n8n tokens in PrivacyFence must be created again.
 
 ### Added
