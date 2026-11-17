@@ -28,6 +28,14 @@ async def _existing(call: ToolCall, audience: str, source: str, source_ref: str)
     return f"rec:{row[0]}" if row else None
 
 
+def _nul_arg(texts: dict[str, str], labels: list[str]) -> str | None:
+    """The name of the first argument that holds a NUL character, which Postgres text cannot store."""
+    for name, value in texts.items():
+        if "\x00" in value:
+            return name
+    return "labels" if any("\x00" in label for label in labels) else None
+
+
 async def ingest_record(
     call: ToolCall,
     source: str,
@@ -43,6 +51,13 @@ async def ingest_record(
     deps, caller = call.deps, call.caller
     if audience not in caller.audiences or audience not in deps.config.groups:
         raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
+    bad = _nul_arg(
+        {"source": source, "source_ref": source_ref, "title": title, "body": body,
+         "source_url": source_url, "content_type": content_type},
+        labels,
+    )
+    if bad is not None:
+        raise kh_error("bad_arg", errors.BAD_ARG, name=bad)
     data = body.encode()
     if len(data) > deps.settings.max_record_bytes:
         raise kh_error("too_large", errors.TOO_LARGE)

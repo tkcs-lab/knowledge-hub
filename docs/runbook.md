@@ -83,7 +83,7 @@ The tick is pinned to the declaration: changing a tool's gate, verb or effect, o
 | Re-index after review | `kh rebuild` or `kh rebuild --repo kb-all`. Idempotent. |
 | Look for drift | `kh check`. Exit 1 means drift; read the printed lines. |
 | Daily job | `kh daily`, once a day from a scheduler: recomputes `stale` and purges expired claim ids. |
-| Queue missing embeddings | `kh requeue-embeddings` prints the number queued. |
+| Queue missing embeddings | `kh requeue-embeddings` prints the number queued. It also re-queues a record whose job was left `running` by a worker that stopped mid-job. |
 | Change the embedding model or chunker | Change `KH_EMBED_MODEL` or `KH_CHUNKER_VERSION`, restart, run `kh setup apply --only ollama`, `kh rebuild`, then `kh requeue-embeddings`. |
 | Check a document before a pull request | `kh lint path/to/file.md`. |
 

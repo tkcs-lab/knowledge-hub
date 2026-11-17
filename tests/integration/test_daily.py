@@ -69,3 +69,20 @@ async def test_requeue_inserts_a_job_per_record_without_chunks(world, indexer_po
         rows = conn.execute("SELECT kind, state, payload ->> 'id' FROM kh.index_jobs ORDER BY id").fetchall()
     assert rows == [("embed_record", "queued", waiting), ("embed_record", "queued", bare)]
     assert await requeue_embeddings(indexer_pool) == 0
+
+
+async def test_requeue_ignores_a_job_stuck_in_running(world, indexer_pool):
+    with conn_for(world) as conn:
+        stuck = add_record(conn)
+        conn.execute("DELETE FROM kh.index_jobs")
+        conn.execute(
+            "INSERT INTO kh.index_jobs (kind, state, payload)"
+            " VALUES ('embed_record', 'running', jsonb_build_object('id', %s::text))",
+            (stuck,),
+        )
+    assert await requeue_embeddings(indexer_pool) == 1
+    with conn_for(world) as conn:
+        rows = conn.execute(
+            "SELECT state FROM kh.index_jobs WHERE payload ->> 'id' = %s ORDER BY id", (stuck,)
+        ).fetchall()
+    assert ("queued",) in rows

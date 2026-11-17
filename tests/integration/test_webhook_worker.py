@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 from dataclasses import replace
 
 import httpx
@@ -291,6 +292,21 @@ async def test_embed_record_replaces_existing_chunks(world, blobs, make_worker):
     add_job(world, "embed_record", payload=json.dumps({"id": rec}))
     await make_worker().run_once()
     assert q(world, "SELECT text FROM kh.chunks WHERE record_id = %s", rec) == [("second body",)]
+
+
+async def test_embed_record_strips_nul_from_a_stored_body(world, blobs, make_worker, caplog):
+    await blobs.put("records/r1", b"# Hea\x00d\nal\x00pha beta\n", "text/plain")
+    rec = add_record(world)
+    [(job_id,)] = q(world, "SELECT id FROM kh.index_jobs")
+    with caplog.at_level(logging.WARNING, logger="knowledge_hub.indexer.worker"):
+        await make_worker().run_once()
+    assert job(world, job_id) == ("done", 1, None)
+    chunks = q(world, "SELECT heading_path, text FROM kh.chunks WHERE record_id = %s", rec)
+    assert chunks == [("Head", "alpha beta")]
+    [warning] = [r for r in caplog.records if r.levelno == logging.WARNING]
+    message = warning.getMessage()
+    assert rec in message and "removed 2 NUL characters" in message
+    assert "alpha" not in caplog.text
 
 
 async def test_embed_record_skips_embedding_when_the_embedder_refuses(world, blobs, indexer_pool, reader):

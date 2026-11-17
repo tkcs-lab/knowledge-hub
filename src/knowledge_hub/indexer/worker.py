@@ -75,6 +75,10 @@ class Worker:
         if self.blobs is None:
             raise RuntimeError("no blob store configured")
         body = (await self.blobs.get(blob_key)).decode("utf-8", errors="replace")
+        nul = body.count("\x00")
+        if nul:
+            body = body.replace("\x00", "")
+            log.warning("record %s: removed %d NUL characters before indexing", record_id, nul)
         chunks = chunk_markdown(body, str(self.chunker_version))
         embeddable = bool(self.embedder.may_embed(audience))
         vectors: list[list[float] | None] = [None] * len(chunks)
