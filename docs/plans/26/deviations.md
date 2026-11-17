@@ -87,7 +87,11 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p14-forgejo-step
 
-- pending
+- worker: ForgejoAdmin has no team-delete or user-lookup method (files outside touches), so the step calls the private _obj(GET /users/{login}) and _request(DELETE /teams/{id}) and the test subclasses FakeForgejoAdmin to add both routes; both endpoints unconfirmed, for ma1
+- worker: followed 3.7 where the brief is shorter: team units_map (repo.code and repo.pulls set to the team permission) is checked and repaired, a site-admin bot or indexer is a ! line, and units missing from a units_map count as none
+- worker: org-owner, site-admin and effective-permission checks run with or without tokens (only the whoami login match needs a token); a collaborator with wrong effective permission after put_collaborator prints ! after apply
+- worker: account existence is checked for every member and approver as well as bot and indexer; a missing login is ! and skipped; a team repo other than its group repo prints ! and is never removed; webhook without a secret prints ! and writes nothing, a same-URL hook of another type is !, and each apply prints an i line for the rewritten secret
+- review: follow-up: add ForgejoAdmin.get_user and delete_team with fake routes so the step can drop private client calls; ma1 confirms GET /users/{login}, DELETE /teams/{id}, the units_map shape and the webhook content_type under config
 
 ## p15-setup-cli
 
