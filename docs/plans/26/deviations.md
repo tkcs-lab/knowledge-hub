@@ -70,7 +70,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11-setup-core
 
-- pending
+- worker: the runner stops at the first failing step and skips later ones, and redacts password=, token= and secret= values in error text
+- worker: without an admin DSN the checks connect as kh_migrator to the postgres database; on failure it prints ! lines for role, database and extension; wrong role attributes or database owner print ~ lines (! without an admin DSN); an unset role password file means no password is set
+- worker: group removal also deletes the group repo_state row; queued retry jobs print as + job git_push: <repo>; the test Cluster() root directory is renamed (-setup) to avoid a per-pid collision with the session cluster
+- review: CLI wiring of kh setup and reading KH_SETUP_PG_ADMIN_DSN_FILE are left to p15
 
 ## p12-setup-ollama-s3
 
