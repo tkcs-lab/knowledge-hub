@@ -4,15 +4,15 @@
 
 ## Summary
 
-**Use it:** The hub has two tiers. T0 is Markdown in Forgejo repos, one repo per group; a change reaches `main` only through a pull request that a member of the group's approver list merges (Claude, n8n or a person opens it; a person may merge their own). T3 is records that n8n or Claude put in with `ingest_record`, each with its own audience group. Everyone reads what their PrivacyFence claim's groups allow. An operator writes one `kh.yaml` (groups, members, approvers, labels) and runs `kh setup plan` then `kh setup apply` to create Postgres roles and tables, labels, Forgejo teams, repos, branch protection and the webhook, and the Ollama model; adding a group later is an edit and a re-run.
+**Use it:** Breaking release, fresh install only. The hub has two tiers. T0 is Markdown in Forgejo repos, one repo per group; a change reaches `main` only through a pull request that a member of the group's approver list merges (Claude, n8n or a person opens it). T3 is records that n8n or Claude put in with `ingest_record`, each with its own audience group. Everyone reads what their PrivacyFence claim's groups allow. An operator writes one `kh.yaml` (groups, members, approvers, labels) and runs `kh setup plan` then `kh setup apply` to create the Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, and the Ollama model; adding a group later is an edit and a re-run.
 
-**Scope:** The hub is rewritten around two tiers. Removed: T1 notes, T2 derived records, candidates, conflicts, promotion, domains, entities and Grist, `owners.yml` and the governance CI gates, the trust walk (anchors, verdicts, stamps), the requester record, emails and any-of audiences, `raw_audience_map`. Kept: claim verification, RLS, chunking, embeddings, search, S3 bodies. Added: `kh setup`, labels, `propose_doc`, `ingest_record`, `list_labels`, a wheel attached to the GitHub release. A fresh install only; no data migration.
+**Scope:** The hub is rewritten around two tiers. Removed: T1 notes, T2 derived records, candidates, conflicts, promotion, domains, entities and Grist, `owners.yml` and the governance gates, the trust walk, the requester record, emails, any-of audiences, `raw_audience_map`. Kept: claim verification, RLS, chunking, embeddings, search, S3 bodies. Added: `kh setup`, `kh lint`, labels, a new `propose_doc`, `ingest_record` (replaces `ingest_raw`), `list_labels`, a wheel on the GitHub release. Changed: `search`, `get_doc`, `list_stale` arguments and results, ids `doc:<uuid>` and `rec:<uuid>`, `kh.yaml` (`groups:` replaces `repos:`), `KH_FORGEJO_ORG` moved to `org:`, `KH_MAX_RAW_BYTES` renamed `KH_MAX_RECORD_BYTES`, backups dump only `kh.records`, and n8n tokens must be created again.
 
-**Security:** T0 trust now rests entirely on Forgejo branch protection and team membership, so `kh setup plan` checks them (3.7). One bot account writes every T0 pull request and every T3 record. The hub never holds admin credentials; `kh setup` does.
+**Security:** T0 trust rests entirely on Forgejo branch protection and team membership, so `kh setup plan` checks them (3.7). One bot account opens every T0 pull request and is stamped on every T3 record. Accepted residuals (3.3): a holder of two groups can write into the wider one, a leaked bot token reads every T0 repo, and with 0 required approvals the approver must review the final diff. The hub never holds admin credentials; `kh setup` does.
 
-**Performance:** No measurable change expected; search keeps its exact vector scan, filtered by one `audience` column.
+**Performance:** No measurable change.
 
-**Review focus:** forge-only trust and what `plan` must verify (3.2, 3.7); the group-to-audience authority split between PrivacyFence and `kh.yaml` (3.3); the delete-first phase order (7, p1 to p3); the protected `release.yml` change (3.10).
+**Review focus:** forge-only trust and what `plan` verifies (3.2, 3.7); the group-to-audience authority split (3.3); the RLS insert and dedupe rules and definer triggers (3.5); `propose_doc` text and path checks (3.8); the demolition phase p1 and its keep-list (3.11, 3.12).
 
 ## 1. Goal
 
@@ -57,6 +57,7 @@ org: kh                       # Forgejo organisation (replaces KH_FORGEJO_ORG)
 bot_login: kh-bot             # writes every T0 PR and stamps every T3 record
 indexer_login: kh-indexer     # read-only token owner
 forgejo_web_url: null
+hub_url: http://knowledge-hub:8080   # how Forgejo reaches the hub; only `kh setup` needs it
 groups:
   all:
     repo: kb-all              # default: kb-<group>
@@ -69,7 +70,7 @@ labels:
   product:ember: Ember product
 ```
 
-Validation (class `KhConfig`, `knowledge_hub/config.py`, pure, no I/O): group names match the group regex, are not `owners` in any case, and `<name>-approve` collides with no group; logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$`, unique per list after case-folding; `approvers` non-empty and a subset of `members` (error `config: group <g> approver <login> is not a member`); repo names match `^[a-z0-9][a-z0-9._-]{0,99}$`, unique; `bot_login` and `indexer_login` differ and appear in no member list; labels match the label regex, description at most 200 characters, at most 500 labels; `forgejo_web_url` null or https. Derived Forgejo teams: `<group>` (write on its repo) and `<group>-approve` (read on its repo, in the merge whitelist). Rejected: A1 `repos:` map with a separate approve group (lets an approve group become an audience with no repo).
+Validation (class `KhConfig`, `knowledge_hub/config.py`, pure, no I/O): group names match the group regex, are not `owners` in any case, and `<name>-approve` collides with no group; logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$`, unique per list after case-folding; `approvers` non-empty and a subset of `members` (error `config: group <g> approver <login> is not a member`); repo names match `^[a-z0-9][a-z0-9._-]{0,99}$`, unique; `bot_login` and `indexer_login` differ and appear in no member list; labels match the label regex, description at most 200 characters, at most 500 labels; `forgejo_web_url` null or https. `KhConfig()` with no arguments is valid (org `kh`, bot `kh-bot`, indexer `kh-indexer`, no groups, no labels, `hub_url` null); `config.bots` is `frozenset({bot_login, indexer_login})`; `hub_url` is null or an http(s) URL without a path. Derived Forgejo teams: `<group>` (write on its repo) and `<group>-approve` (read on its repo, in the merge whitelist). Rejected: A1 `repos:` map with a separate approve group (lets an approve group become an audience with no repo).
 
 ### 3.5 Schema (single migration `0001_baseline.sql`)
 
@@ -87,7 +88,7 @@ Fresh install only. `db/migrate.py` refuses to run when `kh.schema_migrations` h
 | `repo_state` | `repo` PK, `last_indexed_sha`, `indexed_at` | none | ALL |
 | `index_alerts` | `id` identity, `repo`, `path`, `message`, `created_at` | none | ALL |
 
-Functions and triggers: `kh.caller_audiences()`, `kh.caller_sub()`, `kh.caller_type()` (no `kh.email`); `kh.can_read(text)`; `kh.claim_seen(jti, expires_at)` (definer, copy); `chunks_inherit_owner` (BEFORE INSERT, copies tier, audience, labels, stale, owner key and created time from the owner row); `owner_propagate_to_chunks` (AFTER UPDATE of audience, labels, stale on `documents`); `records_enqueue_embed` (AFTER INSERT on `records`, inserts `index_jobs(kind='embed_record', payload={"id": <uuid>})`); `kh.assert_labels_exist(text[])` raising SQLSTATE `P0K05` used by BEFORE INSERT OR UPDATE OF labels triggers on `documents` and `records`; a BEFORE DELETE trigger on `labels` raising `P0K06` while any document or record uses the label (definer function owned by `kh_migrator`). Dedupe: re-ingesting the same `(audience, source, source_ref)` returns the existing row's id through a SELECT under RLS, safe because inserting already requires the audience (this avoids revealing records of other audiences; research: architect finding 4). Rejected: label join tables (arrays plus the two triggers give the same guard with far less SQL); a global unique `(source, source_ref)` (leaks existence).
+Functions and triggers: `kh.caller_audiences()`, `kh.caller_sub()`, `kh.caller_type()` (no `kh.email`); `kh.can_read(text)`; `kh.claim_seen(jti, expires_at)` (definer, copy); `chunks_inherit_owner` (BEFORE INSERT, copies tier, audience, labels, stale, owner key and created time from the owner row); `owner_propagate_to_chunks` (AFTER UPDATE of audience, labels, stale on `documents`); `records_enqueue_embed` (AFTER INSERT on `records`; a SECURITY DEFINER function owned by `kh_migrator` with `SET search_path = kh, pg_temp`, because `kh_app` has no grant on `index_jobs`; it inserts `index_jobs(kind='embed_record', payload={"id": <uuid>})`); `kh.assert_labels_exist(text[])` raising SQLSTATE `P0K05` used by BEFORE INSERT OR UPDATE OF labels triggers on `documents` and `records`; a BEFORE DELETE trigger on `labels` raising `P0K06` while any document or record uses the label (definer function owned by `kh_migrator`). Dedupe: re-ingesting the same `(audience, source, source_ref)` returns the existing row's id through a SELECT under RLS, safe because inserting already requires the audience (this avoids revealing records of other audiences); a concurrent duplicate that hits the unique key is caught as a unique violation and answered by the same SELECT. Rejected: label join tables (arrays plus the two triggers give the same guard with far less SQL); a global unique `(source, source_ref)` (leaks existence).
 
 ### 3.6 Indexer (T0)
 
@@ -99,32 +100,32 @@ Functions and triggers: `kh.caller_audiences()`, `kh.caller_sub()`, `kh.caller_t
 
 ### 3.7 `kh setup`
 
-`kh setup plan|apply --config kh.yaml [--only postgres|labels|forgejo|ollama|s3] [--prune]`. `plan` is strictly read-only and exits 0 (no drift), 1 (drift, one line each) or 2 (error); run it on a schedule to catch protection drift (`kh setup plan` in cron, non-zero pages someone). `apply` exits 0 or 2 and is idempotent. Printed line prefixes: `+ create ...`, `~ update ...`, `- remove ...` (only with `--prune`), `? unmanaged ...`, `! refused ...`. Credentials come from files, never the YAML: `KH_SETUP_PG_ADMIN_DSN_FILE` (optional), `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, plus the existing `KH_DB_*_PASSWORD_FILE`, `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE`, `KH_FORGEJO_INDEXER_TOKEN_FILE`, `KH_WEBHOOK_HMAC_FILE`, `KH_OLLAMA_URL`, `KH_EMBED_MODEL`, `KH_S3_*`. The `kh serve` service never mounts the two `KH_SETUP_*` files. Setup never creates Forgejo users or tokens; a missing `bot_login` or `indexer_login` account is an error.
+`kh setup plan|apply --config kh.yaml [--only postgres|labels|forgejo|ollama|s3] [--prune] [--create-bucket]` (`--create-bucket` only matters for `apply`). `plan` is strictly read-only. Line format `<prefix> <verb> <object kind> <name>[: <detail>]`, with prefixes `+` (create), `~` (update), `-` (remove, only with `--prune`), `!` (refused: a change the script will not make, for example `! refused group all changed repo`) and the informational `?` (unmanaged object) and `i` (information: `i audience <group>`, `i webhook secret not verifiable`, `i owners: <logins> can bypass protection`). Drift is any `+`, `~`, `-` or `!` line. `plan` exits 0 when there is no drift, 1 when there is, 2 on an error; run it on a schedule to catch protection drift. `apply` performs every possible change, prints the same lines, is idempotent, and exits 0, or 2 when an error occurred or any `!` line remains. `?` and `i` lines never change an exit code. Tests assert prefixes and object names, not the detail text. Credentials come from files, never the YAML: `KH_SETUP_PG_ADMIN_DSN_FILE` (optional), `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, plus the existing `KH_DB_*_PASSWORD_FILE`, `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE`, `KH_FORGEJO_INDEXER_TOKEN_FILE`, `KH_WEBHOOK_HMAC_FILE`, `KH_OLLAMA_URL`, `KH_EMBED_MODEL`, `KH_S3_*`. The `kh serve` service never mounts the two `KH_SETUP_*` files. Setup never creates Forgejo users or tokens; a missing `bot_login` or `indexer_login` account is an error.
 
 Steps, in order (one module each under `knowledge_hub/setup/`, each a `Step` with `plan() -> list[Change]` and `apply(prune: bool) -> list[Change]`):
 
 1. **postgres** with an admin DSN: create the three roles (passwords from the `KH_DB_*_PASSWORD_FILE` files, always re-set on apply because they cannot be read back), the database owned by `kh_migrator`, `CREATE EXTENSION vector`; then run pending migrations as `kh_migrator`. Without an admin DSN: check only (roles, database, extension exist; pending migrations are drift). Then sync `kh.groups` and the group-owned documents index (groups added; groups removed only with `--prune`, refused when records exist, and their documents are deleted).
 2. **labels**: insert new, update descriptions; a removed label is deleted only with `--prune` and only when unused (the `P0K06` trigger refuses; the line says `! refused label <x> in use`). After adding a label apply inserts one `git_push` job per repo so files rejected for an unknown label are retried.
-3. **forgejo** (admin token): per group: team `<group>` (permission write, `includes_all_repositories` false, `can_create_org_repo` false, members exactly the config) and team `<group>-approve` (permission read on the repo, members exactly the approvers); the repo (private, default branch `main`, created with `auto_init` so `main` exists; Actions disabled, `default_delete_branch_after_merge` true); collaborators: bot write, indexer read; branch protection on `main` through `rule_name: main`, `enable_push: false`, `enable_push_whitelist: false`, `enable_merge_whitelist: true`, `merge_whitelist_teams: ["<group>-approve"]`, `required_approvals: 0`, `block_on_rejected_reviews: true`, `apply_to_admins: true` (field names from research r-20261117-1, https://codeberg.org/forgejo/forgejo/raw/branch/forgejo/modules/structs/repo_branch.go, 2026-11-17; `branch_name` is deprecated). Forgejo silently drops whitelist teams without read access to the repo (https://codeberg.org/forgejo/forgejo/raw/branch/forgejo/models/git/protected_branch.go, 2026-11-17), so the approve team is added to the repo first and apply re-reads the protection after writing and reports any difference as drift. One org-level webhook (push) with the secret from `KH_WEBHOOK_HMAC_FILE`, rewritten on every apply (Forgejo never returns it; plan says `webhook secret not verifiable`). Identity checks when the bot and indexer token files are set: `GET /user` equals the configured login; the bot has no repo admin permission, the indexer no push; neither is an org owner or site admin. Report-only line listing members of the Owners team as people who can bypass protection. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only; repos are never deleted. A group's repo is immutable: a changed `repo` is `! refused group <g> changed repo; remove the group and add a new one`.
+3. **forgejo** (admin token): per group: team `<group>` (permission write, `includes_all_repositories` false, `can_create_org_repo` false, members exactly the config) and team `<group>-approve` (permission read on the repo, members exactly the approvers); the repo (private, default branch `main`, created with `auto_init` so `main` exists; Actions disabled, `default_delete_branch_after_merge` true); collaborators: bot write, indexer read; branch protection on `main` through `rule_name: main`, `enable_push: false`, `enable_push_whitelist: false`, `enable_merge_whitelist: true`, `merge_whitelist_teams: ["<group>-approve"]`, `required_approvals: 0`, `block_on_rejected_reviews: true`, `apply_to_admins: true` (field names from research r-20261117-1, https://codeberg.org/forgejo/forgejo/raw/branch/forgejo/modules/structs/repo_branch.go, 2026-11-17; `branch_name` is deprecated). Forgejo silently drops whitelist teams without read access to the repo (https://codeberg.org/forgejo/forgejo/raw/branch/forgejo/models/git/protected_branch.go, 2026-11-17), so the approve team is added to the repo first and apply re-reads the protection after writing and reports any difference as drift. One org-level webhook (type `forgejo`, events `["push"]`, content type `json`, URL `<hub_url>/webhooks/forgejo`) with the secret from `KH_WEBHOOK_HMAC_FILE`, rewritten on every apply (Forgejo never returns it; plan prints the `i` line). A config without `hub_url` makes this step print `! refused hub_url is not set`. Identity checks when the bot and indexer token files are set: `GET /user` equals the configured login; the bot has no repo admin permission, the indexer no push; neither is an org owner or site admin. Report-only line listing members of the Owners team as people who can bypass protection. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only; repos are never deleted. A group's repo is immutable: a changed `repo` is `! refused group <g> changed repo; remove the group and add a new one`.
 4. **ollama**: `plan` checks the model is listed and that one embedding has length `KH_EMBED_DIM` (1024 in the schema); `apply` pulls it (`POST /api/pull`, stream off).
 5. **s3**: check only by default (bucket exists; put, get and delete of `kh-setup-probe/<uuid>`); `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
 
-`plan` ends with the audience list line per group (`audience all`, ...) for PrivacyFence (3.3).
+`plan` ends with one `i audience <group>` line per group: the audience names PrivacyFence must emit (3.3). The labels and groups sync connect as `kh_migrator` (`settings.dsn("migrator")`); only `PostgresStep` and `LabelsStep` hold that DSN.
 
 ### 3.8 MCP tools (six)
 
-All take flat arguments (`str`, `int`, `bool`, `list[str]`, `Literal`), none named `reason` (`tests/unit/test_tool_schemas.py`). Reads are `auto`, writes `popup` in the PrivacyFence declaration, with `allowed_principal_types: [claude_client, n8n_workflow]` and no `email_for_visibility`.
+All take flat arguments (`str`, `int`, `bool`, `list[str]`, `Literal`), none named `reason` (`tests/unit/test_tool_schemas.py`). Reads are `auto`, writes `popup` in the PrivacyFence declaration (verbs: `search` for search; `read` for get_doc, list_stale, list_labels; `add` for ingest_record; `update` for propose_doc; `effect` strings `Stores a raw record readable by the named group.` and `Opens a pull request that proposes a document change.`), with `allowed_principal_types: [claude_client, n8n_workflow]` and no `email_for_visibility`.
 
 | Tool | Signature | Result |
 |---|---|---|
-| `search` | `query: str, min_tier: Literal["T0","T3"]="T0", labels: list[str]=[], audience: str="", limit: int=10 (1..50), cursor: str=""` | `{hits: [{id, tier, title, audience, labels, repo, path, source_url, occurred_at, blob_sha, stale, score, snippet}], next_cursor, extra: {t3_hits}}`; `labels` is all-of; with `min_tier="T0"` only T0 is searched and, when no T0 hit exists but T3 hits do, the call fails with the `NORMATIVE` text |
-| `get_doc` | `id: str` | `doc:` returns `{id, tier, repo, path, audience, labels, title, body, review_by, stale, commit_sha, blob_sha, source_link}`; `rec:` returns `{id, tier, audience, labels, title, body (from S3), source, source_ref, source_url, occurred_at, written_by}` |
+| `search` | `query: str, min_tier: Literal["T0","T3"]="T0", labels: list[str]=[], audience: str="", limit: int=10 (1..50), cursor: str=""` | `{hits: [{id, tier, title, audience, labels, repo, path, source_url, occurred_at, blob_sha, stale, score, snippet}], next_cursor}` (`snippet` is the best chunk's text cut to 400 characters; fields that do not apply to a tier are empty strings); `labels` is all-of; with `min_tier="T0"` only T0 is searched and, when no T0 hit exists but T3 hits do, the call fails with the `NORMATIVE` text |
+| `get_doc` | `id: str` | `doc:` returns `{id, tier, repo, path, audience, labels, title, body, review_by, stale, commit_sha, blob_sha, source_link}` (`source_link` is `<forgejo_web_url>/<org>/<repo>/src/commit/<commit_sha>/<path>`, or an empty string when `forgejo_web_url` is null); `rec:` returns `{id, tier, audience, labels, title, body (from S3), source, source_ref, source_url, occurred_at, written_by}` |
 | `list_stale` | `audience: str="", limit: int=50 (1..50), cursor: str=""` | documents with `stale` true, oldest `review_by` first |
 | `list_labels` | none | `[{name, description}]` |
-| `ingest_record` | `source: str, source_ref: str, title: str, body: str, audience: str, occurred_at: str (ISO 8601), labels: list[str]=[], source_url: str="", content_type: str="text/plain"` | `{id, existed: bool}`; refuses unless the caller holds `audience` and it is a configured group, or when the body exceeds `KH_MAX_RECORD_BYTES` (1048576), or a label is unknown; stores the body at S3 key `records/<uuid>`, `excerpt` the first 2000 characters, `written_by` the config's `bot_login`, `created_by_sub` and type from the caller |
+| `ingest_record` | `source: str, source_ref: str, title: str, body: str, audience: str, occurred_at: str (ISO 8601 with a timezone; a naive time is refused with BAD_ARG), labels: list[str]=[], source_url: str="", content_type: str="text/plain"` | `{id, existed: bool}`; refuses unless the caller holds `audience` and it is a configured group, or when the body exceeds `KH_MAX_RECORD_BYTES` (1048576), or a label is unknown; stores the body at S3 key `records/<uuid>`, `excerpt` the first 2000 characters, `written_by` the config's `bot_login`, `created_by_sub` and type from the caller |
 | `propose_doc` | `group: str, path: str, id: str, title: str, review_by: str, body: str, labels: list[str]=[], summary: str="", base_blob: str=""` | `{pr_url, pr_number, branch}` |
 
-`propose_doc` rules: caller holds `group` and the group's repo exists; `path` matches `^[a-z0-9][a-z0-9/_-]*\.md$` with no `..`, `//` or dot-segment and is not `README.md`; `base_blob` empty means the path must not exist, otherwise it is passed as `sha` to Forgejo's contents API so Forgejo enforces the race; `id` must not already exist at another path in the repo; text is refused if it holds control characters other than tab and newline, bidirectional controls, HTML comments or tags, or exceeds `KH_PROPOSE_MAX_BYTES` (131072); labels must exist; the bot lists its open pull requests in the repo and refuses at `KH_PROPOSE_MAX_OPEN` (20). The hub renders the file itself (frontmatter keys in the order `id`, `title`, `review_by`, `labels`, strings JSON-quoted, then `---` and the body), parses it back with the indexer's parser and refuses on mismatch, creates branch `bot/propose/<uuid4>` from the head of `main`, puts the one file, opens a pull request to `main` titled `Propose: <title>` (at most 120 characters) whose body is `summary` plus the lines `Requested-by: <sub>`, `Principal: <type>`, `Written-by: <bot_login>` (information only, not enforced). The bot client can only write branches starting `bot/` and open pull requests with base `main` (code guard, kept from today's design).
+`propose_doc` rules: caller holds `group` and the group's repo exists; `path` matches `^[a-z0-9][a-z0-9/_-]*\.md$` with no `..`, `//` or dot-segment and is not `README.md`; `base_blob` empty means the path must not exist, otherwise it is passed as `sha` to Forgejo's contents API so Forgejo enforces the race; `id` must not already exist at another path in the repo; text is refused if it holds control characters other than tab and newline, bidirectional controls, HTML comments or tags, or exceeds `KH_PROPOSE_MAX_BYTES` (131072); labels must exist; the bot lists its open pull requests in the repo and refuses at `KH_PROPOSE_MAX_OPEN` (20). The hub renders the file itself (frontmatter keys in the order `id`, `title`, `review_by`, `labels`, strings JSON-quoted, then `---` and the body), parses it back with the indexer's parser and refuses on mismatch, creates branch `bot/propose/<uuid4>` from the head of `main`, puts the one file (commit message `Propose: <title>` plus a blank line and `Requested-by: <sub>`), opens a pull request to `main` titled `Propose: <title>` (at most 120 characters) whose body is `summary` plus the lines `Requested-by: <sub>`, `Principal: <type>`, `Written-by: <bot_login>` (information only, not enforced). The bot client can only write branches starting `bot/` and open pull requests with base `main` (code guard, kept from today's design).
 
 Fixed error texts (module `mcp/errors.py`, one constant each): `NOT_FOUND` "not found", `INTERNAL` "internal error (ref {ref})", `RATE_LIMIT` (unchanged), `CURSOR_FOREIGN` (unchanged), `NORMATIVE` "only T3 records match; repeat with min_tier T3 to see them", `BAD_ID` "id must be doc:<uuid> or rec:<uuid>", `BAD_LABEL` "unknown label", `BAD_ARG` "argument <name> is invalid", `AUDIENCE_NOT_HELD` "audience is not held by this caller or not configured", `TOO_LARGE` "body is too large", `BAD_TEXT` "text contains forbidden characters", `PATH_EXISTS` "path already exists; pass base_blob to edit it", `BLOB_CHANGED` "the file changed since base_blob", `ID_IN_USE` "id is used by another file in this repo", `TOO_MANY_OPEN` "too many open proposals in this repo", `NOT_CONFIGURED` "writes are not configured", `PROPOSE_FAILED` "could not open the pull request". Obsolete constants are deleted.
 
@@ -134,15 +135,15 @@ Kept: `KH_ENV`, `KH_DEV_IDENTITY`, `KH_PF_ISSUER/AUDIENCE/JWKS_URL`, `KH_ALLOWED
 
 ### 3.10 Release
 
-The GitHub release gets the wheel, `SHA256SUMS` and `deploy/kh.example.yaml` next to the GHCR image. `.github/workflows/release.yml` is a protected path: phase p12 does not edit it and reports `protected-change: .github/workflows/release.yml - attach the wheel to the release` with a unified diff made from these literal edits: (a) in job `build`, after the step "Smoke test", insert a step "Build and smoke-test the wheel" whose `run` starts with `set -euo pipefail`, creates `$RUNNER_TEMP/build-venv`, installs `build`, runs `python -m build --wheel --outdir dist`, installs `dist/*.whl` into a second venv `$RUNNER_TEMP/check-venv`, runs `kh setup --help` there, then `(cd dist && sha256sum ./*.whl > SHA256SUMS)`; and a step `uses: actions/upload-artifact@v4` with `name: wheel`, `path: dist/`, `if-no-files-found: error`; (b) in job `publish`, before "Create tag and GitHub release", a step `uses: actions/download-artifact@v4` with `name: wheel`, `path: dist`; and `dist/*.whl dist/SHA256SUMS deploy/kh.example.yaml` appended to the `gh release create` command. The job set, permissions and strict-shell rule pinned by `tests/unit/test_release_files.py` stay true. Operator install without Docker: `pip install knowledge_hub-<v>-py3-none-any.whl`, then `kh setup plan --config kh.yaml`.
+The GitHub release gets the wheel, `SHA256SUMS` and `deploy/kh.example.yaml` next to the GHCR image. `.github/workflows/release.yml` is a protected path: phase p12 does not edit it and reports `protected-change: .github/workflows/release.yml - attach the wheel to the release` with a unified diff made from these literal edits: (a) in job `build`, after the step "Smoke test", insert a step "Build and smoke-test the wheel" whose `run` starts with `set -euo pipefail`, creates `$RUNNER_TEMP/build-venv`, installs `build`, runs `python -m build --wheel --outdir dist`, installs `dist/*.whl` into a second venv `$RUNNER_TEMP/check-venv`, runs `kh --help` there (main does not contain `kh setup` until the feature merges), then `(cd dist && sha256sum ./*.whl > SHA256SUMS)`; and a step `uses: actions/upload-artifact@v4` with `name: wheel`, `path: dist/`, `if-no-files-found: error`; (b) in job `publish`, before "Create tag and GitHub release", a step `uses: actions/download-artifact@v4` with `name: wheel`, `path: dist`; and `dist/*.whl dist/SHA256SUMS deploy/kh.example.yaml` appended to the `gh release create` command. The job set, permissions and strict-shell rule pinned by `tests/unit/test_release_files.py` stay true. Operator install without Docker: `pip install knowledge_hub-<v>-py3-none-any.whl`, then `kh setup plan --config kh.yaml`.
 
-### 3.11 What is deleted (by phase)
+### 3.11 What is deleted, and the keep-list of the demolition phase
 
-p1: tools `derived`, `promote`, `conflicts`, `entities`, `agent_notes`, `agent_proposals`, `agent_edit`, `agent_status`, their tests and declaration entries. p2: `agent/`, `governance/`, `grist/`, `visibility.py`, `jobs/recompute.py`, `jobs/audience_map.py`, the CLI gates, Grist and agent settings, `pyproject.toml` package-data for governance templates. p3: `tools/docs.py`, `tools/search.py`, `tools/raw.py`, `search/sql.py`, `indexer/{trust,sync_plan,sync,sync_chunks,worker,webhook,rebuild}.py`, `approvals.py`, `merge_rule.py`, `merge_io.py`, `proposals.py`, `jobs/daily.py`, `jobs/requeue.py` (rewritten later). p4: migrations `0001` to `0009`, `kh_provenance`. p5: `forgejo/client.py` (split into `reader.py` and `bot.py`; the admin client is new in p11). p13: `docs/governance.md`. Pure file deletion counts as one change per file in the sizing of a phase.
+Phase p1 deletes everything of the old world except this keep-list, then rewires the shared modules until `ruff check .` and the whole suite pass. Source kept: `__init__.py`, `app.py`, `auth/**`, `blobs/**`, `cli.py`, `config.py` (rewritten in p1), `db/**`, `deps.py`, `embed/**` (`may_embed` takes an audience string), `indexer/__init__.py`, `indexer/chunker.py`, `indexer/frontmatter.py` (rewritten in p3), `mcp/**`, `metrics.py`, `migrations/**` (replaced in p2), `ratelimit.py`, `search/__init__.py`, `search/cursor.py`, `settings.py`, `tools/__init__.py`. Everything else under `src/knowledge_hub` is deleted: `agent/`, `forgejo/`, `governance/`, `grist/`, `jobs/`, `approvals.py`, `merge_rule.py`, `merge_io.py`, `proposals.py`, `visibility.py`, `indexer/{trust,sync_plan,sync,sync_chunks,worker,webhook,rebuild}.py`, `search/sql.py`, every `tools/*.py` except `__init__.py`. Tests kept: unit `test_blobs`, `test_chunker`, `test_claims`, `test_config` (rewritten), `test_cursor`, `test_deploy_files`, `test_docs_links`, `test_embed_providers` (edited), `test_frontmatter`, `test_privacyfence_declaration` (edited), `test_ratelimit`, `test_release_files`, `test_settings` (edited), `test_tool_schemas` (edited), `test_webhook_hmac`; integration `test_migrate_runner`, `test_replay_cache`, `test_rls_policies`, `test_rls_tables`, `test_schema_tables`, `test_smoke`, `test_triggers`; support `claims.py`, `fixtures_app.py`, `fixtures_db.py`, `mcp_client.py`, `pg.py`, `principals.py`, `seed.py`, `blobs.py`. All other tests and support files are deleted and recreated by the phase that rebuilds their subject. Later deletions: p2 migrations `0001` to `0009`; p17 `docs/governance.md`. No test module imports from another test module (today `test_list_stale`, `test_sync` and others import helpers from other test files, which makes deleting one break many); shared helpers live in `tests/support/`.
 
 ### 3.12 Phase order and why
 
-Delete from the leaves inward so every phase keeps `ruff check .` and the whole suite green: unregister tools with their tests and declaration entries (p1); delete modules nothing references (p2); remove the old indexer and tool modules that depend on the old schema, leaving a server with no tools (p3); then new schema (p4), config and Forgejo clients (p5), indexer (p6, p7), tools (p8, p9), setup (p10, p11), release and deploy files (p12), docs (p13). The phases run in a strict chain because `tests/support/*` and `mcp/server.py` are touched by almost all of them. CI also runs the integration suite, so "green" includes `tests/integration`. Rejected: building the new modules beside the old ones (two schemas, double the test-support work).
+The old modules import each other and the tests import each other (`config` is imported by 60 files, `forgejo/client.py` by `proposals`, `governance.owners` by `trust` and `merge_rule`), so deleting leaf by leaf cannot keep the suite green. One demolition phase (p1) deletes against the keep-list and rewrites `config.py` and the wiring in the same step. Then: schema (p2), frontmatter and Forgejo clients (p3), sync (p4), worker and webhook (p5), rebuild, jobs and CLI (p6), tools: search (p7), get_doc, list_stale, list_labels (p8), ingest_record (p9), propose_doc (p10), setup core (p11), Ollama and S3 steps (p12), Forgejo admin client (p13), Forgejo step (p14), setup CLI (p15), release and deploy files (p16), docs (p17). Strict chain: `tests/support/*` and `mcp/server.py` are touched by almost every phase. CI runs the integration suite, so green means `tests/integration` too. Rejected: building the new modules beside the old ones (two schemas, double test-support work); deleting leaf by leaf (shown impossible above).
 
 ## 5. Manual steps
 
@@ -153,26 +154,38 @@ None. Every phase runs against fakes and a throwaway Postgres.
 ### After implementation
 
 **ma1-live-probe: run `kh setup` against a sandbox (about 45 minutes).**
-1. Prepare a sandbox Forgejo with an organisation, the accounts `kh-bot` and `kh-indexer` and their tokens, an empty Postgres 16 with pgvector available, an Ollama server and an S3 bucket. Store tokens in files, never in the chat; see https://github.com/tkcs-lab/knowledge-hub/blob/claude/two-tier-refactoring-plan-7v6q2m/docs/runbook.md (written by the last phase).
-2. Write a `kh.yaml` with two groups and two labels and run `kh setup plan --config kh.yaml`. You should see `+ create` lines only.
-3. Run `kh setup apply --config kh.yaml`, then `kh setup plan --config kh.yaml` again. You should see no lines and exit code 0; any line is a bug.
-4. In Forgejo open a repo's Settings, Branches: direct push is off, the merge whitelist is exactly `<group>-approve`, and admins are bound. Open a pull request with `propose_doc` (or by hand) and merge it as an approver; confirm the document appears in `search`.
-5. Add a third group to `kh.yaml`, apply, and confirm its team, repo and protection appear without touching the first two.
-Report back: pass or fail per step 2, 3, 4, 5 in the pull request.
+1. Create a sandbox Forgejo organisation in your Forgejo's admin area (Site administration, Organizations) and the two accounts `kh-bot` and `kh-indexer` (Site administration, User accounts). You should see both accounts listed.
+2. Create one access token per account (each account's Settings, Applications) and save each in its own file readable only by you; the admin token goes in a third file. Never paste a token into chat.
+3. Prepare an empty Postgres 16 with the `vector` extension available, an Ollama server reachable from the machine, and an S3 bucket.
+4. Write `kh.yaml` from `deploy/kh.example.yaml` (https://github.com/tkcs-lab/knowledge-hub/blob/claude/two-tier-refactoring-plan-7v6q2m/deploy/kh.example.yaml) with two groups and two labels, and set the `KH_*` file variables listed in https://github.com/tkcs-lab/knowledge-hub/blob/claude/two-tier-refactoring-plan-7v6q2m/docs/runbook.md.
+5. Run `kh setup plan --config kh.yaml`. You should see `+ create` lines and `i audience` lines, exit code 1.
+6. Run `kh setup apply --config kh.yaml`, then `kh setup plan --config kh.yaml` again. You should see only `i` lines and exit code 0; any other line is a bug.
+7. In Forgejo open a repo's Settings, Branches: direct push is off, the merge whitelist is exactly `<group>-approve`, admins are bound. Merge a pull request opened by `propose_doc` as an approver and confirm the document appears in `search`.
+8. Add a third group, run `apply`, and confirm its team, repo and protection appear without changing the first two.
+Report back as a pass or fail line per step 5, 6, 7, 8.
 
-**ma2-release-dry-run (about 15 minutes).** After the protected-change pull request for `release.yml` is merged, run the release workflow with `dry_run` true; confirm the job `build` uploads an artifact named `wheel`. Report pass or fail.
+**ma2-release-dry-run (about 15 minutes).**
+1. After the pull request that applies the `release.yml` change is merged, open https://github.com/tkcs-lab/knowledge-hub/actions/workflows/release.yml.
+2. Choose Run workflow on `main` and leave `dry_run` ticked.
+3. When the run ends, open it and look under Artifacts for an item named `wheel`.
+Report back pass or fail.
 
-**ma3-privacyfence (about 20 minutes).** Replace the declaration with `deploy/privacyfence-upstream.example.yaml`, map every group name to its audience name, restart PrivacyFence and create the n8n tokens again (changed gates void existing approvals, PrivacyFence ADR 0300). Report pass or fail.
+**ma3-privacyfence (about 20 minutes).**
+1. In PrivacyFence, replace the hub's upstream declaration with the file https://github.com/tkcs-lab/knowledge-hub/blob/claude/two-tier-refactoring-plan-7v6q2m/deploy/privacyfence-upstream.example.yaml and restart PrivacyFence.
+2. In PrivacyFence's audience mapping, map each Workspace group to the audience name that `kh setup plan` printed as `i audience <group>`.
+3. Create the n8n tokens again in PrivacyFence (the changed tool gates void old approvals) and store each new token in the n8n credential that used the old one.
+Report back pass or fail.
 
 ## 6. Risks and open questions
 
 - **Forgejo semantics differ from the fake.** Early signal: `plan` right after `apply` still reports drift on a real instance (ma1). Research left open: per-field first versions, whether `apply_to_admins` also stops bypass of the merge whitelist, and the push payload's `repository.full_name`. A worker who sees the fake and the brief disagree stops with `status=blocked`.
 - **Seeding by Claude is one popup per record** (flat-schema rule rules out a batch tool). If that is impractical, a follow-up plan adds an operator `kh seed` command; not planned here.
-- **Deleting before rebuilding leaves a server with no tools** between p3 and p8; nothing is released from the feature branch until the end.
+- **The server has no tools between p1 and p7**; nothing is released from the feature branch until the end.
+- **p1 is large** (mass deletion plus the `config.py` rewrite and rewiring of `cli.py`, `app.py`, `deps.py`, `settings.py`, `mcp/server.py`, embed). It is deletion-dominated and its keep-list is explicit; a worker who finds a kept file that cannot compile without a deleted one stops with `status=blocked`.
 - **Two lists of members** (PrivacyFence mapping and `kh.yaml`) can drift (3.3); the setup output lists the audience names to map.
 - **`tests/unit/test_privacyfence_declaration.py` asserts registered tools equal declared tools**; p3 sets both to empty sets and p8 and p9 fill them. A worker who finds another test coupled to the old tool list stops with `status=blocked`.
 - **Protected files.** `.github/workflows/release.yml` and `.tld/toolkit.yaml` are never edited by a phase.
-- **Reviewer note on sizing.** p1 to p3 delete many files; they are `M` because deleted files carry no logic (3.11).
+- **Reviewer note on sizing.** p1 counts deleted files as no logic; its real edits are listed in its brief.
 
 ## Implementation manifest
 
@@ -199,328 +212,358 @@ final_checks:
   - the changelog has entries under "## [Unreleased]" and no version heading
   - grep -rEn "raw_audience_map|allowed_emails|kh_provenance|requested-by|owners\.yml|grist|Grist" src deploy finds nothing
 phases:
-  - id: p1-drop-removed-tools
-    title: Unregister and delete the tools of the removed concepts
+  - id: p1-demolish-and-config
+    title: Delete the old world against the keep-list, rewrite config.py, rewire the shell
     depends_on: []
     complexity: M
     touches:
-      - src/knowledge_hub/tools/derived.py
-      - src/knowledge_hub/tools/promote.py
-      - src/knowledge_hub/tools/conflicts.py
-      - src/knowledge_hub/tools/entities.py
-      - src/knowledge_hub/tools/agent_notes.py
-      - src/knowledge_hub/tools/agent_proposals.py
-      - src/knowledge_hub/tools/agent_edit.py
-      - src/knowledge_hub/tools/agent_status.py
-      - src/knowledge_hub/mcp/server.py
-      - deploy/privacyfence-upstream.example.yaml
-      - tests/**
-    brief: |
-      Goal: remove the eight tools of the dropped concepts (3.11, p1) while ruff and the whole suite stay green.
-      1. In src/knowledge_hub/mcp/server.py `register_tools`, remove the lazy imports and `register` calls of derived, promote, conflicts, entities, agent_notes, agent_proposals, agent_edit and agent_status. Leave docs, search and raw registered.
-      2. `git rm` the eight tool files named in `touches`.
-      3. In deploy/privacyfence-upstream.example.yaml delete the entries of the tools write_derived, propose_change, flag_conflict, list_conflicts, get_entity, list_entities, write_note, propose_doc, propose_edit, pr_status and list_my_proposals. Keep the comment header.
-      4. In tests/unit/test_privacyfence_declaration.py set READ_TOOLS to {"search", "get_doc", "list_stale"} and WRITE_TOOLS to {"ingest_raw"}.
-      5. Delete every test whose subject is one of the removed tools (grep tests/ for the removed module names and tool names: tests/integration/test_agent_*.py, test_conflicts.py, test_entity_tools.py, test_write_derived.py, test_propose_change.py, test_pr_outcomes.py, test_derived_visibility_sql.py, test_strict_visibility.py, and the unit tests test_agent_*.py, test_routing.py). Edit shared test code (tests/support/tool_cases.py, tests/unit/test_tool_schemas.py, any parametrised list) to drop the removed tools; do not loosen any assertion about the tools that remain.
-      6. Do not delete modules outside the eight tool files (p2 does). Run `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q` until both pass.
-      Stop condition: if removing a tool breaks a test of a tool that stays (search, get_doc, list_stale, ingest_raw), stop with status=blocked and name the test.
-    acceptance:
-      - ".venv/bin/python -m ruff check . passes"
-      - ".venv/bin/python -m pytest -q passes"
-      - "grep -rnE \"agent_notes|agent_proposals|agent_edit|agent_status|tools\\.(derived|promote|conflicts|entities)\" src tests finds nothing"
-  - id: p2-drop-unreferenced-modules
-    title: Delete agent, governance, grist, visibility, recompute and their CLI, settings and tests
-    depends_on: [p1-drop-removed-tools]
-    complexity: M
-    touches:
       - src/knowledge_hub/agent/**
+      - src/knowledge_hub/forgejo/**
       - src/knowledge_hub/governance/**
       - src/knowledge_hub/grist/**
-      - src/knowledge_hub/visibility.py
-      - src/knowledge_hub/jobs/recompute.py
-      - src/knowledge_hub/jobs/audience_map.py
-      - src/knowledge_hub/jobs/daily.py
-      - src/knowledge_hub/cli.py
-      - src/knowledge_hub/app.py
-      - src/knowledge_hub/settings.py
-      - src/knowledge_hub/deps.py
-      - src/knowledge_hub/metrics.py
-      - pyproject.toml
-      - tests/**
-    brief: |
-      Goal: delete the modules nothing in the remaining flow references (3.11, p2).
-      1. `git rm -r` src/knowledge_hub/agent, src/knowledge_hub/governance, src/knowledge_hub/grist; `git rm` src/knowledge_hub/visibility.py, jobs/recompute.py, jobs/audience_map.py.
-      2. cli.py: delete the subcommands governance, validate, domain-owners and recompute-visibility and their handlers; keep serve, migrate, rebuild, check, daily, requeue-embeddings.
-      3. app.py: remove the import and call of `load_audience_map` in the lifespan.
-      4. jobs/daily.py: remove the Grist entity-sync part; keep the stale marking and the claim_jti purge. `kh daily` then needs no Grist settings.
-      5. settings.py and deps.py: remove KH_GRIST_URL, KH_GRIST_DOC_ID, KH_GRIST_KEY_FILE, every KH_AGENT_* setting, KH_CI_STATUS_LOGINS, KH_PROMOTION_DAILY_LIMIT, KH_FORGEJO_NOTES_TOKEN_FILE, their validators and the grist and forgejo_notes fields of Deps and build_deps. metrics.py: remove agent_write_failure and WRITE_FAILURE_REASONS.
-      6. pyproject.toml: change package-data to `knowledge_hub = ["migrations/*.sql"]`.
-      7. Delete tests of the deleted modules (unit: test_agent_*, test_cli_validate, test_domain_owners, test_governance_*, test_validate_rules, test_grist_client, test_visibility, test_cli_* for removed commands; integration: test_recompute*.py, test_any_of_migration.py only if it imports a deleted module; tests/data/validate, tests/golden). Edit tests of kept code (test_settings, test_daily, test_metrics, tests/support/forgejo_http.py `grist_transport`) to match. Never loosen an assertion of kept behaviour.
-      8. indexer/trust.py, sync_plan.py, merge_rule.py, merge_io.py, approvals.py, proposals.py and forgejo/client.py stay in this phase (p3 and p5 remove them).
-      Stop condition: if a kept module imports a file you deleted, restore only what is needed and stop with status=blocked naming the import.
-    acceptance:
-      - ".venv/bin/python -m ruff check . passes"
-      - ".venv/bin/python -m pytest -q passes"
-      - "grep -rnE \"grist|governance|audience_map|knowledge_hub\\.visibility\" src pyproject.toml finds nothing"
-  - id: p3-demolish-old-core
-    title: Delete the old indexer, search and read/write tools; leave a server with no tools
-    depends_on: [p2-drop-unreferenced-modules]
-    complexity: M
-    touches:
-      - src/knowledge_hub/tools/docs.py
-      - src/knowledge_hub/tools/search.py
-      - src/knowledge_hub/tools/raw.py
-      - src/knowledge_hub/search/sql.py
+      - src/knowledge_hub/jobs/**
       - src/knowledge_hub/indexer/**
+      - src/knowledge_hub/tools/**
+      - src/knowledge_hub/search/sql.py
       - src/knowledge_hub/approvals.py
       - src/knowledge_hub/merge_rule.py
       - src/knowledge_hub/merge_io.py
       - src/knowledge_hub/proposals.py
-      - src/knowledge_hub/jobs/**
+      - src/knowledge_hub/visibility.py
+      - src/knowledge_hub/config.py
       - src/knowledge_hub/cli.py
       - src/knowledge_hub/app.py
       - src/knowledge_hub/deps.py
+      - src/knowledge_hub/settings.py
       - src/knowledge_hub/mcp/server.py
+      - src/knowledge_hub/embed/**
+      - pyproject.toml
+      - deploy/kh.example.yaml
       - deploy/privacyfence-upstream.example.yaml
       - tests/**
     brief: |
-      Goal: remove everything that depends on the old schema or the old trust model; the later phases rewrite these from scratch. Read the originals with `git show origin/main:<path>` when a later phase needs them.
-      1. `git rm` the files named in `touches` except `indexer/chunker.py`, `indexer/frontmatter.py` and `search/cursor.py`, which stay. Delete the whole indexer package otherwise (trust, sync_plan, sync, sync_chunks, worker, webhook, rebuild) and src/knowledge_hub/jobs entirely.
-      2. cli.py: keep only `serve` and `migrate`; app.py: keep /mcp, /healthz and /metrics; remove the webhook route, the worker task and its import; deps.py: remove the worker, blob and embedder construction that only the worker used if nothing else uses it (keep the embedder and blob store factories; later phases use them).
-      3. mcp/server.py: `register_tools` registers nothing (keep the function and `build_mcp`); deploy/privacyfence-upstream.example.yaml: `tools: {}`; tests/unit/test_privacyfence_declaration.py: READ_TOOLS and WRITE_TOOLS become empty sets.
-      4. Delete every unit and integration test of a deleted module, and every test that needs a registered tool (tests/integration/test_http_e2e.py, test_wiring.py, test_get_doc_*.py, test_tool_get_doc.py, test_list_stale.py, test_search_*.py, test_ingest_raw.py, test_sync*.py, test_rebuild.py, test_webhook_worker.py, test_metrics.py parts about jobs). Keep tests of claims, replay cache, ratelimit, cursor, chunker, embed providers, frontmatter (old, rewritten in p5), config (old, rewritten in p5), forgejo client (old, rewritten in p5), settings, migrate runner, schema, RLS and triggers (old schema, rewritten in p4), release and deploy files.
-      5. Edit shared test code (tests/conftest.py, tests/support/*) only to drop imports of deleted modules.
-      Stop condition: if ruff or a kept test needs a deleted module, stop with status=blocked and name it.
+      Read first: sections 3.4, 3.9, 3.11 and 3.12 of this plan. Originals are available with `git show origin/main:<path>`.
+      Goal: after this phase the repository holds only the keep-list of 3.11, `ruff check .` and `pytest -q` pass, and the server registers no tools.
+      1. Delete with `git rm -r` every source path of 3.11 that is not on the keep-list: agent/, forgejo/, governance/, grist/, jobs/, approvals.py, merge_rule.py, merge_io.py, proposals.py, visibility.py, indexer/{trust,sync_plan,sync,sync_chunks,worker,webhook,rebuild}.py, search/sql.py, every tools/*.py except __init__.py. Delete every test file and tests/support file that is not on the test keep-list of 3.11, plus tests/data/** and tests/golden/** (keep tests/data/pf_req_test_vectors.json if a kept test reads it).
+      2. config.py: rewrite as `KhConfig` per 3.4 (pydantic, extra forbid). Names to keep from the old file: `ConfigError`, `AUDIENCE_RE`, `LOGIN_RE`, `load_config(path)`, `parse_config(data)`. Add `KhConfig.repo_for_group(name) -> str`, `KhConfig.group_for_repo(repo) -> str | None`, property `bots`. Defaults: `org="kh"`, `bot_login="kh-bot"`, `indexer_login="kh-indexer"`, `forgejo_web_url=None`, `hub_url=None`, `groups={}`, `labels={}`; a group's `repo` defaults to `kb-<name>`. Every validation rule of 3.4 raises `ConfigError` with a message starting `config:`. Do not import approvals or any deleted module. Export `Config = KhConfig` is NOT allowed; update every importer to `KhConfig`.
+      3. embed/: change `may_embed` to take `audience: str`; the Fake and Ollama embedders return True, the http embedder returns `audience in self.allowed_audiences`. Update tests/unit/test_embed_providers.py (no import of visibility).
+      4. settings.py: remove the settings listed as removed in 3.9, rename `KH_MAX_RAW_BYTES` to `KH_MAX_RECORD_BYTES`, change the `KH_TIER_WEIGHTS` default to `T0:1.0,T3:0.4`; where settings imported a deleted module for validation, keep the field as a plain string and let p7 validate it. Leave `DevIdentity.email` (p2 removes it).
+      5. cli.py keeps only `serve` and `migrate`. app.py keeps /mcp, /healthz and /metrics; remove the webhook route, the worker task and the audience-map load. deps.py builds verifier, embedder, blob store, the two pools and the rate limiter, and nothing from forgejo or the worker. mcp/server.py: `Deps(settings, config: KhConfig, app_pool, indexer_pool, embedder=None, blobs=None, verifier=None, ratelimiter=None)`; `register_tools` registers nothing; `build_mcp` stays.
+      6. deploy/kh.example.yaml: the example of 3.4 with groups `all` and `mgmt` and two labels. deploy/privacyfence-upstream.example.yaml: `tools: {}` and no `email_for_visibility` line. pyproject.toml: package-data `knowledge_hub = ["migrations/*.sql"]`.
+      7. Edit the kept tests: test_config.py (rewrite: one passing and one failing case per rule of 3.4, including `KhConfig()` valid), test_privacyfence_declaration.py (READ_TOOLS and WRITE_TOOLS empty, assert `email_for_visibility` absent), test_tool_schemas.py (no tool is required to exist; keep the rules applied to whatever is registered), test_settings.py, test_deploy_files.py (`test_example_config_loads` asserts groups `all` and `mgmt`; remove the entity default test; leave the backup tests), tests/support/fixtures_app.py (use `KhConfig()`), principals.py, seed.py and the kept integration tests only as far as needed to import and pass. Never loosen an assertion of kept behaviour.
+      Stop condition: if a kept file cannot import without a deleted module, or a kept test needs a deleted fixture, stop with status=blocked and name the file.
     acceptance:
       - ".venv/bin/python -m ruff check . passes"
       - ".venv/bin/python -m pytest -q passes"
-      - "ls src/knowledge_hub/indexer shows only __init__.py, chunker.py and frontmatter.py"
-      - "grep -rn \"approvals\\|merge_rule\\|merge_io\\|proposals\" src finds nothing outside forgejo/client.py"
-  - id: p4-new-schema
+      - "grep -rnE \"knowledge_hub\\.(agent|forgejo|governance|grist|jobs|approvals|merge_rule|merge_io|proposals|visibility)\" src tests finds nothing"
+      - ".venv/bin/python -m pytest tests/unit/test_config.py -q passes"
+  - id: p2-new-schema
     title: One baseline migration, plain-audience RLS, three roles
-    depends_on: [p3-demolish-old-core]
+    depends_on: [p1-demolish-and-config]
     complexity: M
     touches:
       - src/knowledge_hub/migrations/**
       - src/knowledge_hub/db/migrate.py
       - src/knowledge_hub/db/caller_tx.py
       - src/knowledge_hub/auth/claims.py
+      - src/knowledge_hub/settings.py
       - tests/support/pg.py
       - tests/support/seed.py
       - tests/support/principals.py
+      - tests/support/mcp_client.py
       - tests/support/fixtures_db.py
       - tests/integration/**
       - tests/unit/test_claims.py
+      - tests/unit/test_settings.py
     brief: |
-      Read first: section 3.3 and 3.5 of this plan.
-      Goal: replace migrations 0001 to 0009 with the one baseline of 3.5.
-      1. `git rm` the nine files in src/knowledge_hub/migrations. Create 0001_baseline.sql implementing exactly the tables, grants, policies, functions and triggers of 3.5. Copy the schema, grant and schema_migrations/claim_jti/claim_seen parts from `git show origin/main:src/knowledge_hub/migrations/0001_schema_grants.sql` and `0003_rls.sql`; copy `chunks_inherit_owner` and `owner_propagate_to_chunks` from `0004_triggers.sql` and cut them down to the columns of 3.5. Drop every mention of kh_provenance, allowed_emails, any-of clauses and kh.email.
-      2. db/migrate.py: when `kh.schema_migrations` lists a name that the package does not ship, raise MigrationError("database predates the baseline; a fresh install is required"). Add a unit-level test with a fake connection or an integration test that inserts a foreign name.
-      3. db/caller_tx.py: stop setting `kh.email`. auth/claims.py: remove `email` from `Caller` and from `_build_caller`; the claim's email is ignored. Update tests/unit/test_claims.py.
-      4. tests/support/pg.py `bootstrap_roles`: create kh_migrator, kh_app, kh_indexer only; no kh_provenance.
-      5. Rewrite tests/support/seed.py and principals.py for the new tables: groups `all`, `mgmt`, `hr` (rows in kh.groups), one document and one record per group, callers `alice_all`, `bob_mgmt`, `carol_hr`, `dave_none`, `multi` (all+mgmt), `wf_token` (n8n_workflow, audience all).
-      6. Rewrite integration tests test_schema_tables.py, test_rls_tables.py, test_rls_policies.py, test_triggers.py, test_migrate_runner.py for the new schema: forced RLS on every table; a caller reads only held audiences (documents, records, chunks); insert into records needs the audience and `created_by_sub = caller_sub()`; no UPDATE or DELETE for kh_app; the unique key (audience, source, source_ref); unknown label raises SQLSTATE P0K05; deleting a used label raises P0K06; chunk triggers copy audience, labels, stale; the embed_record job is queued on record insert; a foreign schema_migrations name is refused. Delete integration tests that no longer apply (test_recompute_matches_migration.py and similar).
+      Read first: sections 3.3 and 3.5. Pattern: `git show origin/main:src/knowledge_hub/migrations/0001_schema_grants.sql`, `0003_rls.sql`, `0004_triggers.sql`.
+      1. `git rm` the nine files in src/knowledge_hub/migrations. Create 0001_baseline.sql implementing exactly the tables, column lists, grants, policies, functions and triggers of 3.5, including: forced RLS on every table with the `kh_migrator_all` policy; `kh.can_read`; the definer `records_enqueue_embed` with `SET search_path = kh, pg_temp`; `kh.assert_labels_exist` raising SQLSTATE P0K05; the BEFORE DELETE guard on `labels` raising P0K06; `chunks_inherit_owner` and `owner_propagate_to_chunks` cut down to the new columns. No mention of kh_provenance, allowed_emails, any-of clauses or kh.email.
+      2. db/migrate.py: when `kh.schema_migrations` lists a name the package does not ship, raise `MigrationError("database predates the baseline; a fresh install is required")`; test it in test_migrate_runner.py by inserting a foreign name with an admin connection and calling `migrate`.
+      3. db/caller_tx.py: stop setting `kh.email`. auth/claims.py: remove `email` from `Caller` and `_build_caller` (the claim's email is ignored). settings.py: remove `email` from `DevIdentity`. tests/support/mcp_client.py: drop every use of `caller.email`. Update test_claims.py and test_settings.py.
+      4. tests/support/pg.py `bootstrap_roles`: create kh_migrator, kh_app, kh_indexer only (LOGIN NOSUPERUSER NOBYPASSRLS), database owned by kh_migrator, extension vector.
+      5. tests/support/seed.py and principals.py: seed groups `all`, `mgmt`, `hr` into kh.groups, one document and one record per group (with chunks), and callers `alice_all`, `bob_mgmt`, `carol_hr`, `dave_none`, `multi` (all and mgmt), `wf_token` (principal n8n_workflow, audience all). Provide helper functions `add_doc(conn, **fields)`, `add_record(conn, **fields)` and `add_chunk(conn, **fields)` returning ids.
+      6. Rewrite the integration tests test_schema_tables.py, test_rls_tables.py, test_rls_policies.py, test_triggers.py and test_migrate_runner.py for the new schema: forced RLS on every table; a caller reads only held audiences in documents, records and chunks; inserting a record needs the audience and `created_by_sub = caller_sub()`; kh_app cannot UPDATE or DELETE; the unique key (audience, source, source_ref) and a duplicate insert; P0K05 and P0K06; chunk triggers copy audience, labels, stale; an embed_record job is queued when kh_app inserts a record; a foreign schema_migrations name is refused. Delete any integration test that no longer applies.
       Stop condition: if a kept test needs email or a clause, stop with status=blocked.
     acceptance:
       - ".venv/bin/python -m pytest tests/integration/test_schema_tables.py tests/integration/test_rls_tables.py tests/integration/test_rls_policies.py tests/integration/test_triggers.py tests/integration/test_migrate_runner.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-      - "ls src/knowledge_hub/migrations shows only 0001_baseline.sql"
-      - "grep -rniE \"kh_provenance|allowed_emails|kh\\.email\" src tests finds nothing"
-  - id: p5-config-frontmatter-forgejo
-    title: New KhConfig, frontmatter parser and split Forgejo reader and bot clients
-    depends_on: [p4-new-schema]
+      - "ls src/knowledge_hub/migrations/*.sql prints only src/knowledge_hub/migrations/0001_baseline.sql"
+      - "grep -rniE \"kh_provenance|allowed_emails|kh\\.email\" src/knowledge_hub/migrations src/knowledge_hub/db src/knowledge_hub/auth tests/support finds nothing"
+  - id: p3-frontmatter-forgejo
+    title: New frontmatter parser, Forgejo reader and bot clients, fake Forgejo
+    depends_on: [p2-new-schema]
     complexity: M
     touches:
-      - src/knowledge_hub/config.py
       - src/knowledge_hub/indexer/frontmatter.py
-      - src/knowledge_hub/forgejo/**
-      - src/knowledge_hub/settings.py
-      - deploy/kh.example.yaml
+      - src/knowledge_hub/forgejo/__init__.py
+      - src/knowledge_hub/forgejo/reader.py
+      - src/knowledge_hub/forgejo/bot.py
       - tests/support/forgejo_fake.py
-      - tests/support/forgejo_http.py
-      - tests/unit/test_config.py
       - tests/unit/test_frontmatter.py
-      - tests/unit/test_forgejo_client.py
-      - tests/unit/test_forgejo_write.py
-      - tests/unit/test_forgejo_status.py
-      - tests/unit/test_forgejo_fake.py
-      - tests/unit/test_settings.py
-      - tests/unit/test_deploy_files.py
+      - tests/unit/test_forgejo_reader.py
+      - tests/unit/test_forgejo_bot.py
     brief: |
-      Read first: 3.4, 3.6, 3.8 (propose_doc), 3.9.
-      1. config.py: rewrite as `KhConfig` (pydantic, extra forbid) with the keys and validation of 3.4; `load_config(path)` and `parse_config(dict)` keep their names; errors are `ConfigError` with a `config:` prefix; expose `config.repo_for_group(name)`, `config.group_for_repo(repo)` and `config.bots`. Reuse AUDIENCE_RE and LOGIN_RE from the old file.
-      2. deploy/kh.example.yaml: rewrite to the example of 3.4 with two groups and two labels; update tests/unit/test_deploy_files.py `test_example_config_loads` and remove the entity default test.
-      3. indexer/frontmatter.py: rewrite `parse_document(text, path)` to return `ParsedDoc(id, title, review_by, labels, body)` or `Rejected(reason)` per 3.6 (required id, title, review_by; optional labels; ignore other keys; no domain, owner, type, entities, supersedes). Label existence is checked by the sync, not here.
-      4. forgejo/: `git rm client.py`; create reader.py `ForgejoReader(base_url, token, org, *, transport=None, timeout=30.0)` with `head_sha(repo, branch)`, `list_tree(repo, sha)` (recursive, returns dicts with path, sha, type), `get_raw(repo, path, sha)`, `is_ancestor(repo, base, head)` (compare API; a 404 or error means False) and `aclose`; create bot.py `ForgejoBot(base_url, token, org, *, transport=None, timeout=30.0)` with `head_sha`, `blob_sha(repo, path, ref)`, `create_branch(repo, name, from_sha)`, `put_file(repo, branch, path, content, message, prev_blob: str | None)` (passes `sha` when prev_blob is given), `open_pull(repo, head, base, title, body)`, `list_open_pulls(repo, author)` and `aclose`; the guard `_guard_ref` accepts only names starting `bot/` with a non-empty suffix, no `..`, no `//`; `open_pull` requires base `main`. Keep ForgejoError and ForgejoRefused in forgejo/__init__.py. Copy the HTTP plumbing from `git show origin/main:src/knowledge_hub/forgejo/client.py`.
-      5. settings.py: remove KH_FORGEJO_ORG (the org is `config.org`); nothing else changes here.
-      6. Rewrite tests: test_config.py (every rule of 3.4 with one failing case each), test_frontmatter.py, new test_forgejo_reader.py and test_forgejo_bot.py with httpx.MockTransport, tests/support/forgejo_fake.py as an in-memory repo (tree of path to content, head sha, pulls) used by later phases; delete test_forgejo_client.py, test_forgejo_write.py, test_forgejo_status.py if replaced.
-      Stop condition: if a kept module imports the old client or the old Config fields, stop with status=blocked and name it.
+      Read first: 3.6 and the propose_doc rules of 3.8. Pattern for HTTP plumbing: `git show origin/main:src/knowledge_hub/forgejo/client.py` (`_send`, error handling that never leaks a token) and `indexer/frontmatter.py`.
+      1. indexer/frontmatter.py: rewrite `parse_document(text: str, path: str) -> ParsedDoc | Rejected`; `ParsedDoc(id, title, review_by: date, labels: list[str], body)`, `Rejected(reason: str)`. Rules of 3.6: required `id` (`^[a-z0-9][a-z0-9._-]{0,99}$`), `title` (non-empty string), `review_by` (`YYYY-MM-DD`), optional `labels` (list of strings matching the label regex); other keys are ignored; a file without frontmatter or with invalid YAML is rejected. Reason texts: `missing frontmatter`, `invalid frontmatter`, `missing <key>`, `invalid <key>`.
+      2. forgejo/__init__.py exports `ForgejoError` (message holds method, path and status only), `ForgejoRefused(ForgejoError)`, `ForgejoReader`, `ForgejoBot`. reader.py `ForgejoReader(base_url, token, org, *, transport=None, timeout=30.0)` with `head_sha(repo, branch)`, `list_tree(repo, sha) -> list[dict]` (recursive, paged, entries with `path`, `sha`, `type`), `get_raw(repo, path, sha) -> str`, `is_ancestor(repo, base, head) -> bool` (compare API; any 404 or error answers False) and `aclose()`.
+      3. bot.py `ForgejoBot(base_url, token, org, *, transport=None, timeout=30.0)` with `head_sha`, `blob_sha(repo, path, ref) -> str | None`, `create_branch(repo, name, from_sha)`, `put_file(repo, branch, path, content, message, prev_blob: str | None)` (sends `sha` only when prev_blob is given), `open_pull(repo, head, base, title, body) -> dict`, `list_open_pulls(repo, author) -> list[dict]`, `aclose()`. The guard refuses (ForgejoRefused) any branch not starting `bot/` with a non-empty suffix, containing `..` or `//`, and any pull request whose base is not `main`.
+      4. tests/support/forgejo_fake.py: `FakeForgejo` an in-memory Forgejo behind `httpx.MockTransport`, with `add_repo(name)`, `commit(repo, {path: text | None})` (None deletes; each commit gets a new head sha and every file a git blob sha), and the endpoints the two clients call, including open pulls; used by later phases.
+      5. Tests: test_frontmatter.py (every rule), test_forgejo_reader.py, test_forgejo_bot.py (every method and every guard) over the fake.
     acceptance:
-      - ".venv/bin/python -m pytest tests/unit/test_config.py tests/unit/test_frontmatter.py tests/unit/test_forgejo_reader.py tests/unit/test_forgejo_bot.py tests/unit/test_deploy_files.py -q passes"
+      - ".venv/bin/python -m pytest tests/unit/test_frontmatter.py tests/unit/test_forgejo_reader.py tests/unit/test_forgejo_bot.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-      - "ls src/knowledge_hub/forgejo shows __init__.py, bot.py and reader.py"
-  - id: p6-sync-core
+  - id: p4-sync-core
     title: Tree-diff sync of main into documents and chunks
-    depends_on: [p5-config-frontmatter-forgejo]
+    depends_on: [p3-frontmatter-forgejo]
     complexity: M
     touches:
       - src/knowledge_hub/indexer/sync_plan.py
       - src/knowledge_hub/indexer/sync.py
       - src/knowledge_hub/indexer/sync_chunks.py
+      - tests/support/forgejo_fake.py
       - tests/unit/test_sync_plan.py
       - tests/integration/test_sync.py
       - tests/integration/test_sync_chunks.py
     brief: |
-      Read first: 3.5, 3.6. Pattern: `git show origin/main:src/knowledge_hub/indexer/sync_chunks.py` (chunk planning, apply) and `sync.py` (transaction shape); write the new modules from scratch.
-      1. sync_plan.py: pure function `build_sync_plan(config, repo, head_sha, tree, stored, texts, known_labels) -> SyncPlan` where `tree` is the list of `{path, sha}`, `stored` the rows `(path, blob_sha, doc_key)` and `texts` maps path to fetched text for changed files. Apply the include rules of 3.6 (md only, no dot segment, not root README.md, at most 1 MiB), parse with `parse_document`, reject unknown labels and duplicate ids (all holders rejected), and return `upserts`, `deletes` (stored paths absent from the tree or rejected) and `alerts` (`(path, message)`). Alert messages: `file rejected: <reason>`, `duplicate id <id>`.
-      2. sync_chunks.py: `plan_chunks` and `apply_chunks` copied in shape from the old file for table `kh.chunks` with the new columns; tier is `T0`; embed only when `embedder.may_embed(audience)`.
-      3. sync.py: `async sync_repo(indexer_pool, reader, config, repo, embedder, *, chunker_version)`: read `repo_state` and stored rows; `head = reader.head_sha(repo, "main")`; alert `main of <repo> was rewritten; run kh rebuild after review` when `last_indexed_sha` is set and `reader.is_ancestor` is False (then still sync); fetch the changed blobs; plan; chunk and embed outside the transaction; then one transaction with `pg_advisory_xact_lock(hashtext(repo))`: delete vanished rows, upsert documents (`audience = config group of repo`, `commit_sha = head`), replace changed chunks, insert alerts (deduplicate by repo, path, message), upsert repo_state.
-      4. Tests: unit test of the plan (every include and reject rule, duplicate ids, unknown label, delete of a vanished path, a rejected file retried when stored lacks it); integration tests with tests/support/forgejo_fake.py and the migrated DB: first sync, an edit, a delete, a rename, an unknown label then the label added, duplicate id, rewrite alert, chunk reuse when content is unchanged.
+      Read first: 3.5, 3.6. Pattern: `git show origin/main:src/knowledge_hub/indexer/sync_chunks.py` (chunk planning and apply) and `sync.py` (transaction shape); write the new modules from scratch.
+      1. sync_plan.py: pure `build_sync_plan(config, repo, head_sha, tree, stored, texts, known_labels) -> SyncPlan`; `tree` is a list of `{path, sha}`, `stored` rows `(path, blob_sha, doc_key)`, `texts` maps changed paths to text. Include rules of 3.6 (md only, no dot-prefixed segment, not root README.md, at most 1 MiB); parse with `parse_document`; reject a file with an unknown label (`file rejected: unknown label <x>`) and every holder of a duplicate id (`duplicate id <id>`); output `upserts`, `deletes` (stored paths absent from the tree or now rejected) and `alerts` as `(path, message)`; rejection messages start `file rejected: `.
+      2. sync_chunks.py: `plan_chunks` and `apply_chunks` for table kh.chunks with the p2 columns; tier `T0`; embed only when `embedder.may_embed(audience)`; chunks with an unchanged `content_sha` and model are kept.
+      3. sync.py: `async sync_repo(indexer_pool, reader, config, repo, embedder, *, chunker_version)`: read repo_state and stored rows; `head = await reader.head_sha(repo, "main")`; when `last_indexed_sha` is set and `reader.is_ancestor` is False add the alert `main of <repo> was rewritten; run kh rebuild after review` and carry on; read the known labels from kh.labels; fetch changed blobs; plan; chunk and embed outside the transaction; then one transaction: `pg_advisory_xact_lock(hashtext(repo))`, delete vanished rows, upsert documents (`audience = config.group_for_repo(repo)`, `commit_sha = head`, `blob_sha` from the tree), apply chunks, insert alerts that do not already exist for the same (repo, path, message), upsert repo_state. A repo that is in no group is a ValueError.
+      4. Tests (no import from other test modules; helpers in tests/support): unit tests of the plan for every rule above and a rejected file retried when it is not stored; integration tests with FakeForgejo and the migrated DB: first sync, edit, delete, rename, unknown label then the label added, duplicate id, rewrite alert, chunk reuse, audience equals the group.
     acceptance:
       - ".venv/bin/python -m pytest tests/unit/test_sync_plan.py tests/integration/test_sync.py tests/integration/test_sync_chunks.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-  - id: p7-worker-wiring
-    title: Worker, webhook, rebuild, daily, requeue and the CLI and app wiring
-    depends_on: [p6-sync-core]
+  - id: p5-worker-webhook
+    title: Job worker, push webhook, app and deps wiring
+    depends_on: [p4-sync-core]
     complexity: M
     touches:
       - src/knowledge_hub/indexer/worker.py
       - src/knowledge_hub/indexer/webhook.py
-      - src/knowledge_hub/indexer/rebuild.py
-      - src/knowledge_hub/jobs/daily.py
-      - src/knowledge_hub/jobs/requeue.py
-      - src/knowledge_hub/jobs/__init__.py
-      - src/knowledge_hub/cli.py
       - src/knowledge_hub/app.py
       - src/knowledge_hub/deps.py
-      - tests/unit/test_cli_rebuild.py
+      - src/knowledge_hub/mcp/server.py
       - tests/integration/test_webhook_worker.py
+      - tests/integration/test_wiring.py
+      - tests/integration/test_metrics.py
+    brief: |
+      Read first: 3.6, 3.9. Pattern: `git show origin/main:src/knowledge_hub/indexer/worker.py`, `webhook.py`, `app.py`, `deps.py`, `tests/integration/test_metrics.py`.
+      1. webhook.py `make_webhook_endpoint(deps)`: POST /webhooks/forgejo; body cap `settings.max_body_bytes` (413); HMAC check with `auth.webhook_hmac`; repo from `repository.full_name`, falling back to `repository.owner.login + "/" + repository.name`; ignore another org and any repo for which `config.group_for_repo` is None (202 ignored); only a `push` event on `refs/heads/main` inserts `index_jobs(kind='git_push', repo)`; everything else 202 ignored.
+      2. worker.py `Worker(indexer_pool, reader, embedder, config, blobs, *, chunker_version, poll_seconds=2.0)`: job claim and retry exactly as the old file (five attempts, 30 s times attempts); `git_push` runs `sync_repo`; `embed_record` reads the body from S3 by `blob_key`, chunks it with `chunk_markdown`, embeds when `embedder.may_embed(audience)` and replaces the record's chunks in one transaction.
+      3. deps.py: build `ForgejoReader` (token `KH_FORGEJO_INDEXER_TOKEN_FILE`, org `config.org`) and the Worker when `KH_FORGEJO_URL` is set; `Deps` in mcp/server.py gets `reader` and `worker` fields (default None). app.py: webhook route and worker task back, as in the old lifespan (start, stop, wait 10 s, cancel).
+      4. Tests: webhook (bad HMAC 401, wrong org, unconfigured repo, wrong ref, full_name fallback, queued job), worker (git_push over FakeForgejo, embed_record with an in-memory blob store, retry then failed after five attempts), wiring and `/metrics` as in the old tests but for the new job kinds. No import from other test modules.
+    acceptance:
+      - ".venv/bin/python -m pytest tests/integration/test_webhook_worker.py tests/integration/test_wiring.py tests/integration/test_metrics.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p6-rebuild-jobs-cli
+    title: rebuild and check, daily, requeue, lint and their CLI commands
+    depends_on: [p5-worker-webhook]
+    complexity: M
+    touches:
+      - src/knowledge_hub/indexer/rebuild.py
+      - src/knowledge_hub/jobs/__init__.py
+      - src/knowledge_hub/jobs/daily.py
+      - src/knowledge_hub/jobs/requeue.py
+      - src/knowledge_hub/cli.py
+      - tests/unit/test_cli_rebuild.py
+      - tests/unit/test_cli_lint.py
       - tests/integration/test_rebuild.py
       - tests/integration/test_daily.py
     brief: |
-      Read first: 3.6, 3.9. Pattern: `git show origin/main:src/knowledge_hub/indexer/worker.py`, `webhook.py`, `rebuild.py`, `jobs/daily.py`, `jobs/requeue.py`; rewrite for the new schema.
-      1. webhook.py: POST /webhooks/forgejo; body cap `max_body_bytes` (413); HMAC check unchanged; repo name from `repository.full_name` else `repository.owner.login/repository.name`; ignore other orgs and repos not in `config.repo_for_group`; only a `push` to `refs/heads/main` queues `git_push`; others answer 202 ignored.
-      2. worker.py: `Worker(indexer_pool, reader, embedder, config, blobs, *, chunker_version, poll_seconds)`; job kinds `git_push` (sync_repo) and `embed_record` (read the body from S3 by `blob_key`, chunk, embed when `embedder.may_embed(audience)`, replace chunks in one transaction); claim, retry (30 s times attempts, five attempts) as before.
-      3. rebuild.py: `rebuild(deps, repo=None)` runs sync_repo for every configured repo after clearing `last_indexed_sha`; `check(deps)` reports index drift (head sha versus stored, content drift of chunks, documents whose audience differs from the config group); exit 1 on drift.
-      4. jobs/daily.py: mark stale (`review_by < current_date`) and purge expired claim_jti; jobs/requeue.py: enqueue `embed_record` for records without chunks.
-      5. cli.py: add back `rebuild [--repo R]`, `check`, `daily`, `requeue-embeddings` and `lint FILE...` (runs `parse_document` per file, prints `path: reason`, exit 1 on any); app.py: webhook route and worker task back; deps.py builds ForgejoReader from `KH_FORGEJO_INDEXER_TOKEN_FILE` and `config.org`.
-      6. Tests: webhook (HMAC, wrong repo, wrong ref, full_name fallback), worker (git_push and embed_record, retry), rebuild and check, daily, cli lint.
+      Read first: 3.6. Pattern: `git show origin/main:src/knowledge_hub/indexer/rebuild.py`, `jobs/daily.py`, `jobs/requeue.py`, `cli.py`.
+      1. rebuild.py: `rebuild(deps, repo=None)` clears `repo_state.last_indexed_sha` for the repo (or every configured repo) and runs `sync_repo`; `check(deps) -> list[str]` returns drift lines: `head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks` (only records older than five minutes), `document <path> in <repo> has audience <a>, config says <b>`.
+      2. jobs/daily.py `run_daily(indexer_pool)`: set `stale = (review_by < current_date)` on documents and purge expired `claim_jti`; jobs/requeue.py `requeue_embeddings(indexer_pool)`: insert an `embed_record` job for every record without chunks.
+      3. cli.py: add `rebuild [--repo R]`, `check` (prints the drift lines, exit 1 when any), `daily`, `requeue-embeddings`, `lint FILE...` (runs `parse_document` per file, prints `<path>: <reason>`, exit 1 if any problem, else 0). Exit code 2 for settings or config errors, as the old CLI.
+      4. Tests: rebuild and check (clean, head moved, missing chunks, audience drift), daily (stale flips, purge), requeue, cli parsing and `lint` (good file, each bad file). No import from other test modules.
     acceptance:
-      - ".venv/bin/python -m pytest tests/integration/test_webhook_worker.py tests/integration/test_rebuild.py tests/integration/test_daily.py tests/unit/test_cli_rebuild.py -q passes"
+      - ".venv/bin/python -m pytest tests/unit/test_cli_rebuild.py tests/unit/test_cli_lint.py tests/integration/test_rebuild.py tests/integration/test_daily.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-  - id: p8-read-tools
-    title: search, get_doc, list_stale and list_labels
-    depends_on: [p7-worker-wiring]
+  - id: p7-search-tool
+    title: The search tool, its SQL and the error catalogue
+    depends_on: [p6-rebuild-jobs-cli]
     complexity: M
     touches:
+      - src/knowledge_hub/mcp/errors.py
       - src/knowledge_hub/search/sql.py
       - src/knowledge_hub/tools/search.py
+      - src/knowledge_hub/settings.py
+      - src/knowledge_hub/mcp/server.py
+      - deploy/privacyfence-upstream.example.yaml
+      - tests/unit/test_privacyfence_declaration.py
+      - tests/support/seed.py
+      - tests/integration/test_search_ranking.py
+      - tests/integration/test_search_leaks.py
+    brief: |
+      Read first: 3.8. Pattern: `git show origin/main:src/knowledge_hub/search/sql.py`, `tools/search.py`, `mcp/errors.py`.
+      1. mcp/errors.py: keep `KhError`, `kh_error`, `ToolCall`, `tool_guard` unchanged; replace the constants with exactly the list of 3.8 (names and texts); `RATE_LIMIT` and `CURSOR_FOREIGN` keep their old texts.
+      2. search/sql.py: `SearchFilters(query, query_vector, embedding_model, min_tier, labels, audience, limit, offset, pool, rrf_k, tier_weights, stale_weight)`; `parse_tier_weights(text)` requires exactly T0 and T3 with positive numbers; `build_search_query(filters) -> (sql, params)` with the old single-statement shape (vector list, full-text list, RRF, one best chunk per owner, weights) over tiers T0 and T3, `labels @> %(labels)s`, optional `audience = %(audience)s`; no superseded, disputed, agent or domain parts; the meta row counts T0 hits and T3 hits for the NORMATIVE rule. settings.py validates `KH_TIER_WEIGHTS` with `parse_tier_weights`.
+      3. tools/search.py `search` with the signature and result of 3.8 (snippet 400 characters, cursor as the old `search/cursor.py`); `min_tier="T0"` searches T0 only and raises NORMATIVE when no T0 hit exists but T3 hits do; `register(server, deps)` wraps with `tool_guard`; mcp/server.py registers it.
+      4. Declaration: add `search` (`gate: auto`, `verb: search`); test_privacyfence_declaration READ_TOOLS = {"search"}.
+      5. tests/support/seed.py: helpers to create chunked documents and records with embeddings from the fake embedder. Tests: ranking (tier weights, stale weight, RRF), label all-of filter, audience filter, cursor binding to caller and query, NORMATIVE, and the leak matrix: a caller never sees hits of an audience it lacks, in documents, records and chunks, and `dave_none` sees nothing.
+    acceptance:
+      - ".venv/bin/python -m pytest tests/integration/test_search_ranking.py tests/integration/test_search_leaks.py tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p8-doc-tools
+    title: get_doc, list_stale and list_labels
+    depends_on: [p7-search-tool]
+    complexity: S
+    touches:
       - src/knowledge_hub/tools/docs.py
       - src/knowledge_hub/tools/labels.py
       - src/knowledge_hub/mcp/server.py
-      - src/knowledge_hub/mcp/errors.py
-      - src/knowledge_hub/settings.py
       - deploy/privacyfence-upstream.example.yaml
       - tests/unit/test_privacyfence_declaration.py
-      - tests/integration/test_search_ranking.py
-      - tests/integration/test_search_leaks.py
       - tests/integration/test_tool_get_doc.py
       - tests/integration/test_list_stale.py
+      - tests/integration/test_list_labels.py
       - tests/integration/test_http_e2e.py
-      - tests/support/tool_cases.py
     brief: |
-      Read first: 3.8 (tools, errors), 3.9. Pattern: `git show origin/main:src/knowledge_hub/search/sql.py`, `tools/search.py`, `tools/docs.py`, `mcp/errors.py`.
-      1. mcp/errors.py: define exactly the constants of 3.8's error list (copy `KhError`, `kh_error`, `ToolCall`, `tool_guard` unchanged); remove obsolete constants.
-      2. search/sql.py: `SearchFilters(query, query_vector, embedding_model, min_tier, labels, audience, limit, offset, pool, rrf_k, tier_weights, stale_weight)`; the single-statement shape of the old query (vector list, full-text list, RRF fusion, one best chunk per owner, weights), tiers T0 and T3, `labels @> %(labels)s`, optional `audience = %(audience)s`; no superseded, disputed, agent or domain parts; `parse_tier_weights` requires T0 and T3. settings.py: `KH_TIER_WEIGHTS` default `T0:1.0,T3:0.4`; remove KH_SUPERSEDED_WEIGHT and KH_DISPUTED_WEIGHT.
-      3. tools/search.py, tools/docs.py (get_doc, list_stale), tools/labels.py (list_labels): signatures and result shapes exactly as the table in 3.8; the `NORMATIVE` rule; `source_link` from `config.forgejo_web_url`; get_doc of `rec:` reads the body from S3 through `deps.blobs`. Each module has `register(server, deps)` wrapping with `tool_guard`.
-      4. mcp/server.py registers docs, search, labels. Declaration: add search, get_doc, list_stale, list_labels as `gate: auto` with `verb: search` or `read`; remove `email_for_visibility`; keep `allowed_principal_types`. Test: READ_TOOLS = those four, WRITE_TOOLS empty until p9.
-      5. Tests: ranking and leak matrix for the new model (a caller holding `all` never sees `mgmt` hits, chunks or get_doc; hidden and missing ids give the same NOT_FOUND), cursor binding, label filters, NORMATIVE, list_stale paging, http e2e with signed claims, tool schemas.
+      Read first: 3.8. Pattern: `git show origin/main:src/knowledge_hub/tools/docs.py` (id parsing, keyset cursor helpers).
+      1. tools/docs.py: `get_doc(id)` and `list_stale(audience, limit, cursor)` with the arguments and results of 3.8; id parsing `doc:<uuid>` or `rec:<uuid>` else BAD_ID; a missing and a hidden row both answer NOT_FOUND; `rec:` bodies are read through `deps.blobs`; `source_link` as in 3.8; `list_stale` orders by `review_by` then id with a keyset cursor bound to the caller.
+      2. tools/labels.py: `list_labels()` returns `[{name, description}]` ordered by name. Register all three in mcp/server.py.
+      3. Declaration: `get_doc`, `list_stale`, `list_labels` as `gate: auto`, `verb: read`; test READ_TOOLS = search, get_doc, list_stale, list_labels.
+      4. Tests: get_doc for doc and record, hidden equals missing, bad id; list_stale paging and caller filtering; list_labels; an end-to-end test through the HTTP app with signed claims (tests/support/claims.py and mcp_client.py) that calls each of the four read tools.
     acceptance:
-      - ".venv/bin/python -m pytest tests/integration/test_search_ranking.py tests/integration/test_search_leaks.py tests/integration/test_tool_get_doc.py tests/integration/test_list_stale.py tests/integration/test_http_e2e.py tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
+      - ".venv/bin/python -m pytest tests/integration/test_tool_get_doc.py tests/integration/test_list_stale.py tests/integration/test_list_labels.py tests/integration/test_http_e2e.py tests/unit/test_privacyfence_declaration.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-  - id: p9-write-tools
-    title: ingest_record and propose_doc
-    depends_on: [p8-read-tools]
-    complexity: M
+  - id: p9-ingest-record
+    title: The ingest_record tool
+    depends_on: [p8-doc-tools]
+    complexity: S
     touches:
       - src/knowledge_hub/tools/records.py
-      - src/knowledge_hub/tools/propose.py
-      - src/knowledge_hub/propose_render.py
       - src/knowledge_hub/mcp/server.py
+      - deploy/privacyfence-upstream.example.yaml
+      - tests/unit/test_privacyfence_declaration.py
+      - tests/integration/test_ingest_record.py
+    brief: |
+      Read first: 3.5 (dedupe), 3.8 (ingest_record). Pattern: `git show origin/main:src/knowledge_hub/tools/raw.py`.
+      1. tools/records.py `ingest_record` with the signature and result of 3.8. Order: principal type is claude_client or n8n_workflow (else AUDIENCE_NOT_HELD is not used; the claim middleware already refuses others); the audience must be held by the caller and exist in `config.groups` (else AUDIENCE_NOT_HELD); `len(body.encode()) <= settings.max_record_bytes` (else TOO_LARGE); `occurred_at` parsed with `datetime.fromisoformat`, naive refused with BAD_ARG; every label exists in kh.labels (SELECT under the caller, else BAD_LABEL); SELECT an existing row by (audience, source, source_ref) and return `{id, existed: true}`; put the body to S3 key `records/<uuid>` through `deps.blobs`; INSERT with an application-generated uuid (`written_by = config.bot_login`, `created_by_sub`, `created_by_type` from the caller, `excerpt` the first 2000 characters); a unique violation is answered by the same SELECT. Return `{id: "rec:<uuid>", existed: false}`.
+      2. Register in mcp/server.py; declaration entry `ingest_record` with `gate: popup`, `verb: add`, `effect: Stores a raw record readable by the named group.`; test WRITE_TOOLS = {"ingest_record"}.
+      3. Tests: new record, duplicate returns the existing id, concurrent duplicate, audience not held, audience not configured, naive time, too large, unknown label, S3 failure leaves no row, an embed_record job exists after insert, and a record written by `wf_token` is invisible to a caller without the audience.
+    acceptance:
+      - ".venv/bin/python -m pytest tests/integration/test_ingest_record.py tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p10-propose-doc
+    title: The propose_doc tool
+    depends_on: [p9-ingest-record]
+    complexity: M
+    touches:
+      - src/knowledge_hub/propose_render.py
+      - src/knowledge_hub/tools/propose.py
       - src/knowledge_hub/settings.py
       - src/knowledge_hub/deps.py
+      - src/knowledge_hub/mcp/server.py
       - deploy/privacyfence-upstream.example.yaml
       - tests/unit/test_privacyfence_declaration.py
       - tests/unit/test_propose_render.py
-      - tests/integration/test_ingest_record.py
       - tests/integration/test_propose_doc.py
-      - tests/support/tool_cases.py
     brief: |
-      Read first: 3.8 (ingest_record, propose_doc), 3.9, 3.5 (dedupe). Pattern: `git show origin/main:src/knowledge_hub/tools/raw.py` (S3 put then insert).
-      1. settings.py: rename KH_MAX_RAW_BYTES to KH_MAX_RECORD_BYTES; add KH_PROPOSE_MAX_BYTES (131072) and KH_PROPOSE_MAX_OPEN (20). deps.py builds `forgejo_bot` (ForgejoBot with `KH_FORGEJO_BOT_TOKEN_FILE`) only when the token file is set.
-      2. tools/records.py `ingest_record`: validations and result of 3.8; order: check audience held and configured, size, labels exist (SELECT from kh.labels under the caller), existing row lookup by (audience, source, source_ref) returning `{id, existed: true}`, S3 put at `records/<uuid>`, INSERT with application-generated uuid; id format `rec:<uuid>`.
-      3. propose_render.py: pure `render_file(id, title, review_by, labels, body)`, `check_text(text)` (control, bidi, HTML comment and tag refusal) and `validate_path(path)`; tools/propose.py `propose_doc` per 3.8: needs `deps.forgejo_bot` else `NOT_CONFIGURED`; blob check, id-in-use check against `kh.documents` of the repo, open-PR cap through `list_open_pulls(repo, bot_login)`, branch `bot/propose/<uuid4>`, one file, one pull request; any ForgejoError becomes `PROPOSE_FAILED` with the detail logged only.
-      4. mcp/server.py registers records and propose; declaration: `ingest_record` and `propose_doc` as `gate: popup` with verb `add` (ingest_record) and `update` (propose_doc); test WRITE_TOOLS = those two.
-      5. Tests: unit tests of render, text and path rules; integration tests with FakeForgejo: ingest (new, duplicate returns existing, audience not held, unknown label, too large, S3 failure leaves no row), propose (create, edit with base_blob, stale base_blob, path exists, id in use, cap, caller lacks group, PR body trailer lines), RLS: a record written by `wf_token` is invisible to a caller without the audience.
+      Read first: 3.8 (propose_doc), 3.9.
+      1. settings.py: add `KH_PROPOSE_MAX_BYTES` (131072) and `KH_PROPOSE_MAX_OPEN` (20). deps.py: build `ForgejoBot` from `KH_FORGEJO_BOT_TOKEN_FILE` and `config.org` only when `KH_FORGEJO_URL` and the token file are set; `Deps` gets `forgejo_bot` (default None).
+      2. propose_render.py (pure): `validate_path(path) -> bool` (regex and rules of 3.8), `check_text(text) -> bool` (refuse control characters other than tab and newline, bidi controls U+202A to U+202E and U+2066 to U+2069, `<!--`, and any `<tag` HTML tag), `render_file(id, title, review_by, labels, body) -> str` (frontmatter order id, title, review_by, labels; strings JSON-quoted; labels as a flow list; then `---` and the body).
+      3. tools/propose.py `propose_doc` per 3.8: NOT_CONFIGURED without `deps.forgejo_bot`; AUDIENCE_NOT_HELD when the caller lacks `group` or the group is unknown; BAD_ARG for a bad path, id, review_by; BAD_TEXT; labels exist (BAD_LABEL); size at most `KH_PROPOSE_MAX_BYTES` (TOO_LARGE); the open-PR cap through `list_open_pulls(repo, config.bot_login)` (TOO_MANY_OPEN); `base_blob` empty requires `blob_sha` None (else PATH_EXISTS), otherwise the live blob sha must equal `base_blob` (else BLOB_CHANGED) and is passed as `prev_blob`; the `id` must not belong to another path of the repo in kh.documents (ID_IN_USE); render, parse back with `parse_document` and refuse on mismatch; branch `bot/propose/<uuid4>` from `head_sha(repo, "main")`; put the file; open the pull request; every ForgejoError becomes PROPOSE_FAILED with the detail logged only. Return `{pr_url, pr_number, branch}`.
+      4. Register in mcp/server.py; declaration entry `propose_doc` with `gate: popup`, `verb: update`, `effect: Opens a pull request that proposes a document change.`; test WRITE_TOOLS = {"ingest_record", "propose_doc"}.
+      5. Tests: unit tests of render, text and path rules; integration tests over FakeForgejo: create, edit with base_blob, stale base_blob, path exists, id in use, cap reached, caller lacks the group, not configured, the pull request title and body trailer lines, a branch name outside `bot/` is impossible.
     acceptance:
-      - ".venv/bin/python -m pytest tests/unit/test_propose_render.py tests/integration/test_ingest_record.py tests/integration/test_propose_doc.py tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
+      - ".venv/bin/python -m pytest tests/unit/test_propose_render.py tests/integration/test_propose_doc.py tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-  - id: p10-setup-core
-    title: Setup framework with the postgres, labels, ollama and s3 steps
-    depends_on: [p9-write-tools]
+  - id: p11-setup-core
+    title: Setup framework with the postgres and labels steps
+    depends_on: [p10-propose-doc]
     complexity: M
     touches:
       - src/knowledge_hub/setup/__init__.py
       - src/knowledge_hub/setup/steps.py
       - src/knowledge_hub/setup/postgres.py
       - src/knowledge_hub/setup/labels.py
-      - src/knowledge_hub/setup/ollama.py
-      - src/knowledge_hub/setup/s3.py
       - tests/unit/test_setup_steps.py
-      - tests/unit/test_setup_ollama.py
-      - tests/unit/test_setup_s3.py
       - tests/integration/test_setup_postgres.py
     brief: |
-      Read first: 3.7 (steps 1, 2, 4, 5).
-      1. steps.py: `@dataclass(frozen=True) Change(kind: Literal["create","update","remove","unmanaged","refused"], text: str)`, `class Step(Protocol): name: str; async def plan(self) -> list[Change]; async def apply(self, prune: bool) -> list[Change]`, `render(change) -> str` giving the prefixes `+ `, `~ `, `- `, `? `, `! ` of 3.7, and `run(steps, mode, prune) -> int` implementing the exit codes (plan 0, 1 or 2; apply 0 or 2; an exception from a step prints `setup: <step>: <message>` without credentials and exits 2).
-      2. postgres.py: `PostgresStep(config, settings, admin_dsn: str | None)`: with an admin DSN create roles from the password files (always re-set), the database owned by kh_migrator and the vector extension; then pending migrations through `db.migrate` (plan lists them as `+ create migration <name>`); then sync `kh.groups` rows from the config (insert; update repo is refused; removal only with prune and refused while records exist, deleting the group's documents first); without an admin DSN plan reports missing roles, database or extension as `! refused` lines and apply changes nothing outside migrations and groups.
-      3. labels.py: `LabelsStep` as 3.7 step 2, including the `git_push` jobs after an added label and the `P0K06` refusal text `! refused label <x> in use`.
-      4. ollama.py: `OllamaStep(settings, transport=None)` per step 4 using httpx (`GET /api/tags`, `POST /api/embed`, `POST /api/pull` with `{"model": ..., "stream": false}`); s3.py: `S3Step(settings, client=None)` per step 5 using boto3 (`head_bucket`, put, get, delete of `kh-setup-probe/<uuid>`, `create_bucket` only when a `create_bucket=True` constructor argument is set).
-      5. Tests: steps run/exit codes, Ollama with httpx.MockTransport (model missing, present, wrong dimension, pull), S3 with botocore Stubber, Postgres integration with tests/support/pg.py (plan on an empty cluster, apply, plan again clean, add a group, prune with and without records, label in use).
+      Read first: 3.7 (output format, steps 1 and 2).
+      1. steps.py: `@dataclass(frozen=True) Change(prefix: Literal["+","~","-","!","?","i"], text: str)` with `render()` returning `<prefix> <text>`; `class Step(Protocol)`: `name: str`, `async plan() -> list[Change]`, `async apply(prune: bool) -> list[Change]`; `async run(steps, mode: Literal["plan","apply"], prune: bool) -> int` printing every line and returning the exit code of 3.7 (plan 0, 1 or 2; apply 0 or 2). A step that raises prints `setup: <step>: <message>` (never a credential) and the run returns 2.
+      2. postgres.py `PostgresStep(config, settings, admin_dsn: str | None)`. With an admin DSN: create roles kh_migrator, kh_app, kh_indexer (LOGIN NOSUPERUSER NOBYPASSRLS; password from `settings.db_*_password_file`, re-set on every apply), the database `settings.db_name` owned by kh_migrator, `CREATE EXTENSION IF NOT EXISTS vector` in it. Without one: missing roles, database or extension are `!` lines and apply changes nothing there. Then pending migrations through `knowledge_hub.db.migrate` (plan: one `+ migration <name>` line each). Then `kh.groups`: insert missing groups (`+ group <name>`), a changed `repo` is `! group <name> changed repo; remove the group and add a new one`; a group missing from the config is `? unmanaged group <name>` and, with prune, deleted (its documents first) unless records exist, in which case `! group <name> still has <n> records`.
+      3. labels.py `LabelsStep(config, migrator_dsn: str)`: missing labels `+ label <name>`; changed description `~ label <name>`; a label not in the config `? unmanaged label <name>`, with prune deleted only when unused (the P0K06 refusal becomes `! label <name> is used by <n> rows`). After at least one label was added, apply inserts one `git_push` job per configured repo so rejected files are retried.
+      4. Tests: run() exit codes and rendering; the Postgres step integration over tests/support/pg.py (plan on an empty cluster, apply, second plan has no `+ ~ - !` line, add a group, prune with and without records, wrong repo change, without an admin DSN); labels (add, update, unused removal, used refusal, jobs queued).
     acceptance:
-      - ".venv/bin/python -m pytest tests/unit/test_setup_steps.py tests/unit/test_setup_ollama.py tests/unit/test_setup_s3.py tests/integration/test_setup_postgres.py -q passes"
+      - ".venv/bin/python -m pytest tests/unit/test_setup_steps.py tests/integration/test_setup_postgres.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
-  - id: p11-setup-forgejo-cli
-    title: Forgejo admin client, forgejo step and the kh setup command
-    depends_on: [p10-setup-core]
+  - id: p12-setup-ollama-s3
+    title: The ollama and s3 setup steps
+    depends_on: [p11-setup-core]
+    complexity: S
+    touches:
+      - src/knowledge_hub/setup/ollama.py
+      - src/knowledge_hub/setup/s3.py
+      - tests/unit/test_setup_ollama.py
+      - tests/unit/test_setup_s3.py
+    brief: |
+      Read first: 3.7 (steps 4 and 5), 3.9.
+      1. ollama.py `OllamaStep(settings, *, transport=None)` (httpx): plan lists the model `settings.embed_model` via `GET <KH_OLLAMA_URL>/api/tags`; absent is `+ model <name>`; present, it embeds one short text with `POST /api/embed` and a length other than `settings.embed_dim` is `! model <name> returns <n> dimensions, expected <dim>`. apply pulls an absent model with `POST /api/pull` `{"model": <name>, "stream": false}`. Without `KH_OLLAMA_URL` the step raises `KH_OLLAMA_URL is not set`.
+      2. s3.py `S3Step(settings, *, create_bucket: bool = False, client=None)` (boto3): a missing bucket is `+ bucket <name>`; apply creates it only when `create_bucket` is true, else the line is `! bucket <name> does not exist; create it or pass --create-bucket`; an existing bucket is probed with put, get and delete of `kh-setup-probe/<uuid4>` (a failure is `! bucket <name> probe failed: <ErrorCode>`). plan makes no write except the probe.
+      3. Tests: Ollama over `httpx.MockTransport` (absent, present, wrong dimension, pull), S3 over botocore Stubber (absent, present, probe failure, create flag).
+    acceptance:
+      - ".venv/bin/python -m pytest tests/unit/test_setup_ollama.py tests/unit/test_setup_s3.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p13-forgejo-admin
+    title: Forgejo admin client and a stateful fake admin Forgejo
+    depends_on: [p12-setup-ollama-s3]
     complexity: M
     touches:
       - src/knowledge_hub/forgejo/admin.py
+      - tests/support/forgejo_admin_fake.py
+      - tests/unit/test_forgejo_admin.py
+    brief: |
+      Read first: 3.7 step 3 (branch-protection fields and the silent whitelist drop).
+      1. forgejo/admin.py `ForgejoAdmin(base_url, token, org, *, transport=None)` (httpx, same error handling as ForgejoReader) with: `org_teams()`, `create_team(name, permission, description)`, `edit_team(id, **fields)`, `team_members(id)`, `add_team_member(id, login)`, `remove_team_member(id, login)`, `team_repos(id)`, `add_team_repo(id, repo)`; `repos()`, `get_repo(repo)`, `create_repo(repo)` (private, default branch `main`, `auto_init` true), `edit_repo(repo, **fields)`, `collaborators(repo)`, `put_collaborator(repo, login, permission)`; `protection(repo)` (rule `main` or None), `put_protection(repo, body)` (create or edit by `rule_name`); `org_hooks()`, `create_org_hook(body)`, `edit_org_hook(id, body)`; `whoami(token=None)` (`GET /user`, with an explicit token for the identity checks), `user_repo_permission(repo, login)`, `org_owners()`. Every method returns plain dicts and lists.
+      2. tests/support/forgejo_admin_fake.py: `FakeForgejoAdmin`, a stateful in-memory implementation of those endpoints behind `httpx.MockTransport`, including: a merge-whitelist team without read access to the repo is silently dropped on write (as research r-20261117-1 reports), unknown team names give 422, protection is stored by `rule_name`.
+      3. tests/unit/test_forgejo_admin.py: every method against the fake, plus the drop and the 422.
+    acceptance:
+      - ".venv/bin/python -m pytest tests/unit/test_forgejo_admin.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p14-forgejo-step
+    title: The forgejo setup step with drift checks
+    depends_on: [p13-forgejo-admin]
+    complexity: M
+    worker_level: strong
+    worker_level_reason: The step decides what counts as a security drift of branch protection and teams; a missed field means T0 is silently unprotected
+    touches:
       - src/knowledge_hub/setup/forgejo.py
+      - tests/unit/test_setup_forgejo.py
+    brief: |
+      Read first: 3.2, 3.3, 3.7 (step 3 in full), 3.4.
+      1. setup/forgejo.py `ForgejoStep(config, admin: ForgejoAdmin, *, webhook_secret: str | None, bot_token: str | None, indexer_token: str | None)`. plan and apply cover, per group in config order: team `<group>` (permission write, `includes_all_repositories` false, `can_create_org_repo` false, members exactly `members`) and team `<group>-approve` (permission read, members exactly `approvers`); the repo `config.repo_for_group(group)` (private, default branch main, created with auto_init; Actions disabled; `default_delete_branch_after_merge` true); both teams on the repo (the approve team before the protection is written); collaborators: `bot_login` write, `indexer_login` read; the protection of 3.7 (`rule_name main`, `enable_push false`, `enable_push_whitelist false`, `enable_merge_whitelist true`, `merge_whitelist_teams ["<group>-approve"]`, `required_approvals 0`, `block_on_rejected_reviews true`, `apply_to_admins true`); after writing it, apply reads the protection back and any difference is a `!` line. Org level: one webhook `<hub_url>/webhooks/forgejo` (type forgejo, events push, content type json, active) whose secret is rewritten on every apply; without `hub_url` print `! hub_url is not set`; plan prints `i webhook secret not verifiable`.
+      2. Identity checks when tokens are given: `whoami(token)` login equals `bot_login` or `indexer_login`; the bot has no admin permission on any group repo and the indexer has no push (`user_repo_permission`); neither login is an org owner. Print `i owners: <logins> can bypass protection` for the Owners team members. A missing `bot_login` or `indexer_login` account is `! account <login> does not exist`.
+      3. Unmanaged teams and repos in the org that are not derived from the config print `? unmanaged team <name>` or `? unmanaged repo <name>`; with prune only unmanaged teams are deleted; repos are never deleted. Every line follows the prefixes of 3.7; the drift of every checked field is a `~` line naming the field.
+      4. Tests over FakeForgejoAdmin: clean first plan lists only `+` lines; after apply a second plan has no `+ ~ - !` line; each of these drifts is detected by plan and repaired by apply: member added or removed, approver removed, repo setting changed, collaborator missing, protection field changed (each field of step 1), approve team removed from the repo (and the silent whitelist drop caught by the read-back), webhook missing; an unmanaged team and repo; prune removes only the team; identity mismatch; bot with admin permission.
+      Stop condition: if the fake and 3.7 disagree on a field, follow 3.7 and stop with status=blocked naming the field.
+    acceptance:
+      - ".venv/bin/python -m pytest tests/unit/test_setup_forgejo.py -q passes"
+      - ".venv/bin/python -m pytest -q passes"
+  - id: p15-setup-cli
+    title: The kh setup command and the import boundary
+    depends_on: [p14-forgejo-step]
+    complexity: S
+    touches:
       - src/knowledge_hub/setup/cli.py
       - src/knowledge_hub/cli.py
       - src/knowledge_hub/settings.py
-      - tests/support/forgejo_admin_fake.py
-      - tests/unit/test_forgejo_admin.py
-      - tests/unit/test_setup_forgejo.py
       - tests/unit/test_setup_cli.py
       - tests/unit/test_import_boundary.py
     brief: |
-      Read first: 3.7 (step 3 in full), 3.4.
-      1. forgejo/admin.py `ForgejoAdmin(base_url, token, org, *, transport=None)`: methods for org teams (list, create, edit, set members by diff, add repo to team, list team repos), repos (get, create with auto_init and private, edit settings, collaborators put, list), branch protection (get, create, edit by `rule_name`), org hooks (list, create, edit), `whoami()` (`GET /user`), `user_permission(repo, login)` and `org_owners()`. Branch-protection body exactly as 3.7 step 3.
-      2. tests/support/forgejo_admin_fake.py: a stateful in-memory Forgejo (httpx.MockTransport) implementing those endpoints, including the silent drop of a merge-whitelist team that lacks read access to the repo.
-      3. setup/forgejo.py `ForgejoStep(config, settings, admin, bot_login_token, indexer_login_token)`: plan and apply as 3.7 step 3: order team, repo, team-to-repo access, collaborators, protection (then read back and compare), org hook, identity checks, owners report, unmanaged lines, prune of teams only, the immutable repo rule. Plan after apply on the fake must be empty.
-      4. settings.py: add `KH_SETUP_PG_ADMIN_DSN_FILE` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` (optional paths). setup/cli.py `main(argv)` with `plan|apply`, `--config`, `--only`, `--prune`, `--create-bucket`, building the five steps in order and calling `steps.run`; at the end of `plan` print `audience <group>` per group. cli.py: `setup` subcommand delegating to it.
-      5. tests/unit/test_import_boundary.py: importing `knowledge_hub.app` must not import `knowledge_hub.forgejo.admin` or `knowledge_hub.setup` (check `sys.modules` in a subprocess).
-      6. Tests: admin client with MockTransport, the step on the fake (clean first plan, apply, empty second plan, a group added, a member removed, protection tampered, approve team missing from the repo, unmanaged team, prune), cli exit codes and `--only`.
-      Stop condition: if the fake and the brief disagree on a Forgejo field, follow section 3.7 and stop with status=blocked naming the field.
+      Read first: 3.7 (synopsis, credentials), 3.9.
+      1. settings.py: add optional path settings `KH_SETUP_PG_ADMIN_DSN_FILE` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`.
+      2. setup/cli.py `main(argv) -> int`: arguments `plan|apply`, `--config` (required), `--only` (one of postgres, labels, forgejo, ollama, s3), `--prune`, `--create-bucket`; build the steps in the order postgres, labels, forgejo, ollama, s3 (PostgresStep with the admin DSN read from its file when set, LabelsStep with `settings.dsn("migrator")`, ForgejoStep with the admin token file, the webhook secret from `KH_WEBHOOK_HMAC_FILE` and the bot and indexer token files when set, OllamaStep, S3Step with `create_bucket`), filter by `--only`, call `steps.run`; on a missing required file or setting print `setup: <name> is not set` and return 2. Credentials are never printed.
+      3. cli.py: add the `setup` subcommand delegating to `setup.cli.main`.
+      4. tests/unit/test_import_boundary.py: in a subprocess, importing `knowledge_hub.app` must leave `knowledge_hub.forgejo.admin` and `knowledge_hub.setup` out of `sys.modules`.
+      5. tests/unit/test_setup_cli.py: argument parsing, `--only`, exit codes with fake steps, missing credentials.
     acceptance:
-      - ".venv/bin/python -m pytest tests/unit/test_forgejo_admin.py tests/unit/test_setup_forgejo.py tests/unit/test_setup_cli.py tests/unit/test_import_boundary.py -q passes"
+      - ".venv/bin/python -m pytest tests/unit/test_setup_cli.py tests/unit/test_import_boundary.py -q passes"
       - ".venv/bin/python -m pytest -q passes"
       - ".venv/bin/python -m knowledge_hub.cli setup --help exits 0"
-  - id: p12-release-deploy
+  - id: p16-release-deploy
     title: Compose, backup, declaration and the protected release workflow change
-    depends_on: [p11-setup-forgejo-cli]
+    depends_on: [p15-setup-cli]
     complexity: S
     touches:
       - deploy/compose.example.yaml
@@ -530,18 +573,19 @@ phases:
       - tests/unit/test_privacyfence_declaration.py
     brief: |
       Read first: 3.9, 3.10.
-      1. deploy/compose.example.yaml: set the environment of `knowledge-hub` to the kept and new settings of 3.9 (remove KH_AGENT_*, KH_GRIST_*, KH_FORGEJO_ORG, KH_FORGEJO_NOTES_TOKEN_FILE, KH_PROMOTION_DAILY_LIMIT); keep every secret as a `*_FILE` under /run/secrets and do not mount the two KH_SETUP_* files into this service. Update image tag text only if it says a version that no longer exists; do not invent one.
-      2. deploy/backup-kh.sh: dump only `kh.records` (the non-rebuildable table; groups and labels come from kh.yaml, documents and chunks are rebuilt); keep `--enable-row-security`, `--inserts`, `set -euo pipefail`; replace the restore comment with `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, the S3 bucket sync.
-      3. tests/unit/test_deploy_files.py: TABLES becomes ["records"]; the assertion that documents and chunks are not dumped stays.
-      4. deploy/privacyfence-upstream.example.yaml: header comment explains group audiences and removes the email paragraph; test_privacyfence_declaration asserts `email_for_visibility` is absent.
-      5. Do NOT edit .github/workflows/release.yml (protected). Report, in the phase report, one line `protected-change: .github/workflows/release.yml - attach the wheel and example config to the release` followed by the unified diff built from the literal edits of section 3.10, paths relative to the repository root, applied and checked against a scratch copy of the file (`patch --dry-run -p1`), and confirm the result still satisfies every assertion of tests/unit/test_release_files.py by running those tests' logic against the scratch copy (copy the test to the scratch directory and point WORKFLOW at the copy).
-      Stop condition: if the scratch copy fails an existing release-file assertion, stop with status=blocked and show the failing assertion.
+      1. deploy/compose.example.yaml: the `knowledge-hub` environment holds exactly the kept and new settings of 3.9 (no KH_AGENT_*, KH_GRIST_*, KH_FORGEJO_ORG, KH_FORGEJO_NOTES_TOKEN_FILE, KH_PROMOTION_DAILY_LIMIT); remove the `kh_grist_key` secret and any header comment about Grist; every secret stays a `*_FILE` under /run/secrets; do not mount the two KH_SETUP_* files in this service. Do not invent a version tag.
+      2. deploy/backup-kh.sh: dump only `kh.records` (groups and labels come from kh.yaml, documents and chunks are rebuilt); keep `--enable-row-security`, `--inserts`, `set -euo pipefail`; the restore comment becomes: `pg_restore`, `kh setup apply`, `kh rebuild`, `kh requeue-embeddings`, S3 bucket sync. tests/unit/test_deploy_files.py: `TABLES = ["records"]`; the check that documents and chunks are not dumped stays.
+      3. deploy/privacyfence-upstream.example.yaml: the header comment explains group audiences (the audience names are the group names) and drops the email paragraph. Add a test that the header mentions `kh setup plan`.
+      4. Do NOT edit .github/workflows/release.yml (protected). In the phase report put one line `protected-change: .github/workflows/release.yml - attach the wheel and example config to the release` followed by the unified diff built from the literal edits of 3.10, with this one change: the smoke test inside the new step runs `kh --help` (not `kh setup --help`), because main does not yet contain `kh setup`. Build the diff against a scratch copy of the file outside the repository, check `patch --dry-run -p1` exits 0, then copy tests/unit/test_release_files.py to the scratch directory, point its WORKFLOW at the patched scratch copy and run it: it must pass.
+      Stop condition: if the patched scratch copy fails an existing release-file assertion, stop with status=blocked and show the failing assertion.
     acceptance:
       - ".venv/bin/python -m pytest tests/unit/test_deploy_files.py tests/unit/test_privacyfence_declaration.py tests/unit/test_release_files.py -q passes"
       - "bash -n deploy/backup-kh.sh exits 0"
-  - id: p13-docs-retirement
+      - "grep -rEn \"raw_audience_map|allowed_emails|kh_provenance|requested-by|owners\\.yml|grist|Grist\" src deploy finds nothing"
+      - "the phase report contains a protected-change line, a diff that patch --dry-run -p1 accepts, and a passing run of test_release_files.py against the patched scratch copy"
+  - id: p17-docs-retirement
     title: README, design, configuration, runbook, changelog
-    depends_on: [p12-release-deploy]
+    depends_on: [p16-release-deploy]
     complexity: M
     touches:
       - README.md
@@ -552,13 +596,13 @@ phases:
       - CHANGELOG.md
       - tests/unit/test_docs_links.py
     brief: |
-      Read first: sections 3.1 to 3.10 of this plan, README.md, docs/design.md, docs/configuration.md, docs/runbook.md, `kh --help` and `kh setup --help` output.
-      1. README.md: rewrite for two tiers (table T0, T3), the group model, the tool list (six tools), the `kh` commands of 3.6 and 3.7, quick start (unchanged commands), and links to the three remaining docs. Remove every mention of T1, T2, domains, entities, Grist, owners.yml, governance.
-      2. docs/design.md: rewrite from the decisions of section 3: tiers, forge-only trust and what `plan` verifies, access model and the authority split, the accepted residuals of 3.3, the schema and RLS matrix of 3.5, claim middleware and call binding (keep the existing text, drop email), indexer, search, tools, the rejected alternatives table (add the rejections named in section 3). Replace the "Deviation from the PrivacyFence contract" section with one line saying email is no longer used.
-      3. docs/configuration.md: every setting of 3.9 and every `kh.yaml` key of 3.4 with defaults and the validation rules; the commands table of 3.6; the `kh setup` options, exit codes, credential files and steps of 3.7.
-      4. docs/runbook.md: install order with `kh setup plan` and `apply`, adding a group (edit kh.yaml, apply, restart `kh serve`, change the PrivacyFence mapping), joiners and leavers ("change both"), scheduled `kh setup plan`, the live probe of ma1, backup and restore, rotation, releasing (the wheel and the manual protected-change step for release.yml).
-      5. `git rm docs/governance.md`; fix every link to it. Keep each markdown file at most 400 lines (tests/unit/test_docs_links.py).
-      6. CHANGELOG.md: under `## [Unreleased]` add Added, Changed, Removed entries covering: two tiers, groups, labels, `kh setup`, `ingest_record`, `propose_doc`, `list_labels`, the wheel on releases, the removed tools, commands, settings and migrations, the breaking fresh-install requirement and the PrivacyFence token recreation. Do not open a version heading.
+      Read first: sections 3.1 to 3.10 of this plan, README.md, docs/design.md, docs/configuration.md, docs/runbook.md, and the output of `kh --help` and `kh setup --help`.
+      1. README.md: rewrite for two tiers (a two-row tier table), the group model, the six tools, the `kh` commands of 3.6 and 3.7, the unchanged quick start, and links to the three remaining docs. No mention of T1, T2, domains, entities, Grist, owners.yml or governance.
+      2. docs/design.md: rewrite from section 3: tiers, forge-only trust and what `plan` verifies, the access model and the authority split, the accepted residuals of 3.3, the schema and RLS matrix of 3.5, claim middleware and call binding (keep the existing text, drop email), the indexer, search, tools, and a rejected-alternatives table that includes the rejections named in section 3. Replace the PrivacyFence-contract deviation section by one sentence: email is no longer used.
+      3. docs/configuration.md: every setting of 3.9, every `kh.yaml` key of 3.4 with defaults and validation, the command table of 3.6, and `kh setup` (options, exit codes, line prefixes, credential files, steps) of 3.7.
+      4. docs/runbook.md: install order with `kh setup plan` and `apply`, adding a group (edit kh.yaml, apply, restart `kh serve`, change the PrivacyFence mapping), joiners and leavers ("change both"), a scheduled `kh setup plan`, the live probe of ma1, backup and restore, key rotation, releasing (the wheel; the release.yml change reaches main as a protected-change pull request).
+      5. `git rm docs/governance.md` and fix every link to it. Every markdown file outside docs/plans stays at most 400 lines.
+      6. CHANGELOG.md: under `## [Unreleased]` add Added, Changed and Removed entries for: two tiers, groups, labels, `kh setup`, `kh lint`, `ingest_record`, `propose_doc`, `list_labels`, the wheel on releases, the removed tools, commands, settings and migrations, the breaking fresh-install requirement, the settings renames and the PrivacyFence token recreation. Do not open a version heading.
       7. Run the final_checks greps of the manifest and make them pass.
     acceptance:
       - ".venv/bin/python -m pytest tests/unit/test_docs_links.py -q passes"
