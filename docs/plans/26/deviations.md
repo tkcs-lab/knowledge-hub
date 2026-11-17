@@ -13,7 +13,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-new-schema
 
-- pending
+- None.
+- review: dead legacy PRINCIPALS dict left in tests/support/principals.py (outside p2 touches); to delete in a later phase that owns the file
 
 ## p3-frontmatter-forgejo
 
