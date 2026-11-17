@@ -59,7 +59,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9-ingest-record
 
-- pending
+- worker: ingest_record wraps the INSERT in a savepoint so a unique violation does not abort the caller transaction; a duplicate or failed INSERT deletes the orphan S3 blob best effort; labels are de-duplicated for the existence check but stored as given
 
 ## p10-propose-doc
 
