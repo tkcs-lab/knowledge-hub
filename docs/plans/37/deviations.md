@@ -5,7 +5,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-schema-and-settings
 
-- None.
+- final: tests/integration/test_migrate_runner.py: the worker renamed test_schema_migrations_lists_the_baseline to test_schema_migrations_lists_both_migrations; the plan kept the old name. The rename is kept because the test now lists both migrations.
 
 ## p2-event-logging
 
@@ -25,8 +25,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: review 1: one blocking finding (unrecorded test rename in p1, recorded above); non-blocking: opens tie-break test and rec: open-event test missing.
 
 ## Finishing
 
-- pending
+- final: Scope: no out-of-scope paths in any phase; the p1 scope check was skipped because its merge came before the check.
