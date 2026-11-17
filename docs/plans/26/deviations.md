@@ -100,7 +100,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p16-release-deploy
 
-- pending
+- worker: compose gets KH_PROPOSE_MAX_BYTES 131072 and KH_PROPOSE_MAX_OPEN 20 at the plan defaults; the backup dump file name kh-t2t3-<date>.dump is unchanged because the brief did not mention it
+- review: protected-change: .github/workflows/release.yml (attach wheel and example config) was reported with a diff and is handled by the protected-changes flow, never on the feature branch
 
 ## p17-docs-retirement
 
