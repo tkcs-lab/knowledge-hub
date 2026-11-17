@@ -114,4 +114,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- final: scope disposition: no phase changed a path outside its touches, so nothing was accepted or reverted; the dod rows (ruff, pytest) and the manifest final_checks greps pass
