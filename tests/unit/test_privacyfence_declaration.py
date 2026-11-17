@@ -79,3 +79,12 @@ def test_upstream_fields():
     assert UPSTREAM["identity_claim"] == "required"
     assert UPSTREAM["allowed_principal_types"] == ["claude_client", "n8n_workflow"]
     assert "knowledge-hub:8080" in env["KH_ALLOWED_HOSTS"].split(",")
+
+
+def test_header_explains_people():
+    header = "\n".join(
+        line
+        for line in (ROOT / "deploy" / "privacyfence-upstream.example.yaml").read_text().splitlines()
+        if line.startswith("#")
+    )
+    assert "people" in header
