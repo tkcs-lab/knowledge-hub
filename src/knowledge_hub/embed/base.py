@@ -14,7 +14,7 @@ class EmbeddingProvider(Protocol):
 
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
-    def may_embed(self, visibility: object) -> bool: ...
+    def may_embed(self, audience: str) -> bool: ...
 
 
 class FakeEmbedder:
@@ -25,7 +25,7 @@ class FakeEmbedder:
     def __init__(self, dim: int = 1024) -> None:
         self.dim = dim
 
-    def may_embed(self, visibility: object) -> bool:
+    def may_embed(self, audience: str) -> bool:
         return True
 
     def _one(self, text: str) -> list[float]:

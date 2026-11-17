@@ -30,8 +30,10 @@ TABLES = [
 
 def test_example_config_loads():
     cfg = load_config(ROOT / "deploy" / "kh.example.yaml")
-    assert cfg.repos["canonical-all"].tier == "T0"
-    assert cfg.repos["notes-all"].tier == "T1"
+    assert set(cfg.groups) == {"all", "mgmt"}
+    assert cfg.repo_for_group("all") == "kb-all" and cfg.repo_for_group("mgmt") == "kb-mgmt"
+    assert len(cfg.labels) == 2
+    assert {m for g in cfg.groups.values() for m in g.members} <= set(cfg.people)
 
 
 def test_dockerfile():
@@ -118,14 +120,3 @@ def test_compose_example_config_passes():
         pytest.skip("docker compose is not available")
     result = subprocess.run(["docker", "compose", "-f", str(COMPOSE), "config", "-q"], cwd=ROOT)
     assert result.returncode == 0
-
-
-def test_example_entities_match_defaults():
-    from knowledge_hub.config import Config
-
-    ex = load_config(ROOT / "deploy" / "kh.example.yaml").entities
-    default = Config().entities
-    assert ex.keys() == default.keys()
-    for kind, spec in default.items():
-        for attr in ("table", "audiences", "label", "reference_audiences"):
-            assert getattr(ex[kind], attr) == getattr(spec, attr), (kind, attr)
