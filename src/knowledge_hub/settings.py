@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from knowledge_hub.search.sql import parse_tier_weights
+
 
 class DevIdentity(BaseModel):
     sub: str
@@ -76,6 +78,12 @@ class Settings(BaseSettings):
                 return json.loads(v)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"KH_DEV_IDENTITY is not valid JSON: {exc}") from exc
+        return v
+
+    @field_validator("tier_weights")
+    @classmethod
+    def _check_tier_weights(cls, v: str) -> str:
+        parse_tier_weights(v)
         return v
 
     @model_validator(mode="after")
