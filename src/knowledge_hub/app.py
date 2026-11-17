@@ -77,7 +77,9 @@ def build_app(settings: Settings, deps: Deps, verifier: ClaimVerifier) -> Starle
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        holder["middleware"] = ClaimMiddleware(mcp_handler, verifier, settings, PgReplayCache(deps.app_pool))
+        holder["middleware"] = ClaimMiddleware(
+            mcp_handler, verifier, settings, PgReplayCache(deps.app_pool), config=deps.config
+        )
         async with mcp.session_manager.run():
             yield
 

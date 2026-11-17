@@ -12,6 +12,7 @@ from knowledge_hub.auth.claims import (
     KhAuthError,
     _build_caller,
     caller_from_scope,
+    resolve_audiences,
 )
 from knowledge_hub.auth.pf_claim_verify import CLAIM_HEADER, ClaimVerifier, request_hash
 from knowledge_hub.settings import DevIdentity, Settings
@@ -24,6 +25,7 @@ from tests.support.claims import (
     static_jwks,
     verifier_for_tests,
 )
+from tests.support.principals import KH_CONFIG
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +54,11 @@ def make_settings(**kw):
 def make_client(settings=None, replay=None):
     inner = Recorder()
     app = ClaimMiddleware(
-        inner, verifier_for_tests(), settings or make_settings(), replay or InMemoryReplayCache()
+        inner,
+        verifier_for_tests(),
+        settings or make_settings(),
+        replay or InMemoryReplayCache(),
+        config=KH_CONFIG,
     )
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://hub")
     return client, inner
@@ -84,12 +90,12 @@ def test_vectors_reproduce():
 async def test_valid_claim_passes_and_sets_state():
     client, inner = make_client()
     body = call_body("search", ARGS)
-    r = await post(client, body, call_token(email="Person@Example.org"))
+    r = await post(client, body, call_token(email="Alice@Example.test"))
     assert r.status_code == 200 and r.content == b"ok"
     (seen,) = inner.calls
     assert seen["body"] == body
     caller = seen["state"]["kh_caller"]
-    assert caller == Caller("person-1", "claude_client", "person@example.org", frozenset({"all"}), None)
+    assert caller == Caller("person-1", "claude_client", "alice@example.test", frozenset({"all"}), None)
     call = seen["state"]["kh_call"]
     assert call.name == "search" and call.arguments == ARGS
     assert caller_from_scope({"state": seen["state"]}) is caller
@@ -193,10 +199,10 @@ async def test_n8n_email_dropped():
     )
     assert (await post(client, call_body("search", ARGS), token)).status_code == 200
     caller = inner.calls[0]["state"]["kh_caller"]
-    assert caller.email is None and caller.token_id == "t1"
+    assert caller.email is None and caller.token_id == "t1" and caller.audiences == {"all"}
 
 
-IDENT = DevIdentity(sub="dev", principal_type="claude_client", audiences=["all"], email="Dev@Example.org")
+IDENT = DevIdentity(sub="dev", principal_type="claude_client", audiences=["hr"], email="Multi@Example.test")
 
 
 async def test_dev_identity_without_header(caplog):
@@ -205,7 +211,8 @@ async def test_dev_identity_without_header(caplog):
         r = await post(client, call_body("search", ARGS), None)
     assert r.status_code == 200
     state = inner.calls[0]["state"]
-    assert state["kh_caller"].sub == "dev" and state["kh_caller"].email == "dev@example.org"
+    assert state["kh_caller"].sub == "dev" and state["kh_caller"].email == "multi@example.test"
+    assert state["kh_caller"].audiences == {"all", "mgmt"}
     assert state["kh_call"].name == "search"
     assert "dev identity" in caplog.text
 
@@ -222,6 +229,7 @@ def test_prod_refuses_dev_identity():
             verifier_for_tests(),
             Settings.model_construct(env="prod", dev_identity=IDENT, max_body_bytes=1000),
             None,
+            config=KH_CONFIG,
         )
 
 
@@ -249,4 +257,52 @@ def test_http_jwks_url_with_other_host_than_issuer_is_accepted():
     ],
 )
 def test_email_kept_only_for_claude_client(ptype, email, expected):
-    assert _build_caller("sub", ptype, email, ["all"], None, None).email == expected
+    assert _build_caller("sub", ptype, email, ["all"], None, None, config=KH_CONFIG).email == expected
+
+
+async def test_claim_audiences_are_ignored_for_claude_client():
+    client, inner = make_client()
+    token = call_token(audiences=["hr"], email="alice@example.test")
+    assert (await post(client, call_body("search", ARGS), token)).status_code == 200
+    assert inner.calls[0]["state"]["kh_caller"].audiences == {"all"}
+
+
+@pytest.mark.parametrize("email", ["nobody@example.test", None])
+def test_unknown_or_missing_email_has_no_audiences(email):
+    caller = _build_caller("s", "claude_client", email, ["all"], None, None, config=KH_CONFIG)
+    assert caller.audiences == frozenset()
+
+
+def test_upper_case_email_matches():
+    caller = _build_caller("s", "claude_client", "ALICE@EXAMPLE.TEST", [], None, None, config=KH_CONFIG)
+    assert caller.audiences == {"all"} and caller.email == "alice@example.test"
+
+
+def test_n8n_keeps_only_configured_groups():
+    caller = _build_caller("s", "n8n_workflow", None, ["all", "nope"], "t", None, config=KH_CONFIG)
+    assert caller.audiences == {"all"}
+
+
+def test_resolve_audiences_other_types_are_empty():
+    assert resolve_audiences(KH_CONFIG, "service", "alice@example.test", ["all"]) == frozenset()
+
+
+async def test_bad_audience_name_still_refused_for_claude_client():
+    client, _ = make_client()
+    await refused(
+        client, call_body("search", ARGS), call_token(audiences=["Bad Name"], email="alice@example.test")
+    )
+
+
+def test_dev_identity_of_each_type_resolves():
+    n8n = DevIdentity(
+        sub="wf", principal_type="n8n_workflow", audiences=["mgmt", "nope"], email="alice@example.test"
+    )
+    caller = ClaimMiddleware(
+        Recorder(), verifier_for_tests(), make_settings(env="dev", dev_identity=n8n), None, config=KH_CONFIG
+    )._dev_caller(None)
+    assert caller.audiences == {"mgmt"} and caller.email is None
+    person = ClaimMiddleware(
+        Recorder(), verifier_for_tests(), make_settings(env="dev", dev_identity=IDENT), None, config=KH_CONFIG
+    )._dev_caller(None)
+    assert person.audiences == {"all", "mgmt"}

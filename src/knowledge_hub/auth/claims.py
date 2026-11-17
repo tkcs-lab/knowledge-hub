@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -17,6 +18,7 @@ from knowledge_hub.auth.pf_claim_verify import (
     InMemoryReplayCache,
     Principal,
 )
+from knowledge_hub.config import KhConfig
 from knowledge_hub.metrics import METRICS
 from knowledge_hub.settings import Settings
 
@@ -29,6 +31,7 @@ __all__ = [
     "KhAuthError",
     "ReplayCache",
     "caller_from_scope",
+    "resolve_audiences",
 ]
 
 log = logging.getLogger("knowledge_hub.auth")
@@ -101,6 +104,17 @@ def _parse_call(body: bytes) -> Call | None:
     return Call(params["name"], arguments)
 
 
+def resolve_audiences(
+    config: KhConfig, principal_type: str, email: str | None, claim_audiences: Iterable[str]
+) -> frozenset[str]:
+    """The groups a caller holds: from the verified email for people, from the claim for workflows."""
+    if principal_type == "claude_client":
+        return config.audiences_for_email(email)
+    if principal_type == "n8n_workflow":
+        return frozenset(a for a in claim_audiences if a in config.groups)
+    return frozenset()
+
+
 def _build_caller(
     sub: str,
     principal_type: str,
@@ -108,6 +122,8 @@ def _build_caller(
     audiences: Any,
     token_id: str | None,
     call: Call | None,
+    *,
+    config: KhConfig,
 ) -> Caller:
     if principal_type == "human":
         raise _Refuse(401, "human_refused")
@@ -116,7 +132,13 @@ def _build_caller(
     if any(not isinstance(a, str) or not AUDIENCE_RE.fullmatch(a) for a in audiences):
         raise _Refuse(401, "bad_audience_name")
     kept_email = email.lower() if principal_type == "claude_client" and email else None
-    return Caller(sub, principal_type, kept_email, frozenset(audiences), token_id)
+    return Caller(
+        sub,
+        principal_type,
+        kept_email,
+        resolve_audiences(config, principal_type, kept_email, audiences),
+        token_id,
+    )
 
 
 class ClaimMiddleware:
@@ -126,6 +148,8 @@ class ClaimMiddleware:
         verifier: ClaimVerifier,
         settings: Settings,
         replay_cache: ReplayCache | None,
+        *,
+        config: KhConfig,
     ) -> None:
         if settings.env == "prod" and settings.dev_identity is not None:
             raise ValueError("KH_DEV_IDENTITY is set while KH_ENV=prod; refusing to start")
@@ -133,6 +157,7 @@ class ClaimMiddleware:
         self.verifier = verifier
         self.settings = settings
         self.replay_cache = replay_cache
+        self.config = config
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http" or scope["path"] not in MCP_PATHS:
@@ -215,6 +240,7 @@ class ClaimMiddleware:
             principal.audiences,
             principal.token_id,
             call,
+            config=self.config,
         )
         if self.replay_cache is not None:
             cache = self.replay_cache
@@ -228,7 +254,9 @@ class ClaimMiddleware:
     def _dev_caller(self, call: Call | None) -> Caller:
         ident = self.settings.dev_identity
         assert ident is not None
-        return _build_caller(ident.sub, ident.principal_type, ident.email, ident.audiences, None, call)
+        return _build_caller(
+            ident.sub, ident.principal_type, ident.email, ident.audiences, None, call, config=self.config
+        )
 
     @staticmethod
     def _replay(body: bytes, receive: Any) -> Any:

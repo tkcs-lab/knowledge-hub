@@ -11,6 +11,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- A caller's groups now come from the verified email and the `people`/`groups` of `kh.yaml`; the audiences in a `claude_client` claim are format-checked but no longer grant anything. An `n8n_workflow` claim keeps only the audiences that are configured groups.
 - `kh.yaml` is rewritten: `people` (Forgejo login to verified email), `groups` (members, approvers, optional repo) and `labels` replace `repos`, `audiences`, `entities` and the rest; unknown keys are refused. See `deploy/kh.example.yaml`.
 - `KH_MAX_RAW_BYTES` is now `KH_MAX_RECORD_BYTES`; the `KH_TIER_WEIGHTS` default is `T0:1.0,T3:0.4`; an embedder's `may_embed` takes the audience name.
 
