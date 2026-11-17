@@ -1,292 +1,175 @@
-"""Search ranking: tier, freshness, supersession, disputes and recall under row-level security."""
+"""search: tier weights, stale weight, RRF, labels, audience, cursor and the NORMATIVE rule."""
 
-import uuid
-from datetime import UTC, datetime
+from __future__ import annotations
 
+import json
+
+import psycopg
 import pytest
 
-from knowledge_hub.db.caller_tx import caller_tx
 from knowledge_hub.embed.base import FakeEmbedder
+from knowledge_hub.mcp.errors import CURSOR_FOREIGN, NORMATIVE
 from knowledge_hub.mcp.server import Deps
-from tests.support.principals import alice_all, carol_hr, wf_token
+from tests.support.pg import FRESH_DB
+from tests.support.principals import alice_all, bob_mgmt, multi
+from tests.support.seed import add_chunked_doc, add_chunked_record
 
-QUERY = "budget forecast review"
-EMBEDDER = FakeEmbedder()
-NORMATIVE_PREFIX = "cannot answer normatively from T2/T3 only"
-
-
-_APP_POOLS: dict[int, object] = {}
-
-
-def app_pool_of(indexer_pool):
-    """The app pool that goes with an indexer pool (registered by the ``deps`` fixture)."""
-    return _APP_POOLS[id(indexer_pool)]
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def app_settings(db_settings, tmp_path):
+def cursor_key(tmp_path):
+    path = tmp_path / "cursor.key"
+    path.write_bytes(b"k" * 32)
+    return path
+
+
+@pytest.fixture
+def app_settings(db_settings, cursor_key):
     from tests.support.mcp_client import HOST
 
-    key = tmp_path / "cursor.key"
-    key.write_bytes(b"k" * 32)
-    return db_settings.model_copy(update={"env": "test", "allowed_hosts": HOST, "cursor_key_file": key})
+    update = {"env": "test", "allowed_hosts": HOST, "cursor_key_file": cursor_key}
+    return db_settings.model_copy(update=update)
 
 
 @pytest.fixture
-def deps(app_settings, app_pool, indexer_pool):
-    from knowledge_hub.config import Config
-
-    _APP_POOLS[id(indexer_pool)] = app_pool
+def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings,
-        config=Config(),
-        app_pool=app_pool,
-        indexer_pool=indexer_pool,
-        embedder=EMBEDDER,
+        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        embedder=FakeEmbedder(),
     )
 
 
-async def _chunk(conn, owner_col: str, owner_id, text: str, *, embed: bool = True) -> None:
-    (vec,) = await EMBEDDER.embed([text])
-    literal = "[" + ",".join(repr(x) for x in vec) + "]" if embed else None
-    await conn.execute(
-        f"INSERT INTO kh.chunks (id, {owner_col}, ordinal, heading_path, text, content_sha, embedding,"
-        " embedding_model, owner_key, tier, required_audiences)"
-        " VALUES (%s, %s, 0, 'H', %s, %s, %s::vector, %s, '', 'T0', '{}')",
-        (uuid.uuid4(), owner_id, text, uuid.uuid4().hex, literal, EMBEDDER.model if embed else None),
-    )
+@pytest.fixture
+def db(seeded_db, fresh_db):
+    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
+        yield conn
+        conn.commit()
 
 
-async def add_doc(
-    pool,
-    text: str,
-    *,
-    tier: str = "T0",
-    status: str = "current",
-    stale: bool = False,
-    audiences: tuple[str, ...] = ("all",),
-    emails: list[str] | None = None,
-    domain: str = "product",
-    entities: tuple[str, ...] = (),
-    embed: bool = True,
-    agent_written: bool = False,
-) -> str:
-    """A document with one chunk, written as ``kh_indexer``; returns its citation id."""
-    doc = uuid.uuid4()
-    async with pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, status, stale,"
-            " owner, entities, commit_sha, content_sha, approved_by, approved_at, review_by,"
-            " stamp, required_audiences, allowed_emails, agent_written)"
-            " VALUES (%s, 'canonical-all', %s, %s, %s, %s, 'T', %s, %s, %s, 'team', %s, 'c1', %s,"
-            " '{x}', now(), '2027-01-01', 'reviewed', %s, %s, %s)",
-            (doc, f"p/{doc}.md", str(doc), tier, domain, text, status, stale, list(entities),
-             uuid.uuid4().hex, list(audiences), emails, agent_written),
-        )
-        await _chunk(conn, "document_id", doc, text, embed=embed)
-    return f"doc:{doc}"
-
-
-async def add_raw(
-    pool,
-    text: str,
-    *,
-    audiences: tuple[str, ...] = ("all",),
-    emails: list[str] | None = None,
-    ingested_at: datetime | None = None,
-    domain: str = "technical",
-) -> str:
-    raw = uuid.uuid4()
-    async with caller_tx(app_pool_of(pool), wf_token) as conn:
-        await conn.execute(
-            "INSERT INTO kh.raw_records (id, source_system, source_ref, source_url, participants, title,"
-            " excerpt, ingested_by_sub, ingested_by_type, ingested_at, domain)"
-            " VALUES (%s, 'meet', %s, %s, '{p@example.org}', 'R', %s, %s, 'n8n_workflow', %s, %s)",
-            (raw, str(raw), f"https://meet.example/{raw}", text, wf_token.sub,
-             ingested_at or datetime.now(UTC), domain),
-        )
-    async with pool.connection() as conn:
-        # The insert trigger assigned participant visibility; set the wanted one.
-        await conn.execute(
-            "UPDATE kh.raw_records SET required_audiences = %s, allowed_emails = %s WHERE id = %s",
-            (list(audiences), emails, raw),
-        )
-        await _chunk(conn, "raw_id", raw, text)
-    return f"raw:{raw}"
-
-
-async def add_derived(
-    pool,
-    text: str,
-    *,
-    audiences: tuple[str, ...] = ("all",),
-    emails: list[str] | None = None,
-    created_at: datetime | None = None,
-    domain: str = "technical",
-) -> str:
-    der, src = uuid.uuid4(), uuid.uuid4()
-    async with pool.connection() as conn:  # the source document carries the visibility (plan 3.7)
-        await conn.execute(
-            "INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, status,"
-            " commit_sha, content_sha, required_audiences, allowed_emails)"
-            " VALUES (%s, 'canonical-all', %s, %s, 'T0', 'product', 'S', 's', 'current', 'c1', %s, %s, %s)",
-            (src, f"s/{src}.md", str(src), uuid.uuid4().hex, list(audiences), emails),
-        )
-    async with caller_tx(app_pool_of(pool), wf_token) as conn:
-        await conn.execute(
-            "INSERT INTO kh.derived_records (id, kind, title, body, domain, created_by_sub, created_by_type,"
-            " created_at, required_audiences, allowed_emails)"
-            " VALUES (%s, 'summary', 'D', %s, %s, %s, 'n8n_workflow', %s, %s, %s)",
-            (der, text, domain, wf_token.sub, created_at or datetime.now(UTC), list(audiences), emails),
-        )
-        await conn.execute(
-            "INSERT INTO kh.derived_sources (derived_id, source_kind, source_id, src_required_audiences)"
-            " VALUES (%s, 'doc', %s, '{}')",
-            (der, str(src)),
-        )
-    async with pool.connection() as conn:
-        await _chunk(conn, "derived_id", der, text)
-    return f"derived:{der}"
-
-
-async def search(client, caller, query: str = QUERY, **args):
-    return await client.call(caller, "search", {"query": query, **args})
-
-
-def ids(res) -> list[str]:
-    return [h["citation_id"] for h in res.data["hits"]]
-
-
-async def test_t0_ranks_above_equally_relevant_t3(indexer_pool, mcp_client):
-    t3 = await add_raw(indexer_pool, QUERY)
-    t0 = await add_doc(indexer_pool, QUERY)
-    res = await search(mcp_client, alice_all, min_tier="T3")
+async def hits(mcp_client, caller, **args):
+    res = await mcp_client.call(caller, "search", args)
     assert not res.is_error, res.text
-    assert ids(res) == [t0, t3]
-    assert [h["tier"] for h in res.data["hits"]] == ["T0", "T3"]
-    assert [h["stamp"] for h in res.data["hits"]] == ["reviewed", ""]
+    return res.data["hits"]
 
 
-async def test_stale_ranks_below_current(indexer_pool, mcp_client):
-    stale = await add_doc(indexer_pool, QUERY, stale=True)
-    current = await add_doc(indexer_pool, QUERY)
-    res = await search(mcp_client, alice_all)
-    assert ids(res) == [current, stale]
-    assert res.data["hits"][1]["stale"] is True
+async def test_hit_fields_and_snippet(mcp_client, db):
+    doc = add_chunked_doc(db, "quokka " + "x" * 600, title="Quokka", labels=["ember"], blob_sha="bl1",
+                          path="q.md", repo="kb-all")
+    rec = add_chunked_record(db, "quokka record", title="QR", source_url="https://s/1")
+    db.commit()
+    got = {h["id"]: h for h in await hits(mcp_client, alice_all, query="quokka", min_tier="T3")}
+    d, r = got[f"doc:{doc}"], got[f"rec:{rec}"]
+    assert len(d["snippet"]) == 400 and d["snippet"].startswith("quokka")
+    assert (d["tier"], d["title"], d["audience"], d["labels"], d["repo"], d["path"], d["blob_sha"]) == (
+        "T0", "Quokka", "all", ["ember"], "kb-all", "q.md", "bl1")
+    assert (d["source_url"], d["occurred_at"], d["stale"]) == ("", "", False)
+    assert (r["tier"], r["title"], r["source_url"], r["repo"], r["path"], r["blob_sha"]) == (
+        "T3", "QR", "https://s/1", "", "", "")
+    assert r["occurred_at"].startswith("2026-01-02")
 
 
-async def test_superseded_ranks_below_current(indexer_pool, mcp_client):
-    old = await add_doc(indexer_pool, QUERY, status="superseded")
-    current = await add_doc(indexer_pool, QUERY)
-    res = await search(mcp_client, alice_all)
-    assert ids(res) == [current, old]
-    assert res.data["hits"][1]["status"] == "superseded"
+async def test_tier_weight_orders_t0_before_t3_and_follows_the_setting(mcp_client, db, app_settings):
+    doc = add_chunked_doc(db, "wombat habitat")
+    rec = add_chunked_record(db, "wombat habitat")
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="wombat habitat", min_tier="T3")
+    assert [h["id"] for h in out] == [f"doc:{doc}", f"rec:{rec}"]
+    assert out[0]["score"] > out[1]["score"]
+    # same fixtures, weights flipped
+    app_settings.tier_weights = "T0:0.1,T3:1.0"
+    out = await hits(mcp_client, alice_all, query="wombat habitat", min_tier="T3")
+    assert [h["id"] for h in out] == [f"rec:{rec}", f"doc:{doc}"]
 
 
-async def test_disputed_is_down_weighted(indexer_pool, mcp_client):
-    disputed = await add_doc(indexer_pool, QUERY, status="disputed")
-    current = await add_doc(indexer_pool, QUERY)
-    res = await search(mcp_client, alice_all)
-    assert ids(res) == [current, disputed]
+async def test_stale_weight_demotes_a_better_match(mcp_client, db):
+    stale = add_chunked_doc(db, "alpha beta", stale=True)
+    fresh = add_chunked_doc(db, "alpha beta gamma delta epsilon")
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="alpha beta")
+    assert [h["id"] for h in out] == [f"doc:{fresh}", f"doc:{stale}"]
+    assert [h["stale"] for h in out] == [False, True]
 
 
-async def test_only_disputed_t0_with_visible_t3_hits_is_not_normative(indexer_pool, mcp_client):
-    await add_doc(indexer_pool, QUERY, status="disputed")
-    await add_raw(indexer_pool, QUERY)
-    await add_derived(indexer_pool, QUERY)
-    for tier in ("T0", "T1"):
-        res = await search(mcp_client, alice_all, min_tier=tier)
-        assert res.is_error
-        assert res.text.endswith("cannot answer normatively from T2/T3 only: 2 lower-tier hits; "
-                                 'call search with min_tier="T3" to see them'), res.text
-    # Asking for every tier is not a normative question; the disputed hit is still shown.
-    wide = await search(mcp_client, alice_all, min_tier="T3")
-    assert not wide.is_error and len(wide.data["hits"]) == 3
-    # A current T0 hit makes the answer normative again.
-    await add_doc(indexer_pool, QUERY)
-    ok = await search(mcp_client, alice_all, min_tier="T0")
-    assert not ok.is_error and ok.data["lower_tier_hits"]["T3"] == 1 and ok.data["lower_tier_hits"]["T2"] == 1
+async def test_rrf_rewards_a_chunk_found_by_both_lists(mcp_client, db):
+    both = add_chunked_doc(db, "quokka")
+    vec_only = add_chunked_doc(db, "marsupial unrelated words", vector_of="quokkas")
+    fts_only = add_chunked_doc(db, "quokka grass", embed=False)
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="quokka")
+    ids = [h["id"] for h in out]
+    assert ids[0] == f"doc:{both}"
+    assert {f"doc:{vec_only}", f"doc:{fts_only}"} <= set(ids)
 
 
-async def test_no_hits_and_no_lower_tier_hits_is_an_empty_answer(indexer_pool, mcp_client):
-    res = await search(mcp_client, alice_all, "zzz nothing", min_tier="T0")
-    assert not res.is_error
-    assert res.data["hits"] == []
-    assert res.data["lower_tier_hits"]["T2"] == 0 and res.data["lower_tier_hits"]["T3"] == 0
+async def test_one_best_chunk_per_owner(mcp_client, db):
+    doc = add_chunked_doc(db, "numbat", chunks=3)
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="numbat")
+    assert [h["id"] for h in out] == [f"doc:{doc}"]
 
 
-async def test_narrow_audience_still_gets_its_best_chunks(indexer_pool, mcp_client, app_settings):
-    pool = app_settings.search_pool
-    for _ in range(pool + 10):  # hidden chunks that match more strongly than anything visible
-        await add_doc(indexer_pool, QUERY, audiences=("mgmt",))
-    visible = [
-        await add_doc(indexer_pool, f"review of the budget forecast number {i}", audiences=("all", "hr"))
-        for i in range(3)
-    ]
-    res = await search(mcp_client, carol_hr)
-    assert not res.is_error, res.text
-    assert set(ids(res)) == set(visible)
+async def test_labels_are_all_of(mcp_client, db):
+    one = add_chunked_doc(db, "dingo", labels=["ember"])
+    both = add_chunked_doc(db, "dingo", labels=["ember", "other"])
+    none = add_chunked_doc(db, "dingo")
+    db.commit()
+    async def ids(**args):
+        return {h["id"] for h in await hits(mcp_client, alice_all, query="dingo", **args)}
+
+    assert await ids() == {f"doc:{one}", f"doc:{both}", f"doc:{none}"}
+    assert await ids(labels=["ember"]) == {f"doc:{one}", f"doc:{both}"}
+    assert await ids(labels=["ember", "other"]) == {f"doc:{both}"}
+    assert await ids(labels=["nope"]) == set()
 
 
-async def test_filters_and_hit_fields(indexer_pool, mcp_client):
-    a = await add_doc(indexer_pool, QUERY, domain="product", entities=("prd:a",))
-    await add_doc(indexer_pool, QUERY, domain="technical", entities=("prd:b",))
-    res = await search(mcp_client, alice_all, domains=["product"], entities=["prd:a", "prd:z"])
-    assert ids(res) == [a]
-    hit = res.data["hits"][0]
-    assert hit["text"] == QUERY and hit["owner"] == "team" and hit["approved_by"] == ["x"]
-    assert hit["review_by"] == "2027-01-01" and hit["entities"] == ["prd:a"] and hit["status"] == "current"
-    assert hit["source_link"] == ""  # no forgejo_web_url configured
+async def test_audience_filter(mcp_client, db):
+    a = add_chunked_doc(db, "kookaburra", audience="all")
+    m = add_chunked_doc(db, "kookaburra", audience="mgmt", repo="kb-mgmt")
+    db.commit()
+    both = {h["id"] for h in await hits(mcp_client, multi, query="kookaburra")}
+    assert both == {f"doc:{a}", f"doc:{m}"}
+    only = await hits(mcp_client, multi, query="kookaburra", audience="mgmt")
+    assert [h["id"] for h in only] == [f"doc:{m}"]
+    assert await hits(mcp_client, alice_all, query="kookaburra", audience="mgmt") == []
 
 
-async def test_pagination_walks_the_list_once(indexer_pool, mcp_client):
-    made = {await add_doc(indexer_pool, f"{QUERY} variant {i}") for i in range(5)}
-    seen: list[str] = []
-    cursor = ""
-    for _ in range(5):
-        res = await search(mcp_client, alice_all, limit=2, cursor=cursor)
-        assert not res.is_error, res.text
-        seen += ids(res)
-        cursor = res.data["next_cursor"]
-        if not cursor:
-            break
-    assert len(seen) == len(set(seen)) == 5 and set(seen) == made
+async def test_cursor_pages_and_is_bound_to_caller_and_query(mcp_client, db):
+    docs = [add_chunked_doc(db, f"echidna {n}") for n in range(3)]
+    db.commit()
+    first = await mcp_client.call(alice_all, "search", {"query": "echidna", "limit": 1})
+    assert not first.is_error and first.data["next_cursor"]
+    cur = first.data["next_cursor"]
+    second = await mcp_client.call(alice_all, "search", {"query": "echidna", "limit": 1, "cursor": cur})
+    assert not second.is_error
+    assert second.data["hits"][0]["id"] != first.data["hits"][0]["id"]
+    assert {h["id"] for r in (first, second) for h in r.data["hits"]} <= {f"doc:{d}" for d in docs}
+    other_caller = await mcp_client.call(bob_mgmt, "search", {"query": "echidna", "limit": 1, "cursor": cur})
+    assert other_caller.is_error and other_caller.text.endswith(CURSOR_FOREIGN)
+    other_query = await mcp_client.call(alice_all, "search", {"query": "wallaby", "limit": 1, "cursor": cur})
+    assert other_query.is_error and other_query.text.endswith(CURSOR_FOREIGN)
+    other_filter = await mcp_client.call(
+        alice_all, "search", {"query": "echidna", "limit": 1, "cursor": cur, "labels": ["ember"]})
+    assert other_filter.is_error and other_filter.text.endswith(CURSOR_FOREIGN)
 
 
-async def test_limit_is_bounded(indexer_pool, mcp_client):
-    for i in range(3):
-        await add_doc(indexer_pool, f"{QUERY} {i}")
-    assert len((await search(mcp_client, alice_all, limit=0)).data["hits"]) == 1
-    assert len((await search(mcp_client, alice_all, limit=500)).data["hits"]) == 3
+async def test_normative_when_only_t3_matches(mcp_client, db):
+    rec = add_chunked_record(db, "platypus ledger")
+    db.commit()
+    res = await mcp_client.call(alice_all, "search", {"query": "platypus"})
+    assert res.is_error and res.text.endswith(NORMATIVE)
+    out = await hits(mcp_client, alice_all, query="platypus", min_tier="T3")
+    assert [h["id"] for h in out] == [f"rec:{rec}"]
+    doc = add_chunked_doc(db, "platypus handbook")
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="platypus")  # T0 hit exists: T3 stays out
+    assert [h["id"] for h in out] == [f"doc:{doc}"]
 
 
-async def test_older_embedding_model_is_not_compared(indexer_pool, mcp_client, app_pool):
-    other = await add_doc(indexer_pool, "unrelated words entirely")
-    async with indexer_pool.connection() as conn:
-        await conn.execute("UPDATE kh.chunks SET embedding_model = 'other'")
-    res = await search(mcp_client, alice_all, "something else completely")
-    assert other not in ids(res)  # vector list skips it; full text does not match
+def test_tier_weights_setting_is_validated():
+    from knowledge_hub.settings import Settings
 
-
-async def test_agent_note_ranks_below_an_equal_human_t1_note(indexer_pool, mcp_client):
-    agent = await add_doc(indexer_pool, QUERY, tier="T1", agent_written=True)
-    human = await add_doc(indexer_pool, QUERY, tier="T1")
-    res = await search(mcp_client, alice_all)
-    assert not res.is_error, res.text
-    assert ids(res) == [human, agent]
-    assert [h["agent_written"] for h in res.data["hits"]] == [False, True]
-
-
-async def test_only_agent_notes_raise_normative_unless_min_tier_is_t2(indexer_pool, mcp_client):
-    await add_doc(indexer_pool, QUERY, tier="T1", agent_written=True)
-    res = await search(mcp_client, alice_all)  # the default min_tier is T1
-    assert res.is_error and res.text.endswith(
-        "cannot answer normatively from T2/T3 only: 1 lower-tier hits; "
-        'call search with min_tier="T3" to see them'
-    ), res.text
-    ok = await search(mcp_client, alice_all, min_tier="T2")
-    assert not ok.is_error and [h["agent_written"] for h in ok.data["hits"]] == [True]
-    # A human note of the same topic makes the answer normative again.
-    await add_doc(indexer_pool, QUERY, tier="T1")
-    both = await search(mcp_client, alice_all)
-    assert not both.is_error and [h["agent_written"] for h in both.data["hits"]] == [False, True]
+    for bad in ("T0:1.0", "T0:1.0,T1:0.5,T3:0.4", "T0:1.0,T3:0", "T0:1.0,T3:-1", "T0:x,T3:1"):
+        with pytest.raises(ValueError):
+            Settings(tier_weights=bad)
+    assert json.dumps(Settings(tier_weights="T0:2,T3:1").tier_weights)

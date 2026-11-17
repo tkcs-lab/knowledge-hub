@@ -1,78 +1,20 @@
-"""``kh daily`` (plan 3.12): stale flags, entity cache from the configured Grist tables, expired claim ids."""
+"""``kh daily``: recompute ``stale`` on documents and purge expired replay-cache rows."""
 
 from __future__ import annotations
 
-import json
-from datetime import date
 from typing import Any
 
-from psycopg.types.json import Jsonb
 
-from knowledge_hub.visibility import clause
+async def run_daily(indexer_pool: Any) -> tuple[int, int]:
+    """Set ``stale = (review_by < current_date)`` and delete expired ``claim_jti`` rows.
 
-
-def _text(value: Any) -> str | None:
-    return None if value is None or value == "" else str(value)
-
-
-async def run_daily(indexer_pool: Any, grist: Any, config: Any, today: date) -> dict[str, int]:
-    """Idempotent. Grist is read first, so a Grist failure changes nothing."""
-    audiences: dict[str, list[str]] = {}
-    for kind, spec in config.entities.items():
-        auds = list(spec.audiences)
-        if not auds:  # never an open row: refuse instead of storing empty audiences
-            raise ValueError(f"config entities.{kind} has no audience; refusing to cache open entities")
-        audiences[kind] = [clause(auds)]
-
-    rows: dict[str, tuple] = {}
-    skipped = 0
-    for kind, spec in config.entities.items():
-        for fields in await grist.fetch_table(spec.table):
-            key = _text(fields.get("key"))
-            if key is None or key.partition(":")[0] != kind or not key.partition(":")[2]:
-                skipped += 1
-                continue
-            attrs = {"links": fields.get("links")} if fields.get("links") not in (None, "") else {}
-            rows[key] = (
-                key, kind, _text(fields.get("name")), _text(fields.get("owner_team")),
-                _text(fields.get("status")), Jsonb(json.loads(json.dumps(attrs))), audiences[kind],
-            )
-
+    Returns ``(documents whose stale flag changed, claim rows purged)``. The chunk rows follow the
+    document through the ``owner_propagate_to_chunks`` trigger.
+    """
     async with indexer_pool.connection() as conn, conn.transaction():
-        cur = await conn.execute(
-            "UPDATE kh.documents SET stale = (review_by < %s) "
-            "WHERE review_by IS NOT NULL AND stale IS DISTINCT FROM (review_by < %s)",
-            (today, today),
+        flipped = await conn.execute(
+            "UPDATE kh.documents SET stale = (review_by < current_date)"
+            " WHERE stale IS DISTINCT FROM (review_by < current_date)"
         )
-        stale_changed = cur.rowcount
-        for row in rows.values():
-            await conn.execute(
-                """
-                INSERT INTO kh.entities_cache
-                    (id, kind, name, owner_team, status, attrs, required_audiences, allowed_emails)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL)
-                ON CONFLICT (id) DO UPDATE SET
-                    kind = EXCLUDED.kind, name = EXCLUDED.name, owner_team = EXCLUDED.owner_team,
-                    status = EXCLUDED.status, attrs = EXCLUDED.attrs,
-                    required_audiences = EXCLUDED.required_audiences, allowed_emails = NULL,
-                    synced_at = now()
-                 WHERE (kh.entities_cache.kind, kh.entities_cache.name, kh.entities_cache.owner_team,
-                        kh.entities_cache.status, kh.entities_cache.attrs,
-                        kh.entities_cache.required_audiences, kh.entities_cache.allowed_emails)
-                       IS DISTINCT FROM
-                       (EXCLUDED.kind, EXCLUDED.name, EXCLUDED.owner_team, EXCLUDED.status,
-                        EXCLUDED.attrs, EXCLUDED.required_audiences, EXCLUDED.allowed_emails)
-                """,
-                row,
-            )
-        cur = await conn.execute("DELETE FROM kh.entities_cache WHERE NOT (id = ANY(%s))", (list(rows),))
-        removed = cur.rowcount
-        cur = await conn.execute("DELETE FROM kh.claim_jti WHERE expires_at < now()")
-        purged = cur.rowcount
-    return {
-        "stale_changed": stale_changed,
-        "entities": len(rows),
-        "entities_removed": removed,
-        "entities_skipped": skipped,
-        "jti_purged": purged,
-    }
+        purged = await conn.execute("DELETE FROM kh.claim_jti WHERE expires_at < now()")
+        return flipped.rowcount, purged.rowcount

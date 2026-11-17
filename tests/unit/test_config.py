@@ -1,157 +1,184 @@
-import hashlib
-import json
-
 import pytest
 
 from knowledge_hub.config import (
-    Config,
+    AUDIENCE_RE,
+    GROUP_RE,
+    LABEL_RE,
+    LOGIN_RE,
     ConfigError,
-    EntityKind,
+    KhConfig,
     load_config,
-    owner_teams_for,
     parse_config,
 )
-from knowledge_hub.indexer.rebuild import config_hash
 
 pytestmark = pytest.mark.unit
 
-
-def test_default_config():
-    c = load_config()
-    assert c.audiences == ["all", "mgmt", "hr", "contracts"]
-    assert c.domains == ["portfolio", "product", "technical"]
-    assert c.repos["notes-all"].tier == "T1"
-    assert c.repos["canonical-hr"].audience == "hr"
-    assert c.ingest_principal_types == ["n8n_workflow"]
-    assert c.entities["cus"].audiences == ["contracts"] and c.entities["prd"].table == "Products"
-    assert c.restricted_audiences_imply_all is False
+PEOPLE = {"alice": "alice@example.com", "bob": "Bob@Example.com"}
+GROUPS = {
+    "all": {"members": ["alice", "bob"], "approvers": ["alice"]},
+    "mgmt": {"repo": "mgmt-docs", "members": ["alice"], "approvers": ["alice"]},
+}
 
 
-def test_unknown_audience():
-    with pytest.raises(ConfigError, match="^config:"):
-        parse_config({"raw_audience_map": {"series:1": ["nobody"]}})
+def cfg(**over):
+    data = {"people": PEOPLE, "groups": GROUPS}
+    data.update(over)
+    return parse_config(data)
 
 
-def test_repo_audience_not_listed():
-    with pytest.raises(ConfigError, match="^config:"):
-        parse_config({"audiences": ["all"], "repos": {"r": {"tier": "T0", "audience": "hr"}}})
+def refused(data, text):
+    with pytest.raises(ConfigError) as exc:
+        parse_config(data)
+    assert str(exc.value).startswith("config:")
+    assert text in str(exc.value)
 
 
-def test_two_t0_repos_one_audience():
-    repos = {"a": {"tier": "T0", "audience": "all"}, "b": {"tier": "T0", "audience": "all"}}
-    with pytest.raises(ConfigError, match="^config:.*more than one T0"):
-        parse_config({"repos": repos})
+def test_default_config_is_valid():
+    c = KhConfig()
+    assert (c.org, c.bot_login, c.indexer_login) == ("kh", "kh-bot", "kh-indexer")
+    assert c.forgejo_web_url is None and c.hub_url is None
+    assert c.people == {} and c.groups == {} and c.labels == {}
+    assert load_config() == c and load_config(None) == c
+    assert parse_config(None) == c
+    assert c.bots == frozenset({"kh-bot", "kh-indexer"})
+    assert GROUP_RE.pattern == AUDIENCE_RE.pattern
 
 
-def test_ingest_principal_service_refused():
-    with pytest.raises(ConfigError, match="^config:"):
-        parse_config({"ingest_principal_types": ["service"]})
+def test_regexes():
+    assert LABEL_RE.fullmatch("product:ember") and not LABEL_RE.fullmatch("Product")
+    assert LOGIN_RE.fullmatch("a.b-c_d") and not LOGIN_RE.fullmatch("-a") and not LOGIN_RE.fullmatch("a" * 40)
 
 
-def test_load_from_file(tmp_path):
-    p = tmp_path / "kh.yaml"
-    p.write_text("domains: [product]\n")
-    assert load_config(p).domains == ["product"]
+def test_valid_config_and_repo_default():
+    c = cfg(labels={"product:ember": "Ember"})
+    assert c.repo_for_group("all") == "kb-all" and c.repo_for_group("mgmt") == "mgmt-docs"
+    assert c.group_for_repo("kb-all") == "all" and c.group_for_repo("mgmt-docs") == "mgmt"
+    assert c.group_for_repo("nope") is None
+    assert c.people["bob"] == "bob@example.com"
 
 
-def test_entities_legacy_list_form():
-    c = parse_config({"entities": {"prd": ["all"]}})
-    assert c.entities == {"prd": EntityKind(table="Products", audiences=["all"], label="product")}
+def test_unknown_key_refused():
+    refused({"nope": 1}, "nope")
+    refused({"groups": {"all": {"approvers": [], "members": [], "x": 1}}}, "x")
 
 
-def test_entities_custom_kind():
-    fam = {"table": "Family", "audiences": ["all"], "label": "family member"}
-    c = parse_config({"entities": {"fam": fam}})
-    assert list(c.entities) == ["fam"]
-    spec = c.entities["fam"]
-    assert (spec.table, spec.audiences, spec.label) == ("Family", ["all"], "family member")
+@pytest.mark.parametrize("name", ["Bad", "-a", "a b", "x" * 64, "Owners", "owners"])
+def test_group_name_rules(name):
+    refused({"groups": {name: {"members": [], "approvers": ["a"]}}}, "group")
 
 
-_OK = {"table": "Family", "audiences": ["all"]}
-
-
-@pytest.mark.parametrize(
-    ("entities", "fragment"),
-    [
-        ({"fam": ["all"]}, "the list form is only for"),
-        ({}, "at least one kind"),
-        ({f"k{i}": {"table": f"T{i}", "audiences": ["all"]} for i in range(33)}, "more than 32 kinds"),
-        ({"Fam": _OK}, "must be 1-16 lowercase"),
-        ({"doc": _OK}, "is reserved"),
-        ({"fam": {"table": "Fam/../x", "audiences": ["all"]}}, "must be letters, digits"),
-        ({"a": _OK, "b": _OK}, "use the same table"),
-        ({"fam": {**_OK, "label": "a\nb"}}, "label must be 1-40"),
-        ({"fam": {"table": "Family", "audiences": ["nobody"]}}, "unknown audience"),
-    ],
-)
-def test_entities_rejected(entities, fragment):
-    with pytest.raises(ConfigError, match=r"^config: .*" + fragment):
-        parse_config({"entities": entities})
-
-
-def test_config_hash_unchanged_for_default_entities():
-    payload = {
-        "raw_audience_map": {},
-        "repos": {name: r.audience for name, r in sorted(Config().repos.items())},
-        "entities": {"cmp": ["all"], "cus": ["contracts"], "prd": ["all"], "ver": ["all"]},
+def test_approve_collision():
+    groups = {
+        "all": {"members": ["alice"], "approvers": ["alice"]},
+        "all-approve": {"members": ["alice"], "approvers": ["alice"]},
     }
-    old = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    lists = {"prd": ["all"], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]}
-    legacy = parse_config({"entities": lists})
-    assert old == config_hash(Config()) == config_hash(legacy)
+    refused({"people": PEOPLE, "groups": groups}, "all-approve")
 
 
-def test_cus_reference_audiences_default_and_legacy_list():
-    assert Config().entities["cus"].reference_audiences == ["contracts", "mgmt"]
-    assert Config().entities["prd"].reference_audiences is None
-    legacy = parse_config({"entities": {"prd": ["all"], "cus": ["contracts"]}})
-    assert legacy.entities["cus"].reference_audiences == ["contracts", "mgmt"]
-    assert legacy.entities["prd"].reference_audiences is None
+def test_logins_valid_and_unique_casefolded():
+    refused({"people": {"-bad": "a@b.c"}}, "login")
+    refused({"people": {"Alice": "a@x.io", "alice": "b@x.io"}}, "twice")
+    refused(
+        {"people": PEOPLE, "groups": {"g": {"members": ["alice", "ALICE"], "approvers": ["alice"]}}},
+        "twice",
+    )
+    group = {"members": ["alice"], "approvers": ["ALICE"]}
+    c = parse_config({"people": {"Alice": "a@x.io"}, "groups": {"g": group}})
+    assert c.audiences_for_email("a@x.io") == {"g"}
 
 
-def test_unknown_reference_audience_rejected():
-    entities = {"x": {"table": "X", "audiences": ["all"], "reference_audiences": ["nope"]}}
-    with pytest.raises(ConfigError, match="entities x has unknown reference audience 'nope'"):
-        parse_config({"entities": entities})
+def test_approvers_non_empty_and_subset():
+    refused({"people": PEOPLE, "groups": {"g": {"members": ["alice"], "approvers": []}}}, "approver")
+    refused(
+        {"people": PEOPLE, "groups": {"g": {"members": ["alice"], "approvers": ["bob"]}}},
+        "config: group g approver bob is not a member",
+    )
 
 
-def test_owner_teams_for_defaults_and_override():
-    c = Config()
-    assert owner_teams_for(c, "all") == ["owners-portfolio", "owners-product", "owners-technical"]
-    assert owner_teams_for(c, "hr") == ["owners-hr"]
-    c = parse_config({"governance": {"owner_teams": {"hr": ["people-team"]}}})
-    assert owner_teams_for(c, "hr") == ["people-team"]
-    assert owner_teams_for(c, "mgmt") == ["owners-mgmt"]
+def test_repo_names():
+    group = {"repo": "Bad Repo", "members": [], "approvers": ["alice"]}
+    refused({"people": PEOPLE, "groups": {"g": group}}, "repo")
+    groups = {
+        "a": {"repo": "same", "members": ["alice"], "approvers": ["alice"]},
+        "b": {"repo": "same", "members": ["alice"], "approvers": ["alice"]},
+    }
+    refused({"people": PEOPLE, "groups": groups}, "same")
+    groups = {
+        "a": {"members": ["alice"], "approvers": ["alice"]},
+        "b": {"repo": "kb-a", "members": ["alice"], "approvers": ["alice"]},
+    }
+    refused({"people": PEOPLE, "groups": groups}, "kb-a")
 
 
-def test_governance_validation():
-    with pytest.raises(ConfigError, match="governance owner_teams has unknown audience 'zzz'"):
-        parse_config({"governance": {"owner_teams": {"zzz": ["a"]}}})
-    with pytest.raises(ConfigError, match="not a valid team name"):
-        parse_config({"governance": {"owner_teams": {"hr": ["Bad Team"]}}})
+def test_bots():
+    refused({"bot_login": "same", "indexer_login": "same"}, "differ")
+    refused({"bot_login": "-x"}, "login")
+    refused({"people": {"kh-bot": "b@x.io"}}, "bot")
+    refused({"people": {"KH-Indexer": "b@x.io"}}, "bot")
+    group = {"members": ["bot"], "approvers": ["bot"]}
+    refused({"people": PEOPLE, "bot_login": "bot", "groups": {"g": group}}, "bot")
+    assert parse_config({"bot_login": "b1", "indexer_login": "i1"}).bots == frozenset({"b1", "i1"})
 
 
-def test_self_merge_defaults_and_validation():
-    c = Config()
-    assert c.self_merge_teams == [] and c.bot_logins == ["kh-hub-bot"]
-    with pytest.raises(ConfigError, match="self_merge_teams team 'Bad Team' is not a valid team name"):
-        parse_config({"self_merge_teams": ["Bad Team"]})
-    with pytest.raises(ConfigError, match="bot_logins login '-x' is not a valid login"):
-        parse_config({"bot_logins": ["-x"]})
-    assert parse_config({"self_merge_teams": ["a", "b", "a"]}).self_merge_teams == ["a", "b"]
+def test_labels():
+    assert cfg(labels={"a": "x" * 200}).labels["a"] == "x" * 200
+    refused({"labels": {"Bad": "x"}}, "label")
+    refused({"labels": {"a": "x" * 201}}, "description")
+    refused({"labels": {f"l{i}": "" for i in range(501)}}, "500")
+    assert len(parse_config({"labels": {f"l{i}": "" for i in range(500)}}).labels) == 500
 
 
-def test_bots_property():
-    assert Config().bots == ("kh-hub-bot",)
-    assert parse_config({"bot_logins": ["x"]}).bots == ("kh-hub-bot", "x")
-    assert parse_config({"bot_logins": ["kh-hub-bot", "x"]}).bots == ("kh-hub-bot", "x")
+def test_forgejo_web_url():
+    assert parse_config({"forgejo_web_url": "https://f.example.com"}).forgejo_web_url
+    refused({"forgejo_web_url": "http://f.example.com"}, "forgejo_web_url")
 
 
-def test_config_hash_ignores_self_merge_teams():
-    assert config_hash(Config(self_merge_teams=["a"])) == config_hash(Config())
+def test_hub_url():
+    assert parse_config({"hub_url": "http://knowledge-hub:8080"}).hub_url
+    assert parse_config({"hub_url": "https://hub.example.com/"}).hub_url
+    refused({"hub_url": "ftp://hub"}, "hub_url")
+    refused({"hub_url": "http://hub/path"}, "hub_url")
+    refused({"hub_url": "hub:8080"}, "hub_url")
 
 
-def test_audience_names_are_validated():
-    with pytest.raises(ConfigError) as e:
-        parse_config({"audiences": ["all", "mgmt", "hr", "contracts", "a|b"]})
-    assert str(e.value) == "config: audience 'a|b' is not a valid audience name (audiences)"
+def test_people_emails():
+    refused({"people": {"a": "no-at"}}, "email")
+    refused({"people": {"a": "x@y@z"}}, "email")
+    refused({"people": {"a": "x" * 250 + "@y.io"}}, "email")
+    refused({"people": {"a": "X@Y.io", "b": "x@y.IO"}}, "config: email x@y.io belongs to two people")
+    assert len(parse_config({"people": {"a": "x" * 249 + "@y.io"}}).people["a"]) == 254
+
+
+def test_group_member_must_be_in_people():
+    refused(
+        {"people": PEOPLE, "groups": {"g": {"members": ["zed"], "approvers": ["zed"]}}},
+        "config: group g member zed is not in people",
+    )
+
+
+def test_audiences_for_email():
+    c = cfg()
+    assert c.audiences_for_email("alice@example.com") == {"all", "mgmt"}
+    assert c.audiences_for_email("bob@example.com") == {"all"}
+    assert c.audiences_for_email("BOB@EXAMPLE.COM") == {"all"}
+    assert c.audiences_for_email("stranger@example.com") == frozenset()
+    assert c.audiences_for_email(None) == frozenset()
+    assert c.audiences_for_email("") == frozenset()
+    solo = parse_config({"people": {"dave": "dave@example.com"}})
+    assert solo.audiences_for_email("dave@example.com") == frozenset()
+
+
+def test_load_config_errors(tmp_path):
+    p = tmp_path / "kh.yaml"
+    p.write_text("- a\n- b\n")
+    with pytest.raises(ConfigError, match="^config: top level"):
+        load_config(p)
+    p.write_text("a: [\n")
+    with pytest.raises(ConfigError, match="^config: invalid YAML"):
+        load_config(p)
+    with pytest.raises(ConfigError, match="^config: cannot read"):
+        load_config(tmp_path / "missing.yaml")
+    p.write_text("")
+    assert load_config(p) == KhConfig()
+    p.write_text("org: x\npeople: {a: a@x.io}\n")
+    assert load_config(p).org == "x"

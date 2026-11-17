@@ -1,251 +1,161 @@
+"""Unit tests of the pure sync plan (plan section 3.6)."""
+
 from __future__ import annotations
 
-from knowledge_hub.config import parse_config
-from knowledge_hub.indexer.sync_plan import build_sync_plan
-from tests.support.forgejo_fake import FakeCommit, FakeRepo, ForgejoFake, approval, pr
+import pytest
 
-CFG = parse_config(
-    {
-        "repos": {
-            "canonical-all": {"tier": "T0", "audience": "all", "trust_anchor": "a0"},
-            "canonical-mgmt": {"tier": "T0", "audience": "mgmt", "trust_anchor": "a0"},
-            "notes-all": {"tier": "T1", "audience": "all"},
-        }
-    }
+from knowledge_hub.config import GroupConfig, KhConfig
+from knowledge_hub.indexer.sync_plan import MAX_FILE_BYTES, build_sync_plan, changed_paths
+from tests.support.forgejo_fake import blob_sha, md
+
+CFG = KhConfig(
+    people={"alice": "alice@example.test"},
+    groups={"all": GroupConfig(members=["alice"], approvers=["alice"])},
 )
+REPO = "kb-all"
+HEAD = "h1"
 
 
-def doc(id_: str, extra: str = "", title: str = "T") -> str:
-    head = f"---\nid: {id_}\ntitle: {title}\ndomain: product\nreview_by: 2027-01-01\n"
-    return f"{head}{extra}---\nBody of {id_}.\n"
+def entry(path: str, text: str = "x", size: int | None = None, type_: str = "blob") -> dict:
+    return {"path": path, "sha": blob_sha(text), "type": type_, "size": len(text) if size is None else size}
 
 
-def merged(
-    sha: str, parent: str, files: dict, number: int, approve: bool = True, date="2026-11-02T10:00:00Z"
-):
-    """A merge commit plus its PR and reviews."""
-    head = f"h{number}"
-    commit = FakeCommit(sha, [parent, head], files, date)
-    return commit, pr(number, sha, head), ([approval(head, "bob", date)] if approve else [])
+def plan(files: dict[str, str], stored=(), labels=("ember",), sizes=None):
+    tree = [entry(p, t, (sizes or {}).get(p)) for p, t in files.items()]
+    texts = {p: files[p] for p in changed_paths(tree, list(stored))}
+    return build_sync_plan(CFG, REPO, HEAD, tree, list(stored), texts, labels)
 
 
-def repo_of(commits_prs: list, root_files: dict | None = None) -> FakeRepo:
-    commits = [FakeCommit("a0", [], root_files or {})]
-    prs, reviews = [], {}
-    for c, p, r in commits_prs:
-        commits.append(c)
-        prs.append(p)
-        reviews[p["number"]] = r
-    return FakeRepo(commits, prs, reviews)
+def test_accepted_file_becomes_upsert():
+    p = plan({"a.md": md("a", "Title", labels=["ember"])})
+    [u] = p.upserts
+    assert (u.repo, u.path, u.doc_key, u.audience, u.title, u.labels) == (
+        REPO, "a.md", "a", "all", "Title", ["ember"],
+    )  # fmt: skip
+    assert u.commit_sha == HEAD and u.blob_sha == blob_sha(md("a", "Title", labels=["ember"]))
+    assert p.deletes == [] and p.alerts == []
 
 
-async def plan(repos, repo="canonical-all", state=None, existing=None):
-    return await build_sync_plan(ForgejoFake(repos), CFG, repo, state, existing or {})
+@pytest.mark.parametrize(
+    "path",
+    ["a.txt", "README.md", ".hidden.md", ".git/x.md", "docs/.draft/a.md", "docs/.a.md", "a.md.bak"],
+)
+def test_excluded_paths_are_ignored_without_alert(path):
+    p = plan({path: md("a")})
+    assert p.upserts == [] and p.alerts == []
 
 
-def up(p, key):
-    return next(u for u in p.upserts if u.doc_key == key)
+def test_nested_readme_is_included():
+    assert [u.path for u in plan({"docs/README.md": md("r")}).upserts] == ["docs/README.md"]
 
 
-async def test_approval_fields_and_visibility():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
-    p = await plan({"canonical-all": r})
-    u = up(p, "a")
-    assert (u.status, u.approved_by, u.approved_at) == ("current", ["bob"], "2026-11-02T10:00:00Z")
-    assert u.stamp == "reviewed"
-    assert [v.stamp for v in p.versions] == ["reviewed"]
-    assert list(p.verdicts) == ["m1"] and p.verdicts["m1"].stamp == "reviewed"
-    assert (u.merge_pr, u.pr_url, u.commit_sha) == (1, "https://forgejo.test/kh/repo/pulls/1", "m1")
-    assert (u.tier, u.required_audiences, u.allowed_emails) == ("T0", ["all"], None)
-    assert [v.commit_sha for v in p.versions] == ["m1"]
-    assert p.repo_state == {
-        "repo": "canonical-all",
-        "trusted": True,
-        "untrusted_reason": None,
-        "last_indexed_sha": "m1",
-        "trust_anchor_sha": "a0",
-    }
+def test_trees_are_ignored():
+    tree = [entry("docs", type_="tree"), entry("docs/a.md", md("a"))]
+    p = build_sync_plan(CFG, REPO, HEAD, tree, [], {"docs/a.md": md("a")}, [])
+    assert [u.path for u in p.upserts] == ["docs/a.md"]
 
 
-async def test_file_without_approved_pr_is_disputed_with_alert():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1, approve=False)])
-    p = await plan({"canonical-all": r})
-    u = up(p, "a")
-    assert u.status == "disputed" and u.approved_by == [] and u.merge_pr == 1
-    assert any(
-        a.path == "a.md" and a.message == "file a.md on canonical-all/main has no approved merge PR"
-        for a in p.alerts
+def test_size_limit_uses_the_tree_size():
+    p = plan(
+        {"big.md": md("big"), "ok.md": md("ok")},
+        sizes={"big.md": MAX_FILE_BYTES + 1, "ok.md": MAX_FILE_BYTES},
     )
+    assert [u.path for u in p.upserts] == ["ok.md"]
+    assert p.alerts == []
 
 
-async def test_frontmatter_tier_is_removed_with_alert():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("a", "tier: T0\n")}, 1)])
-    existing = {"a": {"path": "a.md", "commit_sha": "a0"}}
-    p = await plan({"canonical-all": r}, existing=existing)
-    assert p.upserts == [] and p.removals == ["a"] and p.deletions == []
-    assert [a.message for a in p.alerts] == [
-        "frontmatter must not set tier; the server decides tier and audience"
+def test_oversize_stored_file_is_deleted():
+    text = md("big")
+    p = plan(
+        {"big.md": text}, stored=[("big.md", blob_sha(text), "big")], sizes={"big.md": MAX_FILE_BYTES + 1}
+    )
+    assert p.deletes == ["big.md"] and p.upserts == []
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ("no frontmatter", "missing frontmatter"),
+        ("---\nid: a\ntitle: T\n---\n", "missing review_by"),
+        (md("Bad Id"), "invalid id"),
+        (md("a", review_by="2027-13-40"), "invalid review_by"),
+    ],
+)
+def test_parse_errors_are_rejected_with_prefix(text, reason):
+    p = plan({"a.md": text})
+    assert p.upserts == []
+    assert p.alerts == [("a.md", f"file rejected: {reason}")]
+
+
+def test_unknown_label_rejects_the_file():
+    p = plan({"a.md": md("a", labels=["ember", "nope"])})
+    assert p.upserts == []
+    assert p.alerts == [("a.md", "file rejected: unknown label nope")]
+
+
+def test_duplicate_id_rejects_every_holder():
+    p = plan({"a.md": md("same", "A"), "b.md": md("same", "B"), "c.md": md("other")})
+    assert [u.path for u in p.upserts] == ["c.md"]
+    assert sorted(p.alerts) == [
+        ("a.md", "file rejected: duplicate id same"),
+        ("b.md", "file rejected: duplicate id same"),
     ]
 
 
-async def test_rename_keeps_doc_key():
-    r = repo_of(
-        [
-            merged("m1", "a0", {"old.md": doc("a")}, 1),
-            merged("m2", "m1", {"old.md": None, "new.md": doc("a")}, 2),
-        ]
-    )
-    existing = {"a": {"path": "old.md", "commit_sha": "m1"}}
-    p = await plan({"canonical-all": r}, state={"last_indexed_sha": "m1"}, existing=existing)
-    assert [(x.doc_key, x.old_path, x.new_path) for x in p.renames] == [("a", "old.md", "new.md")]
-    assert up(p, "a").path == "new.md" and p.deletions == []
-
-
-async def test_missing_file_is_deleted():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
-    existing = {"a": {"path": "a.md"}, "gone": {"path": "gone.md"}}
-    p = await plan({"canonical-all": r}, existing=existing)
-    assert p.deletions == ["gone"] and p.removals == []
-
-
-async def test_untrusted_repo_plans_everything_disputed():
-    squash = FakeCommit("s1", ["a0"], {"a.md": doc("a")})
-    r = FakeRepo([FakeCommit("a0", []), squash])
-    p = await plan({"canonical-all": r})
-    assert up(p, "a").status == "disputed" and up(p, "a").approved_by == []
-    assert p.repo_state["trusted"] is False
-    assert p.repo_state["untrusted_reason"] == "non-merge commit s1 on main of canonical-all"
-    assert "non-merge commit s1 on main of canonical-all" in [a.message for a in p.alerts]
-
-
-async def test_cross_repo_supersedes_is_disputed_and_touches_nothing_else():
-    mgmt = repo_of([merged("m1", "a0", {"x.md": doc("x", "supersedes: old-all\n")}, 1)])
-    allr = repo_of([merged("m1", "a0", {"old.md": doc("old-all")}, 1)])
-    repos = {"canonical-mgmt": mgmt, "canonical-all": allr}
-    p = await plan(repos, repo="canonical-mgmt")
-    assert up(p, "x").status == "disputed"
-    assert "supersedes/superseded_by must name a document in the same repo" in [a.message for a in p.alerts]
-    assert {u.doc_key for u in p.upserts} == {"x"} and p.repo == "canonical-mgmt"
-    assert (await plan(repos, repo="canonical-all")).upserts[0].status == "current"
-
-
-async def test_same_repo_supersedes_marks_old_superseded():
-    r = repo_of([merged("m1", "a0", {"o.md": doc("old"), "n.md": doc("new", "supersedes: old\n")}, 1)])
-    p = await plan({"canonical-all": r})
-    assert (up(p, "old").status, up(p, "old").superseded_by) == ("superseded", "new")
-    assert up(p, "new").status == "current"
-
-
-async def test_disputed_doc_cannot_supersede():
-    r = repo_of(
-        [merged("m1", "a0", {"o.md": doc("old"), "n.md": doc("new", "supersedes: old\n")}, 1, approve=False)]
-    )
-    assert up(await plan({"canonical-all": r}), "old").status == "disputed"
-    r = repo_of(
-        [
-            merged("m1", "a0", {"o.md": doc("old")}, 1),
-            merged("m2", "m1", {"n.md": doc("new", "supersedes: old\n")}, 2, approve=False),
-        ]
-    )
-    p = await plan({"canonical-all": r})
-    assert up(p, "old").status == "current" and up(p, "new").status == "disputed"
-
-
-async def test_duplicate_id_all_rejected_when_none_or_many_approved():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("d"), "b.md": doc("d")}, 1)])
-    p = await plan({"canonical-all": r}, existing={"d": {"path": "a.md"}})
-    assert p.upserts == [] and p.removals == ["d"]
-    msgs = {a.message for a in p.alerts}
-    assert msgs == {"duplicate id d in canonical-all: a.md, b.md"}
-
-
-async def test_duplicate_id_keeps_only_the_approved_one():
-    r = repo_of(
-        [merged("m1", "a0", {"a.md": doc("d")}, 1), merged("m2", "m1", {"b.md": doc("d")}, 2, approve=False)]
-    )
-    p = await plan({"canonical-all": r})
-    assert [(u.path, u.status) for u in p.upserts] == [("a.md", "current")]
-    assert any(a.path == "b.md" and "duplicate id d" in a.message for a in p.alerts)
-
-
-async def test_rewritten_main_gives_empty_plan_and_alert():
-    r = repo_of([merged("m1", "a0", {"a.md": doc("a")}, 1)])
-    p = await plan({"canonical-all": r}, state={"last_indexed_sha": "zzz"}, existing={"a": {"path": "a.md"}})
-    assert p.refused and p.upserts == p.deletions == p.removals == p.versions == []
-    assert p.repo_state is None
-    assert [a.message for a in p.alerts] == [
-        "main of canonical-all was rewritten; run kh rebuild after review"
+def test_duplicate_with_a_stored_unchanged_file_deletes_it():
+    old = md("same", "Old")
+    stored = [("a.md", blob_sha(old), "same")]
+    p = plan({"a.md": old, "b.md": md("same", "New")}, stored=stored)
+    assert p.upserts == []
+    assert p.deletes == ["a.md"]
+    assert sorted(p.alerts) == [
+        ("a.md", "file rejected: duplicate id same"),
+        ("b.md", "file rejected: duplicate id same"),
     ]
 
 
-async def test_notes_repo_needs_no_approval():
-    r = FakeRepo([FakeCommit("n1", [], {"a.md": doc("a")})])
-    p = await plan({"notes-all": r}, repo="notes-all")
-    u = up(p, "a")
-    assert (u.tier, u.status, u.approved_by, u.commit_sha) == ("T1", "current", [], "n1")
-    assert p.repo_state["trusted"] is True
+def test_unchanged_stored_file_is_not_upserted_nor_read():
+    text = md("a")
+    stored = [("a.md", blob_sha(text), "a")]
+    tree = [entry("a.md", text)]
+    assert changed_paths(tree, stored) == []
+    p = build_sync_plan(CFG, REPO, HEAD, tree, stored, {}, [])
+    assert p.upserts == [] and p.deletes == [] and p.alerts == []
 
 
-def test_doc_changed_compares_instants_not_strings():
-    from types import SimpleNamespace
-
-    from knowledge_hub.indexer.sync_plan import _doc_changed
-
-    row = {"path": "a.md", "content_sha": "c", "commit_sha": "k", "status": "current",
-           "approved_by": ["bob"], "approved_at": "2026-11-02T10:00:00Z", "merge_pr": 1,
-           "agent_written": False}  # fmt: skip
-    base = dict(
-        path="a.md",
-        content_sha="c",
-        commit_sha="k",
-        status="current",
-        approved_by=["bob"],
-        merge_pr=1,
-        stamp=None,
-        agent_written=False,
-    )
-    same = SimpleNamespace(**base, approved_at="2026-11-02T11:00:00.600+01:00")
-    other = SimpleNamespace(**base, approved_at="2026-11-02T10:00:01Z")
-    assert not _doc_changed(row, same)
-    assert _doc_changed(row, other)
-    assert _doc_changed(row, SimpleNamespace(**base, approved_at=None))
-    flagged = dict(base, agent_written=True)
-    assert _doc_changed(row, SimpleNamespace(**flagged, approved_at="2026-11-02T10:00:00Z"))
+def test_edited_file_is_upserted_and_stored_path_absent_is_deleted():
+    stored = [("a.md", "old-blob", "a"), ("gone.md", "g", "g")]
+    p = plan({"a.md": md("a", "New")}, stored=stored)
+    assert [u.title for u in p.upserts] == ["New"]
+    assert p.deletes == ["gone.md"]
 
 
-async def test_dot_path_markdown_is_skipped():
-    r = repo_of(
-        [merged("m1", "a0", {"a.md": doc("a"), ".forgejo/x.md": "# not a document\n"}, 1)]
-    )
-    p = await plan({"canonical-all": r})
-    assert [u.doc_key for u in p.upserts] == ["a"]
-    assert not any(a.path == ".forgejo/x.md" for a in p.alerts)
+def test_rename_deletes_the_old_path_and_upserts_the_new():
+    text = md("a")
+    p = plan({"b.md": text}, stored=[("a.md", blob_sha(text), "a")])
+    assert [(u.path, u.doc_key) for u in p.upserts] == [("b.md", "a")]
+    assert p.deletes == ["a.md"]
 
 
-async def test_agent_written_marks_agent_path_and_type_in_t1_only():
-    files = {
-        "agent/a.md": doc("a", "type: agent-note\n"),
-        "agent/b.md": doc("b"),  # the type key was removed: the path still marks it
-        "c.md": doc("c", "type: agent-note\n"),
-        "d.md": doc("d"),
-    }
-    r = FakeRepo([FakeCommit("n1", [], files)])
-    p = await plan({"notes-all": r}, repo="notes-all")
-    assert {u.doc_key: u.agent_written for u in p.upserts} == {"a": True, "b": True, "c": True, "d": False}
-    t0 = repo_of([merged("m1", "a0", {"agent/a.md": doc("a", "type: agent-note\n")}, 1)])
-    p0 = await plan({"canonical-all": t0})
-    assert up(p0, "a").agent_written is False
+def test_changed_id_at_the_same_path_deletes_the_old_row():
+    p = plan({"a.md": md("new")}, stored=[("a.md", "old-blob", "old")])
+    assert [u.doc_key for u in p.upserts] == ["new"]
+    assert p.deletes == ["a.md"]
 
 
-async def test_squatted_id_keeps_the_human_note_in_t1():
-    files = {"agent/d.md": doc("d", "type: agent-note\n"), "notes/d.md": doc("d")}
-    r = FakeRepo([FakeCommit("n1", [], files)])
-    p = await plan({"notes-all": r}, repo="notes-all", existing={"d": {"path": "agent/d.md"}})
-    assert [(u.path, u.agent_written) for u in p.upserts] == [("notes/d.md", False)]
-    assert any(a.path == "agent/d.md" and "duplicate id d" in a.message for a in p.alerts)
-    assert p.removals == []
-    # Two human files, or two agent files, are all rejected as before.
-    r2 = FakeRepo([FakeCommit("n1", [], {"a/d.md": doc("d"), "b/d.md": doc("d")})])
-    assert (await plan({"notes-all": r2}, repo="notes-all")).upserts == []
-    r3 = FakeRepo([FakeCommit("n1", [], {"agent/d.md": doc("d"), "agent/e.md": doc("d")})])
-    assert (await plan({"notes-all": r3}, repo="notes-all")).upserts == []
+def test_now_rejected_stored_file_is_deleted():
+    p = plan({"a.md": md("a", labels=["nope"])}, stored=[("a.md", "old-blob", "a")])
+    assert p.upserts == [] and p.deletes == ["a.md"]
+    assert p.alerts == [("a.md", "file rejected: unknown label nope")]
+
+
+def test_rejected_file_not_stored_is_retried_every_plan():
+    files = {"a.md": md("a", labels=["later"])}
+    assert plan(files).alerts == [("a.md", "file rejected: unknown label later")]
+    again = plan(files, labels=("ember", "later"))
+    assert [u.doc_key for u in again.upserts] == ["a"] and again.alerts == []
+
+
+def test_repo_in_no_group_is_a_value_error():
+    with pytest.raises(ValueError, match="no group"):
+        build_sync_plan(CFG, "other", HEAD, [], [], {}, [])

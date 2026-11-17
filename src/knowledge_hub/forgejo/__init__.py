@@ -1,5 +1,6 @@
-"""Forgejo API client (plan sections 3.6 and 3.8)."""
+"""Forgejo clients: a read-only one for the indexer and a guarded one for the bot."""
 
-from knowledge_hub.forgejo.client import ForgejoClient, ForgejoError, ForgejoRefused
+from knowledge_hub.forgejo.bot import ForgejoBot
+from knowledge_hub.forgejo.reader import ForgejoError, ForgejoReader, ForgejoRefused
 
-__all__ = ["ForgejoClient", "ForgejoError", "ForgejoRefused"]
+__all__ = ["ForgejoBot", "ForgejoError", "ForgejoReader", "ForgejoRefused"]

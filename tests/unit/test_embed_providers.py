@@ -8,7 +8,6 @@ from knowledge_hub.embed.factory import make_embedder
 from knowledge_hub.embed.http import HttpEmbedder
 from knowledge_hub.embed.ollama import EmbeddingError, OllamaEmbedder
 from knowledge_hub.settings import Settings
-from knowledge_hub.visibility import Visibility
 
 DIM = 4
 
@@ -63,25 +62,16 @@ async def test_http_batches_auth_and_dimension():
 
 
 @pytest.mark.parametrize(
-    ("aud", "emails", "expected"),
-    [
-        (["eng"], None, True),
-        (["eng", "all"], None, True),
-        ([], None, False),
-        (["eng", "hr"], None, False),
-        (["eng"], ["a@x.io"], False),
-        (["eng"], [], False),
-        (["eng|all"], None, True),
-        (["eng|hr"], None, False),
-        (["eng|hr", "all"], None, False),
-    ],
+    ("audience", "expected"),
+    [("eng", True), ("all", True), ("hr", False), ("", False), ("ENG", False)],
 )
-def test_http_may_embed_truth_table(aud, emails, expected):
-    assert _http().may_embed(Visibility(aud, emails)) is expected
+def test_http_may_embed_truth_table(audience, expected):
+    assert _http().may_embed(audience) is expected
 
 
-def test_ollama_may_embed_always():
-    assert _ollama().may_embed(Visibility([], ["a@x.io"])) is True
+def test_ollama_and_fake_may_embed_always():
+    assert _ollama().may_embed("hr") is True
+    assert FakeEmbedder().may_embed("hr") is True
 
 
 def test_factory_selection(tmp_path):

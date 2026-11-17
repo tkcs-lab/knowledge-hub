@@ -1,4 +1,4 @@
-"""The search statement of plan 3.5: one query, exact vector order, RRF over two pool-limited lists.
+"""The search statement of plan 3.8: one query, exact vector order, RRF over two pool-limited lists.
 
 Everything the caller controls travels as a bound parameter. The SQL text is assembled only from
 the constant fragments below. Row-level security filters ``kh.chunks`` before the pool limit, so a
@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-TIERS = ("T0", "T1", "T2", "T3")
+TIERS = ("T0", "T3")
 
 
 @dataclass(frozen=True)
@@ -19,19 +19,15 @@ class SearchFilters:
     query: str
     query_vector: list[float]
     embedding_model: str
-    min_tier: str = "T1"
-    domains: list[str] = field(default_factory=list)
-    entities: list[str] = field(default_factory=list)
+    min_tier: str = "T0"
+    labels: list[str] = field(default_factory=list)
+    audience: str = ""
     limit: int = 10
     offset: int = 0
     pool: int = 50
     rrf_k: int = 60
-    tier_weights: dict[str, float] = field(
-        default_factory=lambda: {"T0": 1.0, "T1": 0.85, "T2": 0.6, "T3": 0.4}
-    )
+    tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T3": 0.4})
     stale_weight: float = 0.5
-    superseded_weight: float = 0.3
-    disputed_weight: float = 0.5
 
     def tiers_at_or_above(self) -> list[str]:
         return list(TIERS[: TIERS.index(self.min_tier) + 1])
@@ -41,20 +37,20 @@ class SearchFilters:
 
 
 def parse_tier_weights(text: str) -> dict[str, float]:
-    """``"T0:1.0,T1:0.85"`` to a dict; every tier must be present and positive."""
+    """``"T0:1.0,T3:0.4"`` to a dict; exactly T0 and T3 must be present and positive."""
     out: dict[str, float] = {}
     for part in text.split(","):
         tier, _, value = part.strip().partition(":")
         out[tier.strip()] = float(value)
-    if set(out) != set(TIERS) or any(v <= 0 for v in out.values()):
-        raise ValueError("KH_TIER_WEIGHTS must give a positive weight for each of T0, T1, T2, T3")
+    if set(out) != set(TIERS) or any(not v > 0 for v in out.values()):
+        raise ValueError("KH_TIER_WEIGHTS must give a positive weight for each of T0 and T3")
     return out
 
 
 _FILTER = """
        c.tier = ANY(%({tiers})s::text[])
-   AND (cardinality(%(domains)s::text[]) = 0 OR c.domain = ANY(%(domains)s::text[]))
-   AND (cardinality(%(entities)s::text[]) = 0 OR c.entities && %(entities)s::text[])
+   AND c.labels @> %(labels)s::text[]
+   AND (%(audience)s = '' OR c.audience = %(audience)s)
 """
 
 
@@ -89,12 +85,9 @@ _BODY = """
 WITH {main_lists},
 {low_lists},
 scored AS (
-  SELECT c.id, c.owner_key, c.tier, c.domain, c.status, c.stale, c.entities, c.text,
-         c.document_id, c.raw_id, c.derived_id, c.owner_created_at, c.agent_written,
-         m.rrf * (%(tier_weights)s::jsonb ->> CASE WHEN c.agent_written THEN 'T2' ELSE c.tier END)::float8
-               * CASE WHEN c.stale THEN %(stale_weight)s ELSE 1 END
-               * CASE WHEN c.superseded THEN %(superseded_weight)s ELSE 1 END
-               * CASE WHEN c.status = 'disputed' THEN %(disputed_weight)s ELSE 1 END AS score
+  SELECT c.id, c.owner_key, c.tier, c.stale, c.text, c.document_id, c.record_id,
+         m.rrf * (%(tier_weights)s::jsonb ->> c.tier)::float8
+               * CASE WHEN c.stale THEN %(stale_weight)s ELSE 1 END AS score
     FROM main_fused m JOIN kh.chunks c ON c.id = m.id
 ),
 best AS (
@@ -104,29 +97,25 @@ page AS (
   SELECT * FROM best ORDER BY score DESC, id LIMIT %(limit)s OFFSET %(offset)s
 ),
 low_owners AS (
-  SELECT DISTINCT ON (c.owner_key) c.owner_key, c.tier, c.owner_created_at
+  SELECT DISTINCT c.owner_key, c.tier
     FROM low_fused l JOIN kh.chunks c ON c.id = l.id
-   ORDER BY c.owner_key, c.id
 ),
 meta AS (
   SELECT (SELECT count(*) FROM best) AS total,
-         (SELECT count(*) FROM best WHERE tier IN ('T0', 'T1') AND status <> 'disputed'
-                                       AND NOT agent_written) AS normative_hits,
-         (SELECT count(*) FROM best WHERE agent_written) AS agent_hits,
-         (SELECT count(*) FROM low_owners WHERE tier = 'T2') AS low_t2,
-         (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS low_t3,
-         (SELECT max(owner_created_at) FROM low_owners) AS low_newest_at
+         (SELECT count(*) FROM best WHERE tier = 'T0') AS t0_hits,
+         (SELECT count(*) FROM best WHERE tier = 'T3')
+           + (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS t3_hits
 )
-SELECT p.id, p.owner_key, p.tier, p.domain, p.status, p.stale, p.entities, p.text, p.score, p.agent_written,
-       d.repo AS doc_repo, d.path AS doc_path, d.commit_sha AS doc_commit_sha, d.owner AS doc_owner,
-       d.approved_by AS doc_approved_by, d.approved_at AS doc_approved_at,
-       d.stamp AS doc_stamp, d.review_by AS doc_review_by,
-       r.source_url AS raw_source_url,
-       meta.total, meta.normative_hits, meta.agent_hits, meta.low_t2, meta.low_t3, meta.low_newest_at
+SELECT p.id, p.owner_key, p.tier, p.stale, p.text, p.score,
+       d.repo AS doc_repo, d.path AS doc_path, d.blob_sha AS doc_blob_sha,
+       d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
+       r.title AS rec_title, r.audience AS rec_audience, r.labels AS rec_labels,
+       r.source_url AS rec_source_url, r.occurred_at AS rec_occurred_at,
+       meta.total, meta.t0_hits, meta.t3_hits
   FROM meta
   LEFT JOIN page p ON true
   LEFT JOIN kh.documents d ON d.id = p.document_id
-  LEFT JOIN kh.raw_records r ON r.id = p.raw_id
+  LEFT JOIN kh.records r ON r.id = p.record_id
  ORDER BY p.score DESC NULLS LAST, p.id
 """
 
@@ -144,15 +133,13 @@ def build_search_query(filters: SearchFilters) -> tuple[str, dict[str, Any]]:
         "model": filters.embedding_model,
         "tiers": filters.tiers_at_or_above(),
         "low_tiers": filters.tiers_below(),
-        "domains": list(filters.domains),
-        "entities": list(filters.entities),
+        "labels": list(filters.labels),
+        "audience": filters.audience,
         "pool": filters.pool,
         "rrf_k": filters.rrf_k,
         "limit": filters.limit,
         "offset": filters.offset,
         "tier_weights": json.dumps(filters.tier_weights),
         "stale_weight": filters.stale_weight,
-        "superseded_weight": filters.superseded_weight,
-        "disputed_weight": filters.disputed_weight,
     }
     return sql, params

@@ -43,12 +43,22 @@ def _secret(deps: Deps) -> bytes | None:
 
 
 def _repo_name(payload: dict[str, Any], org: str) -> str | None:
+    """The bare repository name when the push is for ``org``; ``full_name`` first, then owner and name."""
     repo = payload.get("repository")
-    full = repo.get("full_name") if isinstance(repo, dict) else None
-    if not isinstance(full, str) or full.count("/") != 1:
+    if not isinstance(repo, dict):
         return None
-    owner, name = full.split("/")
-    return name if owner == org and name else None
+    full = repo.get("full_name")
+    if not isinstance(full, str) or not full:
+        owner = repo.get("owner")
+        login = owner.get("login") if isinstance(owner, dict) else None
+        name = repo.get("name")
+        if not isinstance(login, str) or not isinstance(name, str):
+            return None
+        full = f"{login}/{name}"
+    if full.count("/") != 1:
+        return None
+    owner_name, name = full.split("/")
+    return name if owner_name == org and name else None
 
 
 def make_webhook_endpoint(deps: Deps):
@@ -67,27 +77,16 @@ def make_webhook_endpoint(deps: Deps):
             return _empty(400, "bad_request")
         if not isinstance(payload, dict):
             return _empty(400, "bad_request")
-        repo = _repo_name(payload, deps.settings.forgejo_org)
-        if repo is None or repo not in deps.config.repos:
+        repo = _repo_name(payload, deps.config.org)
+        if repo is None or deps.config.group_for_repo(repo) is None:
             return _empty(202, "ignored")
         event = request.headers.get("x-forgejo-event") or request.headers.get("x-gitea-event") or ""
-        kind: str | None = None
-        job_payload: dict[str, Any] = {}
-        if event == "push" and payload.get("ref") == "refs/heads/main":
-            kind = "git_push"
-        elif event == "pull_request":
-            kind = "pr_event"
-            number = payload.get("number")
-            if not isinstance(number, int):
-                pull = payload.get("pull_request")
-                number = pull.get("number") if isinstance(pull, dict) else None
-            job_payload = {"repo": repo, "action": payload.get("action"), "number": number}
-        if kind is None:
+        if event != "push" or payload.get("ref") != "refs/heads/main":
             return _empty(202, "ignored")
         async with deps.indexer_pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES (%s, %s, %s)",
-                (kind, repo, Jsonb(job_payload)),
+                "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES ('git_push', %s, %s)",
+                (repo, Jsonb({})),
             )
         return _empty(202, "queued")
 

@@ -1,371 +1,282 @@
-"""In-memory fake of ``ForgejoClient`` (no HTTP): reads and the promotion write side.
+"""An in-memory Forgejo behind ``httpx.MockTransport``, for the reader, the bot and later phases.
 
-A repo is described by commits, oldest first. Each commit lists the file changes it makes relative to
-its first parent (``None`` deletes a file); the tree at a commit is the first-parent chain applied in
-order. PRs and reviews are given in Forgejo's JSON shapes (see ``indexer/trust.py``).
-
-Writes (``create_branch``, ``put_file``, ``open_pull``) mutate ``branches``, ``files`` and ``opened``
-and append every ref they touch to ``written_refs``, so a test can assert nothing reached ``main``.
-The fake does not guard: the guard lives in the real client and is tested there.
+Every commit holds a full snapshot of the files, so a branch is just a pointer to a commit. Blob shas are
+real git blob hashes of the content; commit shas are fresh hashes per commit.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
-from collections.abc import Callable
+import json
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from urllib.parse import unquote
 
-from knowledge_hub.forgejo.client import ForgejoError
+import httpx
+
+PAGE_MAX = 1000
+
+
+def blob_sha(text: str) -> str:
+    data = text.encode("utf-8")
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()  # noqa: S324 (git object id)
 
 
 @dataclass
-class FakeCommit:
+class _Commit:
     sha: str
-    parents: list[str] = field(default_factory=list)
-    files: dict[str, str | None] = field(default_factory=dict)
-    date: str = "2026-11-01T10:00:00Z"
+    parents: list[str]
+    files: dict[str, str]
 
 
 @dataclass
-class FakeRepo:
-    commits: list[FakeCommit]
-    pulls: list[dict[str, Any]] = field(default_factory=list)
-    reviews: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+class _Repo:
+    name: str
+    commits: dict[str, _Commit] = field(default_factory=dict)
+    branches: dict[str, str] = field(default_factory=dict)
+    pulls: list[dict] = field(default_factory=list)
 
 
-def pr(
-    number: int,
-    merge_sha: str,
-    head_sha: str,
-    author: str = "alice",
-    *,
-    merged_by: str | None = None,
-    merged_at: str | None = None,
-    author_id: int | None = None,
-    merged_by_id: int | None = None,
-) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "number": number,
-        "html_url": f"https://forgejo.test/kh/repo/pulls/{number}",
-        "merged": True,
-        "merge_commit_sha": merge_sha,
-        "user": {"login": author},
-        "base": {"ref": "main"},
-        "head": {"sha": head_sha},
-    }
-    if author_id is not None:
-        out["user"]["id"] = author_id
-    if merged_by is not None:
-        out["merged_by"] = {"login": merged_by}
-        if merged_by_id is not None:
-            out["merged_by"]["id"] = merged_by_id
-    if merged_at is not None:
-        out["merged_at"] = merged_at
-    return out
+class FakeForgejo:
+    """Use ``fake.transport`` as the ``transport=`` of a client; ``fake.requests`` logs ``(method, path)``."""
 
-
-def approval(head_sha: str, user: str = "bob", at: str = "2026-11-02T10:00:00Z") -> dict[str, Any]:
-    return {
-        "state": "APPROVED",
-        "official": True,
-        "dismissed": False,
-        "commit_id": head_sha,
-        "submitted_at": at,
-        "user": {"login": user},
-    }
-
-
-class ForgejoFake:
-    def __init__(
-        self,
-        repos: dict[str, FakeRepo],
-        read_only: bool = False,
-        teams: dict[str, set[str]] | None = None,
-    ) -> None:
-        self.repos = repos
-        self.teams = teams or {}
-        # A read-only fake stands for the indexer client: a write is recorded in ``refused_writes``
-        # and fails, so a test can assert no promotion write went through it.
-        self.read_only = read_only
-        self.refused_writes: list[str] = []
-        self.calls: list[str] = []
-        self.branches: dict[tuple[str, str], str] = {}
-        self.files: dict[tuple[str, str, str], str] = {}
-        self.labels: dict[str, set[str]] = {}
-        self.opened: list[dict[str, Any]] = []
-        self.written_refs: list[str] = []
-        # Commits made on branches by ``put_file``; never part of ``repos[repo].commits`` (the main chain).
-        self.branch_commits: dict[str, list[FakeCommit]] = {}
-        self.messages: list[tuple[str, str, str, str]] = []
-        self.statuses: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        self.unknown_users: set[str] = set()
-        self.fail_after_commit = False
-        self.on_put_file: Callable[[], None] | None = None
+    def __init__(self, org: str = "kh", token: str = "tok", login: str = "kh-bot") -> None:
+        self.org = org
+        self.token = token
+        self.login = login  # the account that opens pull requests and pushes bot branches
+        self.repos: dict[str, _Repo] = {}
+        self.requests: list[tuple[str, str]] = []
+        self.bodies: list[dict] = []
         self._counter = 0
+        self._failures: list[tuple[str, int]] = []
+        self.transport = httpx.MockTransport(self._handle)
 
-    def _next(self) -> int:
+    # -- test setup ------------------------------------------------------------------------------
+
+    def add_repo(self, name: str) -> None:
+        repo = _Repo(name)
+        self.repos[name] = repo
+        sha = self._new_commit(repo, [], {})
+        repo.branches["main"] = sha
+
+    def commit(self, repo: str, changes: dict[str, str | None], branch: str = "main") -> str:
+        """Commit ``changes`` (a text, or None to delete) onto ``branch``; returns the new head sha."""
+        r = self.repos[repo]
+        parent = r.branches[branch]
+        files = dict(r.commits[parent].files)
+        for path, text in changes.items():
+            if text is None:
+                files.pop(path, None)
+            else:
+                files[path] = text
+        sha = self._new_commit(r, [parent], files)
+        r.branches[branch] = sha
+        return sha
+
+    def rewrite(self, repo: str, files: dict[str, str], branch: str = "main") -> str:
+        """Point ``branch`` at a new root commit: history is replaced, the old head is no ancestor."""
+        r = self.repos[repo]
+        sha = self._new_commit(r, [], dict(files))
+        r.branches[branch] = sha
+        return sha
+
+    def head(self, repo: str, branch: str = "main") -> str:
+        return self.repos[repo].branches[branch]
+
+    def files(self, repo: str, ref: str = "main") -> dict[str, str]:
+        r = self.repos[repo]
+        return dict(r.commits[r.branches.get(ref, ref)].files)
+
+    def fail_next(self, path_part: str, status: int) -> None:
+        """The next request whose path contains ``path_part`` answers ``status``."""
+        self._failures.append((path_part, status))
+
+    def _new_commit(self, repo: _Repo, parents: list[str], files: dict[str, str]) -> str:
         self._counter += 1
-        return self._counter
+        seed = f"{repo.name}:{self._counter}:{','.join(parents)}"
+        sha = hashlib.sha1(seed.encode()).hexdigest()  # noqa: S324
+        repo.commits[sha] = _Commit(sha, parents, files)
+        return sha
 
-    def _repo(self, repo: str) -> FakeRepo:
+    def _reachable(self, repo: _Repo, sha: str) -> set[str]:
+        seen: set[str] = set()
+        todo = [sha]
+        while todo:
+            cur = todo.pop()
+            if cur in seen or cur not in repo.commits:
+                continue
+            seen.add(cur)
+            todo.extend(repo.commits[cur].parents)
+        return seen
+
+    def _resolve(self, repo: _Repo, ref: str) -> str | None:
+        if ref in repo.branches:
+            return repo.branches[ref]
+        return ref if ref in repo.commits else None
+
+    # -- request handling ------------------------------------------------------------------------
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        path = unquote(request.url.path)
+        method = request.method
+        self.requests.append((method, path))
         try:
-            return self.repos[repo]
-        except KeyError:
-            raise ForgejoError(f"unknown repo {repo}") from None
+            body = json.loads(request.content) if request.content else {}
+        except ValueError:
+            body = {}
+        if body:
+            self.bodies.append(body)
+        for i, (part, status) in enumerate(self._failures):
+            if part in path:
+                del self._failures[i]
+                return httpx.Response(status, json={"message": "injected"})
+        if request.headers.get("Authorization") != f"token {self.token}":
+            return httpx.Response(401, json={"message": "unauthorized"})
+        m = re.fullmatch(r"/api/v1/repos/([^/]+)/([^/]+)/(.*)", path)
+        if not m or m[1] != self.org or m[2] not in self.repos:
+            return httpx.Response(404, json={"message": "not found"})
+        repo, rest = self.repos[m[2]], m[3]
+        params = request.url.params
+        return self._route(method, repo, rest, params, body)
 
-    def _commit(self, repo: str, sha: str) -> FakeCommit:
-        for c in [*self._repo(repo).commits, *self.branch_commits.get(repo, [])]:
-            if c.sha == sha:
-                return c
-        raise ForgejoError(f"unknown commit {sha}")
+    def _route(self, method: str, repo: _Repo, rest: str, params, body: dict) -> httpx.Response:  # noqa: C901
+        def js(status: int, data) -> httpx.Response:
+            return httpx.Response(status, json=data)
 
-    def _snapshot(self, repo: str, sha: str) -> dict[str, str]:
-        chain: list[FakeCommit] = []
-        cur: str | None = sha
-        while cur is not None:
-            c = self._commit(repo, cur)
-            chain.append(c)
-            cur = c.parents[0] if c.parents else None
-        tree: dict[str, str] = {}
-        for c in reversed(chain):
-            for path, text in c.files.items():
-                if text is None:
-                    tree.pop(path, None)
-                else:
-                    tree[path] = text
-        return tree
+        if method == "GET" and (m := re.fullmatch(r"branches/(.+)", rest)):
+            sha = repo.branches.get(m[1])
+            return js(200, {"name": m[1], "commit": {"id": sha}}) if sha else js(404, {})
+
+        if method == "POST" and rest == "branches":
+            name, old = body.get("new_branch_name"), body.get("old_ref_name", "")
+            src = self._resolve(repo, old)
+            if not name or src is None:
+                return js(404, {})
+            if name in repo.branches:
+                return js(409, {})
+            repo.branches[name] = src
+            return js(201, {"name": name, "commit": {"id": src}})
+
+        if method == "GET" and (m := re.fullmatch(r"git/trees/(.+)", rest)):
+            sha = self._resolve(repo, m[1])
+            if sha is None:
+                return js(404, {})
+            entries = self._tree(repo.commits[sha].files)
+            per = min(int(params.get("per_page", 1000)), PAGE_MAX)
+            page = max(int(params.get("page", 1)), 1)
+            return js(
+                200,
+                {
+                    "sha": sha,
+                    "tree": entries[(page - 1) * per : page * per],
+                    "total_count": len(entries),
+                    "page": page,
+                    "truncated": False,
+                },
+            )
+
+        if method == "GET" and (m := re.fullmatch(r"raw/(.+)", rest)):
+            sha = self._resolve(repo, params.get("ref", "main"))
+            files = repo.commits[sha].files if sha else {}
+            if m[1] not in files:
+                return js(404, {})
+            return httpx.Response(200, content=files[m[1]].encode("utf-8"))
+
+        if re.fullmatch(r"contents/(.+)", rest):
+            return self._contents(method, repo, rest[len("contents/") :], params, body)
+
+        if method == "GET" and (m := re.fullmatch(r"compare/(.+)\.\.\.(.+)", rest)):
+            a, b = self._resolve(repo, m[1]), self._resolve(repo, m[2])
+            if a is None or b is None:
+                return js(404, {})
+            only_b = self._reachable(repo, b) - self._reachable(repo, a)
+            return js(200, {"total_commits": len(only_b), "commits": [{"sha": s} for s in sorted(only_b)]})
+
+        if rest == "pulls" and method == "POST":
+            return self._open_pull(repo, body)
+
+        if rest == "pulls" and method == "GET":
+            state = params.get("state", "open")
+            items = [p for p in repo.pulls if state == "all" or p["state"] == state]
+            limit = int(params.get("limit", 50))
+            page = max(int(params.get("page", 1)), 1)
+            return js(200, items[(page - 1) * limit : page * limit])
+
+        return js(404, {"message": "no such endpoint"})
 
     @staticmethod
-    def _shape(c: FakeCommit) -> dict[str, Any]:
-        return {
-            "sha": c.sha,
-            "parents": [{"sha": p} for p in c.parents],
-            "commit": {"committer": {"date": c.date}},
-        }
-
-    async def head_sha(self, repo: str, branch: str) -> str:
-        self.calls.append("head_sha")
-        if (repo, branch) in self.branches:
-            return self.branches[(repo, branch)]
-        return self._repo(repo).commits[-1].sha
-
-    async def list_tree(self, repo: str, sha: str) -> list[dict[str, Any]]:
-        self.calls.append("list_tree")
-        return [
-            {
-                "path": p,
-                "type": "blob",
-                "sha": "blob-" + hashlib.sha1(t.encode()).hexdigest(),
-                "size": len(t),
-            }
-            for p, t in sorted(self._snapshot(repo, sha).items())
+    def _tree(files: dict[str, str]) -> list[dict]:
+        dirs: set[str] = set()
+        for p in files:
+            parts = p.split("/")
+            dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
+        entries = [{"path": d, "type": "tree", "sha": hashlib.sha1(d.encode()).hexdigest(), "size": 0}  # noqa: S324
+                   for d in dirs]
+        entries += [
+            {"path": p, "type": "blob", "sha": blob_sha(t), "size": len(t.encode("utf-8"))}
+            for p, t in files.items()
         ]
+        return sorted(entries, key=lambda e: e["path"])
 
-    async def get_raw(self, repo: str, path: str, sha: str) -> str:
-        self.calls.append("get_raw")
-        tree = self._snapshot(repo, sha)
-        if path not in tree:
-            raise ForgejoError(f"GET raw/{path} failed: HTTP 404")
-        return tree[path]
+    def _contents(self, method: str, repo: _Repo, path: str, params, body: dict) -> httpx.Response:
+        def js(status: int, data) -> httpx.Response:
+            return httpx.Response(status, json=data)
 
-    async def commits_first_parent(
-        self, repo: str, branch: str, since_sha: str | None = None
-    ) -> list[dict[str, Any]]:
-        self.calls.append("commits_first_parent")
-        out: list[dict[str, Any]] = []
-        cur: str | None = await self.head_sha(repo, branch)
-        while cur is not None and cur != since_sha:
-            c = self._commit(repo, cur)
-            out.append(self._shape(c))
-            cur = c.parents[0] if c.parents else None
-        return out
+        if method == "GET":
+            sha = self._resolve(repo, params.get("ref", "main"))
+            files = repo.commits[sha].files if sha else {}
+            if path not in files:
+                return js(404, {})
+            return js(200, {"path": path, "type": "file", "sha": blob_sha(files[path])})
 
-    async def pull_for_commit(self, repo: str, sha: str) -> dict[str, Any] | None:
-        self.calls.append("pull_for_commit")
-        return next((p for p in self._repo(repo).pulls if p.get("merge_commit_sha") == sha), None)
-
-    async def pull(self, repo: str, number: int) -> dict[str, Any]:
-        self.calls.append("pull")
-        for p in self._repo(repo).pulls:
-            if p["number"] == number:
-                return p
-        raise ForgejoError(f"pull {number} not found")
-
-    async def pull_reviews(self, repo: str, number: int) -> list[dict[str, Any]]:
-        self.calls.append("pull_reviews")
-        return list(self._repo(repo).reviews.get(number, []))
-
-    async def changed_files(self, repo: str, base: str, head: str) -> list[str]:
-        self.calls.append("changed_files")
-        a, b = self._snapshot(repo, base), self._snapshot(repo, head)
-        return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
-
-    async def team_id(self, name: str) -> int | None:
-        self.calls.append("team_id")
-        names = list(self.teams)
-        return names.index(name) + 1 if name in names else None
-
-    async def is_team_member(self, team_id: int, login: str) -> bool:
-        self.calls.append("is_team_member")
-        names = list(self.teams)
-        return 1 <= team_id <= len(names) and login in self.teams[names[team_id - 1]]
-
-    # -- write side ----------------------------------------------------------------------------
-
-    def _tree_at(self, repo: str, ref: str) -> dict[str, str]:
-        if (repo, ref) in self.branches:
-            tree = self._snapshot(repo, self.branches[(repo, ref)])
-            tree.update({p: t for (r, b, p), t in self.files.items() if r == repo and b == ref})
-            return tree
-        if ref == "main":
-            return self._snapshot(repo, self._repo(repo).commits[-1].sha)
-        return self._snapshot(repo, ref)
-
-    def _write(self, name: str) -> None:
-        if self.read_only:
-            self.refused_writes.append(name)
-            raise ForgejoError(f"{name} refused: read-only client")
-
-    async def path_exists(self, repo: str, path: str, ref: str) -> bool:
-        self.calls.append("path_exists")
-        return path in self._tree_at(repo, ref)
-
-    async def create_branch(self, repo: str, name: str, from_sha: str) -> None:
-        self._write("create_branch")
-        self.calls.append("create_branch")
-        self.written_refs.append(name)
-        self._commit(repo, from_sha)
-        if (repo, name) in self.branches:
-            raise ForgejoError("POST branches failed: HTTP 409")
-        self.branches[(repo, name)] = from_sha
-
-    async def put_file(
-        self, repo: str, branch: str, path: str, content: str, message: str
-    ) -> dict[str, Any]:
-        self._write("put_file")
-        self.calls.append("put_file")
-        self.written_refs.append(branch)
-        if (repo, branch) not in self.branches:
-            raise ForgejoError("PUT contents failed: HTTP 404")
-        if self.on_put_file is not None:
-            self.on_put_file()
-        parent = self.branches[(repo, branch)]
-        commit = FakeCommit(f"b{self._next()}", parents=[parent], files={path: content})
-        self.branch_commits.setdefault(repo, []).append(commit)
-        self.branches[(repo, branch)] = commit.sha
-        self.files[(repo, branch, path)] = content
-        self.messages.append((repo, branch, path, message))
-        return {"sha": commit.sha, "parents": [parent]}
-
-    def _resolve(self, repo: str, ref: str) -> str:
-        if (repo, ref) in self.branches:
-            return self.branches[(repo, ref)]
-        if ref == "main":
-            return self._repo(repo).commits[-1].sha
-        return ref
-
-    async def compare_files(self, repo: str, base: str, head: str) -> list[dict[str, Any]]:
-        self.calls.append("compare_files")
-        a, b = self._tree_at(repo, base), self._tree_at(repo, head)
-        out = []
-        for p in sorted(set(a) | set(b)):
-            if a.get(p) == b.get(p):
-                continue
-            status = "added" if p not in a else "removed" if p not in b else "modified"
-            out.append({"filename": p, "status": status})
-        return out
-
-    async def blob_sha(self, repo: str, path: str, ref: str) -> str | None:
-        self.calls.append("blob_sha")
-        text = self._tree_at(repo, ref).get(path)
-        if text is None:
-            return None
-        data = text.encode("utf-8")
-        return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()  # noqa: S324
-
-    async def last_commit(self, repo: str, path: str, ref: str) -> str | None:
-        self.calls.append("last_commit")
-        cur: str | None = self._resolve(repo, ref)
-        while cur is not None:
-            c = self._commit(repo, cur)
-            if path in c.files:
-                return c.sha
-            cur = c.parents[0] if c.parents else None
-        return None
-
-    async def put_note(
-        self, repo: str, path: str, content: str, message: str, prev_blob: str | None
-    ) -> str:
-        self._write("put_note")
-        self.calls.append("put_note")
-        current = await self.blob_sha(repo, path, "main")
-        if prev_blob is None and current is not None:
-            raise ForgejoError("POST contents failed: HTTP 422")
-        if prev_blob is not None and prev_blob != current:
-            raise ForgejoError("PUT contents failed: HTTP 409")
-        repo_obj = self._repo(repo)
-        commit = FakeCommit(
-            f"n{self._next()}", parents=[repo_obj.commits[-1].sha], files={path: content}
-        )
-        repo_obj.commits.append(commit)
-        self.messages.append((repo, "main", path, message))
-        self.written_refs.append("main")
-        if self.fail_after_commit:
-            raise ForgejoError("PUT contents failed: timeout")
-        return commit.sha
-
-    async def commit_statuses(self, repo: str, sha: str) -> list[dict[str, Any]]:
-        self.calls.append("commit_statuses")
-        return list(self.statuses.get((repo, sha), []))
-
-    async def post_requester(self, repo: str, sha: str, login: str, proposal_id: str) -> None:
-        self._write("post_requester")
-        self.calls.append("post_requester")
-        self.statuses.setdefault((repo, sha), []).append(
+        if method not in ("POST", "PUT"):
+            return js(405, {})
+        branch = body.get("branch")
+        head = repo.branches.get(branch)
+        if head is None:
+            return js(404, {})
+        files = repo.commits[head].files
+        if method == "POST" and path in files:
+            return js(422, {"message": "repository file already exists"})
+        if method == "PUT" and (path not in files or body.get("sha") != blob_sha(files[path])):
+            return js(409 if path in files else 404, {"message": "sha does not match"})
+        try:
+            text = base64.b64decode(body["content"], validate=True).decode("utf-8")
+        except (KeyError, ValueError):
+            return js(422, {"message": "bad content"})
+        sha = self.commit(repo.name, {path: text}, branch=branch)
+        return js(
+            201 if method == "POST" else 200,
             {
-                "context": "kh/requested-by",
-                "state": "success",
-                "description": f"{login} {proposal_id}",
-                "creator": "kh-hub-bot",
-            }
+                "content": {"path": path, "sha": blob_sha(text)},
+                "commit": {"sha": sha, "parents": [{"sha": p} for p in repo.commits[sha].parents]},
+            },
         )
 
-    async def pull_for_head(self, repo: str, branch: str) -> dict[str, Any] | None:
-        self.calls.append("pull_for_head")
-        return next(
-            (p for p in self._repo(repo).pulls if (p.get("head") or {}).get("ref") == branch), None
-        )
-
-    async def org_member(self, login: str) -> bool:
-        self.calls.append("org_member")
-        return login not in self.unknown_users
-
-    async def open_pull(
-        self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
-    ) -> dict[str, Any]:
-        self._write("open_pull")
-        self.calls.append("open_pull")
-        self.written_refs.append(head)
-        if (repo, head) not in self.branches:
-            raise ForgejoError("POST pulls failed: HTTP 404")
-        known = self.labels.get(repo)
-        if known is not None and (missing := [n for n in labels if n not in known]):
-            raise ForgejoError("label not found: " + ", ".join(missing))
-        repo_obj = self._repo(repo)
-        number = max([p["number"] for p in repo_obj.pulls] + [0]) + 1
+    def _open_pull(self, repo: _Repo, body: dict) -> httpx.Response:
+        head, base = body.get("head"), body.get("base")
+        if head not in repo.branches or base not in repo.branches:
+            return httpx.Response(404, json={})
+        if any(p["head"]["ref"] == head and p["state"] == "open" for p in repo.pulls):
+            return httpx.Response(409, json={"message": "pull request already exists"})
+        number = len(repo.pulls) + 1
         pull = {
             "number": number,
-            "html_url": f"https://forgejo.test/kh/{repo}/pulls/{number}",
-            "merged": False,
-            "user": {"login": "kh-hub-bot"},
-            "base": {"ref": base},
-            "head": {"ref": head, "sha": self.branches[(repo, head)]},
             "state": "open",
-            "title": title,
-            "body": body,
-            "labels": [{"name": n} for n in labels],
+            "title": body.get("title", ""),
+            "body": body.get("body", ""),
+            "html_url": f"https://forgejo.test/{self.org}/{repo.name}/pulls/{number}",
+            "head": {"ref": head, "sha": repo.branches[head]},
+            "base": {"ref": base},
+            "user": {"login": self.login},
         }
-        repo_obj.pulls.append(pull)
-        self.opened.append(pull)
-        return pull
+        repo.pulls.append(pull)
+        return httpx.Response(201, json=pull)
+
+
+def md(doc_id: str, title: str = "T", *, labels: list[str] | None = None, review_by: str = "2099-01-01",
+       body: str = "Body text.\n") -> str:
+    """A Markdown file with the required frontmatter (``labels`` omitted when None)."""
+    lab = "" if labels is None else f"labels: [{', '.join(labels)}]\n"
+    return f"---\nid: {doc_id}\ntitle: {title}\nreview_by: {review_by}\n{lab}---\n{body}"

@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from knowledge_hub.search.sql import parse_tier_weights
+
 
 class DevIdentity(BaseModel):
     sub: str
@@ -37,19 +39,9 @@ class Settings(BaseSettings):
 
     config_file: Path | None = None
     forgejo_url: str | None = None
-    forgejo_org: str = "kh"
     forgejo_bot_token_file: Path | None = None
     forgejo_indexer_token_file: Path | None = None
     webhook_hmac_file: Path | None = None
-    forgejo_notes_token_file: Path | None = None
-
-    agent_notes_enabled: bool = False
-    agent_proposals_enabled: bool = False
-    agent_email_domains: str = ""
-    agent_note_daily_limit: int = 20
-    agent_proposal_daily_limit: int = 5
-    agent_max_body_bytes: int = 131072
-    ci_status_logins: str = "kh-ci"
 
     embed_provider: Literal["ollama", "http", "fake"] = "ollama"
     ollama_url: str | None = None
@@ -67,21 +59,19 @@ class Settings(BaseSettings):
 
     cursor_key_file: Path | None = None
     chunker_version: int = 1
-    promotion_daily_limit: int = 5
     rrf_k: int = 60
     search_pool: int = 50
-    tier_weights: str = "T0:1.0,T1:0.85,T2:0.6,T3:0.4"
+    tier_weights: str = "T0:1.0,T3:0.4"
     stale_weight: float = 0.5
-    superseded_weight: float = 0.3
-    disputed_weight: float = 0.5
     search_max_offset: int = 100
-    max_raw_bytes: int = 1048576
+    max_record_bytes: int = 1048576
+    propose_max_bytes: int = 131072
+    propose_max_open: int = 20
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
 
-    grist_url: str | None = None
-    grist_doc_id: str | None = None
-    grist_key_file: Path | None = None
+    setup_pg_admin_dsn_file: Path | None = None
+    setup_forgejo_admin_token_file: Path | None = None
 
     @field_validator("dev_identity", mode="before")
     @classmethod
@@ -95,26 +85,18 @@ class Settings(BaseSettings):
                 raise ValueError(f"KH_DEV_IDENTITY is not valid JSON: {exc}") from exc
         return v
 
+    @field_validator("tier_weights")
+    @classmethod
+    def _check_tier_weights(cls, v: str) -> str:
+        parse_tier_weights(v)
+        return v
+
     @model_validator(mode="after")
     def _check_env_rules(self) -> Settings:
         if self.env == "prod" and self.dev_identity is not None:
             raise ValueError("KH_DEV_IDENTITY is set while KH_ENV=prod; refusing to start")
         if self.embed_provider == "fake" and self.env not in ("dev", "test"):
             raise ValueError("KH_EMBED_PROVIDER=fake is only allowed when KH_ENV is dev or test")
-        if self.agent_notes_enabled and not (
-            self.forgejo_url and self.forgejo_notes_token_file and self.agent_email_domains.strip()
-        ):
-            raise ValueError(
-                "KH_AGENT_NOTES_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_NOTES_TOKEN_FILE and "
-                "KH_AGENT_EMAIL_DOMAINS"
-            )
-        if self.agent_proposals_enabled and not (
-            self.forgejo_url and self.forgejo_bot_token_file and self.agent_email_domains.strip()
-        ):
-            raise ValueError(
-                "KH_AGENT_PROPOSALS_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_BOT_TOKEN_FILE and "
-                "KH_AGENT_EMAIL_DOMAINS"
-            )
         return self
 
     def dsn(self, role: Literal["migrator", "app", "indexer"]) -> str:

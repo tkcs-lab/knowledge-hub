@@ -61,8 +61,6 @@ def bootstrap_roles(cluster: Cluster) -> None:
     with psycopg.connect(cluster.admin_dsn(), autocommit=True) as conn:
         for role in LOGIN_ROLES:
             conn.execute(f"CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS")
-        conn.execute("CREATE ROLE kh_provenance NOLOGIN NOSUPERUSER NOBYPASSRLS")
         conn.execute("CREATE DATABASE kh OWNER kh_migrator")
-        conn.execute("GRANT kh_provenance TO kh_migrator")
     with psycopg.connect(cluster.admin_dsn("kh"), autocommit=True) as conn:
         conn.execute("CREATE EXTENSION vector")

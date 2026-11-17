@@ -1,133 +1,95 @@
-"""list_stale: visible stale or overdue documents, oldest review date first, keyset paging."""
+"""list_stale: ordering, paging and what a caller may see."""
 
-import datetime
+from __future__ import annotations
+
+from datetime import date
 
 import psycopg
 import pytest
 
-from knowledge_hub.config import Config
-from knowledge_hub.mcp import errors
-from knowledge_hub.mcp.server import Deps
-from tests.integration.test_derived_visibility_sql import doc as make_doc
+from knowledge_hub.mcp.errors import CURSOR_FOREIGN
 from tests.support.pg import FRESH_DB
-from tests.support.principals import PRINCIPALS, alice_all, bob_mgmt, carol_hr
+from tests.support.principals import alice_all, bob_mgmt, dave_none, multi
+from tests.support.seed import add_doc
 
-TODAY = datetime.date.today()
-
-
-def days(n: int) -> datetime.date:
-    return TODAY + datetime.timedelta(days=n)
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def app_settings(app_settings, tmp_path):
+def app_settings(db_settings, tmp_path):
+    from tests.support.mcp_client import HOST
+
     key = tmp_path / "cursor.key"
     key.write_bytes(b"k" * 32)
-    return app_settings.model_copy(update={"cursor_key_file": key})
+    return db_settings.model_copy(update={"env": "test", "allowed_hosts": HOST, "cursor_key_file": key})
 
 
 @pytest.fixture
-def deps(app_settings, app_pool, indexer_pool):
-    return Deps(settings=app_settings, config=Config(), app_pool=app_pool, indexer_pool=indexer_pool)
+def stale_docs(seeded_db, fresh_db):
+    """Five stale ``all`` documents (two share a date), one fresh, one stale ``mgmt``, one stale ``hr``."""
+    out: list[str] = []
+    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
+        for day in (5, 1, 3, 3, 2):
+            out.append(add_doc(conn, stale=True, review_by=date(2025, 1, day), title=f"stale {day}"))
+        add_doc(conn, stale=False, review_by=date(2020, 1, 1), title="fresh")
+        mg = add_doc(conn, repo="kb-mgmt", audience="mgmt", stale=True, review_by=date(2025, 2, 1))
+        hr = add_doc(conn, repo="kb-hr", audience="hr", stale=True, review_by=date(2025, 3, 1))
+    return {"all": out, "mgmt": mg, "hr": hr}
 
 
-@pytest.fixture
-def admin(fresh_db):
-    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB), autocommit=True) as conn:
-        yield conn
+def _ids(res) -> list[str]:
+    return [d["id"] for d in res.data["documents"]]
 
 
-def stale_doc(admin, aud=("all",), review_by=None, stale=False, domain="product", owner="team"):
-    did = make_doc(admin, aud)
-    admin.execute(
-        "UPDATE kh.documents SET review_by = %s, stale = %s, domain = %s, owner = %s WHERE id = %s",
-        (review_by, stale, domain, owner, did),
-    )
-    return f"doc:{did}"
+async def test_oldest_review_by_first_then_id(mcp_client, stale_docs):
+    res = await mcp_client.call(alice_all, "list_stale")
+    assert not res.is_error, res.text
+    docs = res.data["documents"]
+    keys = [(d["review_by"], d["id"]) for d in docs]
+    assert keys == sorted(keys)
+    assert [d["review_by"] for d in docs] == [f"2025-01-0{n}" for n in (1, 2, 3, 3, 5)]
+    assert {d["id"] for d in docs} == {f"doc:{i}" for i in stale_docs["all"]}
+    assert res.data["next_cursor"] == ""
+    assert set(docs[0]) == {"id", "title", "audience", "labels", "repo", "path", "review_by", "stale"}
 
 
-async def stale(client, who, **args) -> dict:
-    res = await client.call(who, "list_stale", args)
-    assert not res.is_error, res
-    return res.data
-
-
-def cites(page) -> list[str]:
-    return [d["citation_id"] for d in page["documents"]]
-
-
-async def test_only_stale_or_overdue_documents_oldest_first(admin, mcp_client):
-    old = stale_doc(admin, review_by=days(-30))
-    older = stale_doc(admin, review_by=days(-90))
-    flagged = stale_doc(admin, review_by=days(10), stale=True)
-    nodate = stale_doc(admin, stale=True)
-    stale_doc(admin, review_by=days(5))  # not due
-    stale_doc(admin)  # no review date, not stale
-    page = await stale(mcp_client, alice_all)
-    assert cites(page) == [older, old, flagged, nodate]
-    assert page["next_cursor"] == ""
-    assert page["documents"][0]["review_by"] == days(-90).isoformat()
-
-
-async def test_each_principal_sees_only_visible_documents(admin, mcp_client):
-    a = stale_doc(admin, ("all",), days(-1))
-    m = stale_doc(admin, ("mgmt",), days(-2))
-    h = stale_doc(admin, ("hr",), days(-3))
-    want = {
-        "alice_all": {a},
-        "bob_mgmt": {a, m},
-        "carol_hr": {a, h},
-        "dave_none": set(),
-        "eve_nobody": set(),
-        "wf_token": {a},
-        "mgmt_only": {m},
-        "finance_only": set(),
-        "mgmt_finance": {m},
-    }
-    for name, who in PRINCIPALS.items():
-        page = await stale(mcp_client, who)
-        assert set(cites(page)) == want[name], name
-        assert set(page) == {"documents", "next_cursor"}
-
-
-async def test_filters(admin, mcp_client):
-    a = stale_doc(admin, review_by=days(-1), domain="product", owner="x")
-    b = stale_doc(admin, review_by=days(-2), domain="technical", owner="y")
-    assert cites(await stale(mcp_client, alice_all, domain="technical")) == [b]
-    assert cites(await stale(mcp_client, alice_all, owner="x")) == [a]
-    assert cites(await stale(mcp_client, alice_all, domain="technical", owner="x")) == []
-
-
-async def test_paging_and_foreign_cursors(admin, mcp_client):
-    ids = [stale_doc(admin, review_by=days(-10 + i)) for i in range(4)]
-    ids.append(stale_doc(admin, stale=True))  # null review date sorts last
-    seen, cursor = [], ""
-    while True:
-        page = await stale(mcp_client, alice_all, limit=2, cursor=cursor)
-        seen += cites(page)
-        cursor = page["next_cursor"]
+async def test_paging_covers_every_row_once(mcp_client, stale_docs):
+    seen: list[str] = []
+    cursor = ""
+    for _ in range(5):
+        res = await mcp_client.call(alice_all, "list_stale", {"limit": 2, "cursor": cursor})
+        assert not res.is_error, res.text
+        seen += _ids(res)
+        cursor = res.data["next_cursor"]
         if not cursor:
             break
-    assert seen == ids
-    token = (await stale(mcp_client, alice_all, limit=2))["next_cursor"]
-    for who, extra in ((bob_mgmt, {}), (alice_all, {"owner": "other"}), (alice_all, {"domain": "technical"})):
-        res = await mcp_client.call(who, "list_stale", {"limit": 2, "cursor": token, **extra})
-        assert res.is_error and res.text.endswith(errors.CURSOR_FOREIGN), res
-    bad = await mcp_client.call(alice_all, "list_stale", {"cursor": "nope"})
-    assert bad.is_error and bad.text.endswith(errors.CURSOR_FOREIGN)
+    full = _ids(await mcp_client.call(alice_all, "list_stale"))
+    assert seen == full and len(seen) == 5
 
 
-async def test_pages_never_change_with_hidden_rows(admin, mcp_client):
-    for i in range(3):
-        stale_doc(admin, review_by=days(-20 + i))
-    runs = []
-    for _ in range(2):
-        first = await stale(mcp_client, alice_all, limit=2)
-        second = await stale(mcp_client, alice_all, limit=2, cursor=first["next_cursor"])
-        runs.append((first, second))
-        for i in range(4):  # hidden rows sorting before, among and after the visible ones
-            stale_doc(admin, ("hr",), days(-100 + 30 * i))
-            stale_doc(admin, ("mgmt",), stale=True)
-    assert runs[0] == runs[1]
-    hr_view = await stale(mcp_client, carol_hr)
-    assert len(hr_view["documents"]) == 3 + 8
+async def test_caller_filtering(mcp_client, stale_docs):
+    bob = await mcp_client.call(bob_mgmt, "list_stale")
+    assert _ids(bob) == [f"doc:{stale_docs['mgmt']}"]
+    both = await mcp_client.call(multi, "list_stale")
+    assert len(_ids(both)) == 6 and f"doc:{stale_docs['hr']}" not in _ids(both)
+    none = await mcp_client.call(dave_none, "list_stale")
+    assert none.data == {"documents": [], "next_cursor": ""}
+
+
+async def test_audience_narrows(mcp_client, stale_docs):
+    res = await mcp_client.call(multi, "list_stale", {"audience": "mgmt"})
+    assert _ids(res) == [f"doc:{stale_docs['mgmt']}"]
+    res = await mcp_client.call(alice_all, "list_stale", {"audience": "hr"})
+    assert res.data["documents"] == []
+
+
+async def test_a_cursor_is_bound_to_the_caller_and_the_filter(mcp_client, stale_docs):
+    first = await mcp_client.call(multi, "list_stale", {"limit": 1})
+    cursor = first.data["next_cursor"]
+    assert cursor
+    other = await mcp_client.call(alice_all, "list_stale", {"limit": 1, "cursor": cursor})
+    assert other.is_error and other.text.endswith(CURSOR_FOREIGN)
+    narrowed = await mcp_client.call(multi, "list_stale", {"limit": 1, "audience": "all", "cursor": cursor})
+    assert narrowed.is_error and narrowed.text.endswith(CURSOR_FOREIGN)
+    junk = await mcp_client.call(multi, "list_stale", {"cursor": "abc.def"})
+    assert junk.is_error and junk.text.endswith(CURSOR_FOREIGN)

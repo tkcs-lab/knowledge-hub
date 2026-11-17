@@ -1,121 +1,36 @@
-import uuid
+"""Baseline schema: tables, columns and constraints (plan 3.5)."""
 
 import psycopg
 import pytest
 
-VIS = ["required_audiences", "allowed_emails"]
+from tests.support.seed import add_chunk, add_doc, add_record
 
 EXPECTED = {
-    "documents": ["id", "repo", "path", "doc_key", "tier", "domain", "title", "body", "frontmatter",
-                  "status", "stale", "review_by", "owner", "entities", "supersedes", "superseded_by",
-                  "commit_sha", "content_sha", "approved_by", "approved_at", "merge_pr", "pr_url",
-                  "indexed_at", "updated_at", "agent_written"] + VIS + ["stamp"],
-    "document_versions": ["document_id", "commit_sha", "path", "tier", "status", "approved_by",
-                          "approved_at", "indexed_at", "stamp"],
-    "chunks": ["id", "document_id", "raw_id", "derived_id", "entities", "ordinal", "heading_path",
-               "text", "content_sha", "embedding", "embedding_model", "tsv", "owner_key",
-               "owner_created_at", "tier", "domain", "status", "stale", "superseded",
-               "agent_written"] + VIS,
-    "entities_cache": ["id", "kind", "name", "owner_team", "status", "attrs", "synced_at"] + VIS,
-    "raw_records": ["id", "source_system", "source_ref", "source_url", "series", "folder",
-                    "participants", "title", "blob_key", "excerpt", "content_type", "occurred_at",
-                    "ingested_by_sub", "ingested_by_type", "ingested_at", "domain", "entities",
-                    "generated_by"] + VIS,
-    "raw_audience_map": ["kind", "key", "audiences"],
-    "derived_records": ["id", "kind", "title", "body", "claims", "domain", "entities", "generated_by",
-                        "created_by_sub", "created_by_type", "created_at"] + VIS,
-    "derived_sources": ["derived_id", "source_kind", "source_id", "version",
-                        "src_required_audiences", "src_allowed_emails"],
-    "candidates": ["id", "derived_id", "target_doc_id", "state", "domain", "target_repo", "target_path",
-                   "title", "body_sha", "dedupe_key", "branch", "pr_number", "pr_url",
-                   "created_by_sub", "created_at", "decided_at", "error"] + VIS,
-    "proposals": ["id", "kind", "state", "repo", "path", "doc_key", "domain", "title", "content_sha",
-                  "dedupe_key", "branch", "base_sha", "commit_sha", "pr_number", "pr_url",
-                  "requester_login", "created_by_sub", "created_at", "decided_at", "error"] + VIS,
-    "candidate_sources": ["candidate_id", "source_kind", "source_id", "src_required_audiences",
-                          "src_allowed_emails"],
-    "conflicts": ["id", "state", "domain", "note", "created_by_sub", "created_at", "closed_at",
-                  "closed_by_pr"] + VIS,
-    "conflict_items": ["conflict_id", "item_kind", "item_id", "src_required_audiences",
-                       "src_allowed_emails"],
+    "schema_migrations": ["name", "sha256", "applied_at"],
+    "claim_jti": ["jti", "expires_at"],
+    "groups": ["name", "repo"],
+    "labels": ["name", "description", "created_at"],
+    "documents": ["id", "repo", "path", "doc_key", "audience", "title", "body", "labels", "review_by",
+                  "stale", "commit_sha", "blob_sha", "indexed_at", "updated_at"],
+    "records": ["id", "audience", "source", "source_ref", "source_url", "title", "blob_key", "excerpt",
+                "content_type", "occurred_at", "labels", "written_by", "created_by_sub",
+                "created_by_type", "ingested_at"],
+    "chunks": ["id", "document_id", "record_id", "owner_key", "owner_created_at", "ordinal",
+               "heading_path", "text", "content_sha", "embedding", "embedding_model", "tsv", "tier",
+               "audience", "labels", "stale"],
     "index_jobs": ["id", "kind", "repo", "payload", "state", "attempts", "last_error", "created_at",
                    "run_after"],
-    "repo_state": ["repo", "trust_anchor_sha", "last_indexed_sha", "trusted", "untrusted_reason",
-                   "config_hash"],
+    "repo_state": ["repo", "last_indexed_sha", "indexed_at"],
     "index_alerts": ["id", "repo", "path", "message", "created_at"],
-    "merge_verdicts": ["repo", "merge_sha", "pr_number", "status", "stamp", "reason", "approved_by",
-                       "approved_at", "pr_url", "judged_at"],
 }
-
-OPEN = {"required_audiences": [], "allowed_emails": None}
-
-
-def u():
-    return str(uuid.uuid4())
 
 
 @pytest.fixture
 def conn(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn("kh_fresh"), autocommit=True) as c:
-        # These tests exercise the table constraints with hand-written rows; the 0004 triggers
-        # (tests/integration/test_triggers.py) would overwrite or reject them.
-        for t in ("chunks", "raw_records", "derived_records", "documents", "derived_sources",
-                  "candidate_sources", "conflict_items", "candidates", "conflicts"):
-            c.execute(f"ALTER TABLE kh.{t} DISABLE TRIGGER USER")
+        c.execute("INSERT INTO kh.groups (name, repo) VALUES ('all', 'kb-all'), ('mgmt', 'kb-mgmt')")
+        c.execute("INSERT INTO kh.labels (name) VALUES ('ember')")
         yield c
-
-
-def insert(conn, table, **cols):
-    names = list(cols)
-    conn.execute(
-        f"INSERT INTO kh.{table} ({', '.join(names)}) VALUES ({', '.join(['%s'] * len(names))})",
-        [cols[n] for n in names],
-    )
-
-
-def ok_vis():
-    return {"required_audiences": ["all"], "allowed_emails": None}
-
-
-def doc(**over):
-    row = dict(id=u(), repo="r", path="p" + u(), doc_key="k" + u(), tier="T0", domain="d", title="t",
-               body="b", status="current", commit_sha="c", content_sha="s", **ok_vis())
-    row.update(over)
-    return row
-
-
-def raw(**over):
-    row = dict(id=u(), source_system="s", source_ref=u(), ingested_by_sub="x", ingested_by_type="y",
-               **ok_vis())
-    row.update(over)
-    return row
-
-
-def derived(**over):
-    row = dict(id=u(), kind="summary", title="t", body="b", created_by_sub="x", created_by_type="y",
-               **ok_vis())
-    row.update(over)
-    return row
-
-
-def candidate(**over):
-    row = dict(id=u(), state="proposed", domain="d", target_repo="r", target_path="p", title="t",
-               body_sha="b", dedupe_key="k", created_by_sub="x", **ok_vis())
-    row.update(over)
-    return row
-
-
-def conflict(**over):
-    row = dict(id=u(), state="open", created_by_sub="x", **ok_vis())
-    row.update(over)
-    return row
-
-
-def chunk(**over):
-    row = dict(id=u(), ordinal=0, text="hello world", content_sha="s", owner_key="doc:x", tier="T0",
-               **ok_vis())
-    row.update(over)
-    return row
 
 
 def test_tables_and_columns(conn):
@@ -126,8 +41,6 @@ def test_tables_and_columns(conn):
     actual: dict[str, list[str]] = {}
     for t, c in rows:
         actual.setdefault(t, []).append(c)
-    actual.pop("schema_migrations")
-    actual.pop("claim_jti")
     assert {k: sorted(v) for k, v in actual.items()} == {k: sorted(v) for k, v in EXPECTED.items()}
 
 
@@ -140,73 +53,101 @@ def test_embedding_is_nullable_vector_1024(conn):
     assert row == ("YES", "vector(1024)")
 
 
-@pytest.mark.parametrize(
-    ("table", "make"),
-    [
-        ("documents", doc),
-        ("entities_cache", lambda **o: dict(id=u(), **o)),
-        ("raw_records", raw),
-        ("derived_records", derived),
-        ("candidates", candidate),
-        ("conflicts", conflict),
-    ],
-)
-def test_no_open_rows(conn, table, make):
-    insert(conn, table, **make(**{**ok_vis(), "allowed_emails": ["a@x.y"], "required_audiences": []}))
-    with pytest.raises(psycopg.errors.CheckViolation) as exc:
-        insert(conn, table, **(make() | OPEN))
-    assert exc.value.diag.constraint_name == "kh_no_open_rows"
+def test_every_table_is_owned_by_the_migrator(conn):
+    rows = conn.execute(
+        "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'kh' AND c.relkind = 'r'"
+    ).fetchall()
+    assert {owner for _, owner in rows} == {"kh_migrator"}
+    assert {name for name, _ in rows} == set(EXPECTED)
 
 
-@pytest.mark.parametrize("bad", [[""], ["mgmt|finance"], ["MGMT"], ["a||b"], ["mgmt", ""]])
-def test_audience_clauses_check(conn, bad):
-    insert(conn, "entities_cache", id=u(), required_audiences=["finance|mgmt"], allowed_emails=None)
-    insert(conn, "entities_cache", id=u(), required_audiences=["all", "hr"], allowed_emails=None)
-    with pytest.raises(psycopg.errors.CheckViolation) as exc:
-        insert(conn, "entities_cache", id=u(), required_audiences=bad, allowed_emails=None)
-    assert exc.value.diag.constraint_name == "kh_audience_clauses"
+@pytest.mark.parametrize("bad", ["", "A", "-a", "a b", "a/b", "a" * 64])
+def test_group_name_check(conn, bad):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("INSERT INTO kh.groups (name, repo) VALUES (%s, 'r')", [bad])
 
 
-def test_chunk_open_row_names_constraint(conn):
-    d = doc()
-    insert(conn, "documents", **d)
-    with pytest.raises(psycopg.errors.CheckViolation) as exc:
-        insert(conn, "chunks", **(chunk(document_id=d["id"]) | OPEN))
-    assert exc.value.diag.constraint_name == "kh_no_open_rows"
+@pytest.mark.parametrize("name", ["product:ember", "a.b-c_d", "x"])
+def test_label_name_accepts_legal_names(conn, name):
+    conn.execute("INSERT INTO kh.labels (name) VALUES (%s)", [name])
+
+
+@pytest.mark.parametrize("bad", ["", "A", ":a", "a b"])
+def test_label_name_check(conn, bad):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("INSERT INTO kh.labels (name) VALUES (%s)", [bad])
+
+
+def test_group_repo_is_unique(conn):
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute("INSERT INTO kh.groups (name, repo) VALUES ('other', 'kb-all')")
+
+
+def test_documents_audience_must_be_a_group(conn):
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        add_doc(conn, audience="nope")
+
+
+def test_documents_unique_keys(conn):
+    add_doc(conn, repo="kb-all", path="a.md", doc_key="a")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        add_doc(conn, repo="kb-all", path="b.md", doc_key="a")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        add_doc(conn, repo="kb-all", path="a.md", doc_key="b")
+    add_doc(conn, repo="kb-mgmt", path="a.md", doc_key="a", audience="mgmt")
+
+
+def test_records_audience_must_be_a_group(conn):
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        add_record(conn, audience="nope")
+
+
+def test_records_unique_key_is_audience_source_ref(conn):
+    add_record(conn, audience="all", source="s", source_ref="r")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        add_record(conn, audience="all", source="s", source_ref="r")
+    add_record(conn, audience="mgmt", source="s", source_ref="r")
+    add_record(conn, audience="all", source="s2", source_ref="r")
 
 
 def test_chunk_owner_check(conn):
-    d, r = doc(), raw()
-    insert(conn, "documents", **d)
-    insert(conn, "raw_records", **r)
-    insert(conn, "chunks", **chunk(document_id=d["id"]))
-    for owners in ({}, {"document_id": d["id"], "raw_id": r["id"]}):
+    d, r = add_doc(conn), add_record(conn)
+    add_chunk(conn, document_id=d)
+    add_chunk(conn, record_id=r, tier="T3")
+    for owners in ({}, {"document_id": d, "record_id": r}):
         with pytest.raises(psycopg.errors.CheckViolation) as exc:
-            insert(conn, "chunks", **chunk(**owners))
+            add_chunk(conn, **owners)
         assert exc.value.diag.constraint_name == "chunks_one_owner"
 
 
-def test_chunk_cascade_on_document_delete(conn):
-    d = doc()
-    insert(conn, "documents", **d)
-    insert(conn, "chunks", **chunk(document_id=d["id"]))
-    conn.execute("DELETE FROM kh.documents WHERE id = %s", [d["id"]])
+def test_chunk_tier_check(conn):
+    add_chunk(conn, document_id=add_doc(conn))
+    with pytest.raises(psycopg.errors.CheckViolation) as exc:
+        conn.execute("UPDATE kh.chunks SET tier = 'T1'")
+    assert exc.value.diag.constraint_name == "chunks_tier_check"
+
+
+def test_chunks_cascade_on_owner_delete(conn):
+    d, r = add_doc(conn), add_record(conn)
+    add_chunk(conn, document_id=d)
+    add_chunk(conn, record_id=r)
+    conn.execute("DELETE FROM kh.documents WHERE id = %s", [d])
+    assert conn.execute("SELECT count(*) FROM kh.chunks").fetchone() == (1,)
+    conn.execute("DELETE FROM kh.records WHERE id = %s", [r])
     assert conn.execute("SELECT count(*) FROM kh.chunks").fetchone() == (0,)
 
 
-def test_dedupe_key_partial_unique(conn):
-    first = candidate()
-    insert(conn, "candidates", **first)
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        insert(conn, "candidates", **candidate())
-    conn.execute("UPDATE kh.candidates SET state = 'rejected' WHERE id = %s", [first["id"]])
-    insert(conn, "candidates", **candidate())
+def test_index_job_kinds(conn):
+    conn.execute("INSERT INTO kh.index_jobs (kind) VALUES ('git_push'), ('embed_record')")
+    for kind in ("embed_raw", "pr_event"):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("INSERT INTO kh.index_jobs (kind) VALUES (%s)", [kind])
 
 
 def test_tsv_generated(conn):
-    d = doc()
-    insert(conn, "documents", **d)
-    insert(conn, "chunks", **chunk(document_id=d["id"], heading_path="Intro", text="running quickly"))
+    d = add_doc(conn)
+    add_chunk(conn, document_id=d, heading_path="Intro", text="running quickly")
     row = conn.execute(
         "SELECT tsv::text, tsv @@ to_tsquery('english', 'run & quick') FROM kh.chunks"
     ).fetchone()

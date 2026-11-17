@@ -8,21 +8,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from knowledge_hub.config import Config
+from knowledge_hub.config import KhConfig
 from knowledge_hub.mcp.server import Deps, build_mcp
 from knowledge_hub.settings import Settings
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-READ_TOOLS = {
-    "search", "get_doc", "get_entity", "list_entities", "list_conflicts", "list_stale",
-    "pr_status", "list_my_proposals",
-}
-WRITE_TOOLS = {
-    "ingest_raw", "write_derived", "propose_change", "flag_conflict",
-    "write_note", "propose_doc", "propose_edit",
-}
+READ_TOOLS: set[str] = {"search", "get_doc", "list_stale", "list_labels"}
+WRITE_TOOLS: set[str] = {"ingest_record", "propose_doc"}
 READ_VERBS = {"read", "download", "search"}
 VERBS = READ_VERBS | {"add", "update", "restructure", "move", "send", "delete"}
 
@@ -33,7 +27,7 @@ TOOLS = UPSTREAM["tools"]
 
 
 async def test_every_registered_tool_is_declared():
-    deps = Deps(settings=Settings(env="test"), config=Config(), app_pool=None, indexer_pool=None)
+    deps = Deps(settings=Settings(env="test"), config=KhConfig(), app_pool=None, indexer_pool=None)
     registered = {t.name for t in await build_mcp(deps).list_tools()}
     assert registered == set(TOOLS), "declare every registered tool in the upstream declaration"
     assert registered == READ_TOOLS | WRITE_TOOLS, (
@@ -85,3 +79,12 @@ def test_upstream_fields():
     assert UPSTREAM["identity_claim"] == "required"
     assert UPSTREAM["allowed_principal_types"] == ["claude_client", "n8n_workflow"]
     assert "knowledge-hub:8080" in env["KH_ALLOWED_HOSTS"].split(",")
+
+
+def test_header_explains_people():
+    header = "\n".join(
+        line
+        for line in (ROOT / "deploy" / "privacyfence-upstream.example.yaml").read_text().splitlines()
+        if line.startswith("#")
+    )
+    assert "people" in header

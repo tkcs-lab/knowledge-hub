@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # Backup of the knowledge hub's non-rebuildable data.
 #
-# Dumps only the T2/T3 tables and mirrors the blob bucket. The git-derived tables
-# (documents, document_versions, chunks, entities_cache) are NOT dumped: they are rebuilt
-# from Forgejo with `kh rebuild`.
+# Dumps only kh.records. Groups and labels come from kh.yaml (`kh setup apply`); documents and chunks
+# are rebuilt from Forgejo with `kh rebuild`. The blob bucket is mirrored.
 #
-# Restore (as the Postgres superuser, after `kh migrate` on an empty database):
+# Restore (as the Postgres superuser, after `kh migrate` on an empty database), in this order:
 #   pg_restore --no-owner -d kh kh-t2t3-<date>.dump     (INSERT format, so RLS does not block it)
-#   kh rebuild                 # git-derived tables
-#   kh recompute-visibility    # once: the audience-map loader does not recompute when no
-#                              # __config__ hash is stored, which is the case after a restore
-#   kh requeue-embeddings      # rebuilds the chunks / embeddings
-# Blobs: `aws s3 sync "${BACKUP_DIR}/blobs/" s3://$KH_S3_BUCKET --endpoint-url "$KH_S3_ENDPOINT"`.
+#   kh setup apply
+#   kh rebuild
+#   kh requeue-embeddings
+#   S3 bucket sync, as for blobs: `aws s3 sync "${BACKUP_DIR}/blobs/" s3://$KH_S3_BUCKET --endpoint-url "$KH_S3_ENDPOINT"`.
 #
 # Runs as role kh_migrator: its USING (true) policy lets pg_dump read the FORCE-RLS tables
 # when --enable-row-security is given. Secrets are read from files only.
@@ -40,15 +38,7 @@ export AWS_DEFAULT_REGION="${KH_S3_REGION:-garage}"
 
 pg_dump -Fc --no-owner --enable-row-security --inserts \
   -h "$DB_HOST" -p "$DB_PORT" -U kh_migrator -d "$DB_NAME" \
-  -t kh.raw_records \
-  -t kh.raw_audience_map \
-  -t kh.derived_records \
-  -t kh.derived_sources \
-  -t kh.candidates \
-  -t kh.proposals \
-  -t kh.candidate_sources \
-  -t kh.conflicts \
-  -t kh.conflict_items \
+  -t kh.records \
   -f "${BACKUP_DIR}/kh-t2t3-${DATE}.dump"
 
 aws s3 sync --endpoint-url "$KH_S3_ENDPOINT" "s3://$KH_S3_BUCKET" "${BACKUP_DIR}/blobs/"

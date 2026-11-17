@@ -1,21 +1,24 @@
-"""Rate limits and the /metrics endpoint (plan 3.2)."""
+"""The /metrics endpoint: token check, job states for the new job kinds, webhook counters, no leaks."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import re
 
 import httpx
+import psycopg
 import pytest
 
 from knowledge_hub.app import build_app
-from knowledge_hub.config import Config
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.metrics import METRICS
-from knowledge_hub.ratelimit import RateLimiter
 from tests.support.claims import verifier_for_tests
-from tests.support.principals import alice_all, bob_mgmt
+from tests.support.principals import alice_all
 
 TOKEN = "metrics-secret-token"
+SECRET = "hook-secret"
 
 
 @pytest.fixture(autouse=True)
@@ -31,18 +34,16 @@ def app_settings(app_settings, tmp_path):
     key.write_bytes(b"k" * 32)
     tok = tmp_path / "metrics.token"
     tok.write_text(TOKEN + "\n")
-    return app_settings.model_copy(update={"cursor_key_file": key, "metrics_token_file": tok})
+    hook = tmp_path / "hmac"
+    hook.write_text(SECRET + "\n")
+    return app_settings.model_copy(
+        update={"cursor_key_file": key, "metrics_token_file": tok, "webhook_hmac_file": hook}
+    )
 
 
 @pytest.fixture
-def deps(app_settings, app_pool, indexer_pool):
-    return Deps(
-        settings=app_settings,
-        config=Config(),
-        app_pool=app_pool,
-        indexer_pool=indexer_pool,
-        ratelimiter=RateLimiter(3),
-    )
+def deps(app_settings, kh_config, app_pool, indexer_pool):
+    return Deps(settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool)
 
 
 async def scrape(http, token=TOKEN):
@@ -50,33 +51,56 @@ async def scrape(http, token=TOKEN):
     return await http.get("/metrics", headers=headers)
 
 
-async def test_tool_call_counts_and_scrape(mcp_client):
-    res = await mcp_client.call(alice_all, "list_stale", {})
-    assert not res.is_error, res
+async def hook(http, payload, event="push"):
+    body = json.dumps(payload).encode()
+    sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+    return await http.post(
+        "/webhooks/forgejo", content=body, headers={"x-forgejo-event": event, "x-forgejo-signature": sig}
+    )
+
+
+async def test_scrape_lists_every_job_state(mcp_client):
     r = await scrape(mcp_client.http)
     assert r.status_code == 200
-    text = r.text
-    assert 'kh_tool_calls_total{tool="list_stale",outcome="ok"} 1' in text
-    assert 'kh_tool_seconds_count{tool="list_stale"} 1' in text
-    assert re.search(r'kh_tool_seconds_sum\{tool="list_stale"\} [0-9.]+', text)
-    assert 'kh_index_jobs{state="queued"} 0' in text
+    for state in ("queued", "running", "done", "failed"):
+        assert f'kh_index_jobs{{state="{state}"}} 0' in r.text
+
+
+async def test_queued_jobs_of_both_kinds_are_counted(mcp_client, fresh_db):
+    pushed = {"ref": "refs/heads/main", "repository": {"full_name": "kh/kb-all"}}
+    with psycopg.connect(fresh_db.admin_dsn("kh_fresh"), autocommit=True) as conn:
+        conn.execute("INSERT INTO kh.groups (name, repo) VALUES ('all', 'kb-all')")
+        conn.execute("INSERT INTO kh.index_jobs (kind, payload) VALUES ('embed_record', '{}')")
+    assert (await hook(mcp_client.http, pushed)).status_code == 202
+    text = (await scrape(mcp_client.http)).text
+    assert 'kh_index_jobs{state="queued"} 2' in text
+    assert 'kh_webhook_events_total{result="queued"} 1' in text
+
+
+async def test_webhook_results_are_counted(mcp_client):
+    other = {"ref": "refs/heads/main", "repository": {"full_name": "other/kb-all"}}
+    assert (await hook(mcp_client.http, other)).status_code == 202
+    bad = await mcp_client.http.post(
+        "/webhooks/forgejo", content=b"{}", headers={"x-forgejo-signature": "0" * 64}
+    )
+    assert bad.status_code == 401
+    text = (await scrape(mcp_client.http)).text
+    assert 'kh_webhook_events_total{result="ignored"} 1' in text
+    assert 'kh_webhook_events_total{result="bad_signature"} 1' in text
 
 
 async def test_rejected_claim_is_counted(mcp_client):
-    res = await mcp_client.call(alice_all, "list_stale", {}, token="not-a-claim")
+    res = await mcp_client.call(alice_all, "anything", {}, token="not-a-claim")
     assert res.status == 401
     text = (await scrape(mcp_client.http)).text
     assert re.search(r'kh_claim_rejections_total\{code="[a-z_]+"\} 1', text)
 
 
-async def test_rate_limit_text_and_counter(mcp_client):
-    for _ in range(3):
-        assert not (await mcp_client.call(alice_all, "list_stale", {})).is_error
-    res = await mcp_client.call(alice_all, "list_stale", {})
-    assert res.is_error and re.search(r"rate limit exceeded; retry in \d+ seconds", res.text)
-    assert not (await mcp_client.call(bob_mgmt, "list_stale", {})).is_error  # per-sub bucket
-    text = (await scrape(mcp_client.http)).text
-    assert 'kh_tool_calls_total{tool="list_stale",outcome="rate_limited"} 1' in text
+async def test_tool_call_counters_are_rendered():
+    METRICS.tool_call("search", "ok", 0.25)
+    text = METRICS.render()
+    assert 'kh_tool_calls_total{tool="search",outcome="ok"} 1' in text
+    assert re.search(r'kh_tool_seconds_sum\{tool="search"\} 0\.25', text)
 
 
 @pytest.mark.parametrize("token", [None, "wrong", "", TOKEN + "x"])
@@ -90,14 +114,13 @@ async def test_non_bearer_scheme_is_refused(mcp_client):
 
 
 async def test_metrics_text_leaks_nothing(mcp_client):
-    for who in (alice_all, bob_mgmt):
-        await mcp_client.call(who, "list_stale", {})
-    await mcp_client.call(alice_all, "get_doc", {"id": "doc:00000000-0000-4000-8000-000000000001"})
-    await mcp_client.call(alice_all, "list_stale", {}, token="junk")
+    pushed = {"ref": "refs/heads/main", "repository": {"full_name": "kh/kb-all"}}
+    await hook(mcp_client.http, pushed)
+    await mcp_client.call(alice_all, "anything", {}, token="junk")
     text = (await scrape(mcp_client.http)).text
     assert "@" not in text
     assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", text)
-    for secret in ("alice", "bob", "mgmt", "hr", "contracts", "audience", TOKEN):
+    for secret in ("alice", "bob", "mgmt", "kb-all", "audience", TOKEN, SECRET):
         assert secret not in text.replace("kh_", "")
 
 
@@ -125,18 +148,3 @@ def test_label_values_come_from_fixed_sets():
     text = METRICS.render()
     assert 'code="other"' in text and 'result="other"' in text and 'outcome="error"' in text
     assert "alice" not in text and "doc:" not in text
-
-
-async def test_agent_write_failure_counter_is_rendered(mcp_client):
-    from knowledge_hub.agent.guards import record_write_failure
-    from knowledge_hub.forgejo.client import ForgejoError, ForgejoRefused
-
-    record_write_failure("write_note", ForgejoRefused("no"))
-    record_write_failure("write_note", ForgejoError("boom"))
-    record_write_failure("write_note", ForgejoError("boom"))
-    text = (await scrape(mcp_client.http)).text
-    assert 'kh_agent_write_failures_total{tool="write_note",reason="refused"} 1' in text
-    assert 'kh_agent_write_failures_total{tool="write_note",reason="forgejo_error"} 2' in text
-    assert "# TYPE kh_agent_write_failures_total counter" in text
-    METRICS.reset()
-    assert "kh_agent_write_failures_total{" not in METRICS.render()

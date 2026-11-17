@@ -27,12 +27,8 @@ class HttpEmbedder:
             transport=transport, timeout=timeout, headers={"Authorization": f"Bearer {token}"}
         )
 
-    def may_embed(self, visibility: object) -> bool:
-        audiences = getattr(visibility, "required_audiences", None)
-        if not audiences or getattr(visibility, "allowed_emails", None) is not None:
-            return False
-        members = {a for c in audiences for a in c.split("|")}
-        return members <= self.allowed_audiences
+    def may_embed(self, audience: str) -> bool:
+        return audience in self.allowed_audiences
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []

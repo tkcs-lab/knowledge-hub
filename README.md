@@ -1,19 +1,28 @@
 # knowledge-hub
 
-The trusted core of the company knowledge layer: one MCP interface over canonical documents in git and machine-written records in Postgres. Every result carries its trust tier and is filtered by the caller's audiences inside Postgres (row-level security), not in Python. Agents reach it through PrivacyFence, where its tools appear as `kh_search`, `kh_get_doc`, `kh_propose_change`, `kh_write_note`, `kh_propose_doc`, `kh_propose_edit`, `kh_pr_status`, `kh_list_my_proposals` and so on.
+The trusted core of the company knowledge layer: one MCP interface over two tiers of knowledge. Every result carries its tier and is filtered by the caller's groups inside Postgres (row-level security), not in Python. Agents reach it through PrivacyFence, where its tools appear as `kh_search`, `kh_get_doc`, `kh_ingest_record` and so on.
 
-## The four tiers
+## The two tiers
 
 | Tier | Source | Trust |
 |---|---|---|
-| T0 | canonical Forgejo repos, merged after an approved pull request | normative |
-| T1 | `notes-*` repos, any merge; agents through `write_note` (marked, unreviewed) | notes |
-| T2 | derived records written by `write_derived`, citing their sources | machine summary |
-| T3 | raw records ingested by workflows, bodies in S3-compatible storage | raw material |
+| T0 | Markdown files on `main` of a group's Forgejo repo, merged by a pull request that one of the group's approvers merges | normative |
+| T3 | records that n8n or Claude put in with `ingest_record`, bodies in S3-compatible storage | raw material |
 
-## Audience model
+## Groups
 
-PrivacyFence signs an identity claim for every request, and the hub verifies it with PrivacyFence's vendored verifier. The claim lists the caller's audiences (`all`, `mgmt`, `hr`, `contracts`, ...), which an operator maps from Workspace groups. A row's `required_audiences` is a set of clauses, each one audience or an any-of list, and the row is visible when the caller holds at least one audience of every clause. Rows may also list `allowed_emails`, which must then match the verified email of a person (meeting attendees, for example). A derived record inherits the clauses of all its sources, so it needs every source and can never be wider than its sources. Postgres enforces all of this with four roles under forced row-level security.
+A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of members and a non-empty list of approvers. A person reads the groups that `kh.yaml` lists for their verified email, so a joiner or leaver is one edit of one file. Every T3 record belongs to one group, and an n8n workflow holds the group names its PrivacyFence token carries. Documents and records may also carry labels, defined in `kh.yaml`.
+
+## Tools
+
+| Tool | Use |
+|---|---|
+| `search` | Hybrid search over T0 and T3, filtered by labels and group. |
+| `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
+| `list_stale` | Documents past their `review_by` date. |
+| `list_labels` | The labels of `kh.yaml`. |
+| `ingest_record` | Store a raw record (T3) readable by one group. |
+| `propose_doc` | Open a pull request that proposes a document change in a group's repo. |
 
 ## Quick start
 
@@ -32,19 +41,17 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 
 | Command | Use |
 |---|---|
-| `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the webhook worker. |
-| `kh migrate` | Apply the SQL migrations as `kh_migrator`. |
-| `kh rebuild` | Re-walk trust from the configured anchor and re-index Forgejo. `--rejudge` judges every merge afresh. |
-| `kh check` | Compare the index and the config with Forgejo; exit 1 on drift. |
-| `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
-| `kh recompute-visibility` | Rewrite visibility from the config. |
+| `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
+| `kh migrate` | Apply the SQL migration as `kh_migrator`. |
+| `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
+| `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo). |
+| `kh check` | Compare the index with Forgejo; exit 1 on drift. |
+| `kh daily` | Recompute stale flags and purge expired claim ids. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
-| `kh validate` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. See [governance](docs/governance.md). |
-| `kh domain-owners` | CI gate: owner-team approvals or self-merge by an owner of a pull request. See [governance](docs/governance.md). |
-| `kh governance render` | Write the seed files (schema, `owners.yml`, CODEOWNERS, PR template, workflow) of a canonical repo. See [governance](docs/governance.md). |
+| `kh lint FILE...` | Offline frontmatter check of Markdown files; exit 1 on a problem. |
 
 ## Documentation
 
-- [Design](docs/design.md): tiers, roles, row-level security, trust model, decisions and rejected alternatives.
-- [Configuration](docs/configuration.md): every `KH_*` variable and every `kh.yaml` key.
-- [Runbook](docs/runbook.md): install order, routine tasks, alerts, restore and rotation.
+- [Design](docs/design.md): tiers, trust, the access model, schema, search and rejected alternatives.
+- [Configuration](docs/configuration.md): every `KH_*` variable, every `kh.yaml` key, `kh setup`.
+- [Runbook](docs/runbook.md): install order, routine tasks, alerts, restore, rotation and releasing.

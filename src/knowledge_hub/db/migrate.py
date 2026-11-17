@@ -28,6 +28,13 @@ def _applied(conn: psycopg.Connection) -> dict[str, str]:
     return {name: sha for name, sha in conn.execute("SELECT name, sha256 FROM kh.schema_migrations")}
 
 
+def pending(dsn: str) -> list[str]:
+    """Names of shipped migration files that are not applied yet (read-only)."""
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        applied = _applied(conn)
+    return [name for name, _ in _migration_files() if name not in applied]
+
+
 def migrate(dsn: str, *, stop_after: str | None = None) -> list[str]:
     """Apply pending migrations; return the names applied in this run.
 
@@ -37,6 +44,9 @@ def migrate(dsn: str, *, stop_after: str | None = None) -> list[str]:
     applied_now: list[str] = []
     with psycopg.connect(dsn, autocommit=True) as conn:
         applied = _applied(conn)
+        shipped = {name for name, _ in files}
+        if any(name not in shipped for name in applied):
+            raise MigrationError("database predates the baseline; a fresh install is required")
         for name, text in files:
             if stop_after is not None and name > stop_after:
                 continue

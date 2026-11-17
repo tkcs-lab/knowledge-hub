@@ -1,8 +1,8 @@
-"""Chunk planning, embedding and writing for one repo sync (plan sections 3.6 and 3.10).
+"""Chunk planning, embedding and writing for one repo sync (plan sections 3.5 and 3.6).
 
 ``plan_chunks`` runs before the write transaction (embedding is slow); ``apply_chunks`` runs inside it.
-A stored chunk is kept (same id) when a new chunk has the same ``content_sha`` (which includes the chunker
-version), the same embedding model, and the same "embedded or not" state; anything else is rewritten.
+A stored chunk is kept (same id, same embedding) when a new chunk has the same ``content_sha`` (which
+includes the chunker version), the same embedding model and the same "embedded or not" state.
 """
 
 from __future__ import annotations
@@ -14,10 +14,7 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from knowledge_hub.config import Config
 from knowledge_hub.indexer.chunker import chunk_markdown
-
-DEFAULT_CHUNKER_VERSION = 1
 
 
 @dataclass
@@ -31,9 +28,11 @@ class StoredChunk:
 
 @dataclass
 class ChunkDoc:
-    """One document to chunk: ``doc`` is the ``DocUpsert`` (body and visibility), ``stored`` its chunks."""
+    """One document to chunk and the chunks it already has."""
 
-    doc: Any
+    doc_key: str
+    audience: str
+    body: str
     stored: list[StoredChunk] = field(default_factory=list)
 
 
@@ -50,7 +49,7 @@ class NewChunk:
 @dataclass
 class DocChunks:
     doc_key: str
-    keep: dict[Any, int]  # stored chunk id -> new ordinal (kept as is, id and embedding unchanged)
+    keep: dict[Any, int]  # stored chunk id -> new ordinal
     drop: list[Any]  # stored chunk ids to delete
     write: list[NewChunk]  # chunks to insert
 
@@ -79,29 +78,22 @@ async def load_stored_chunks(conn: Any, repo: str) -> dict[str, list[StoredChunk
     return out
 
 
-async def plan_chunks(
-    embedder: Any,
-    config: Config,
-    document_rows: Sequence[ChunkDoc],
-    *,
-    chunker_version: int = DEFAULT_CHUNKER_VERSION,
-) -> ChunkPlan:
-    """Chunk each document, embed what changed, and diff against the stored chunks.
+def _embed_text(heading_path: str, text: str) -> str:
+    return f"{heading_path}\n\n{text}" if heading_path else text
 
-    ``config`` is accepted for the plan's signature; the chunker version is a setting, passed as
-    ``chunker_version``.
-    """
-    del config
+
+async def plan_chunks(
+    embedder: Any, repo: str, docs: Sequence[ChunkDoc], *, chunker_version: int
+) -> ChunkPlan:
+    """Chunk each document, embed what changed (only when ``may_embed(audience)``), diff against stored."""
     version = str(chunker_version)
-    plan = ChunkPlan(repo="")
-    pending: list[tuple[NewChunk, str]] = []  # (chunk, text) awaiting an embedding
-    for row in document_rows:
-        doc = row.doc
-        plan.repo = doc.repo
-        embeddable = bool(embedder.may_embed(doc))
+    plan = ChunkPlan(repo=repo)
+    pending: list[tuple[NewChunk, str]] = []
+    for doc in docs:
+        embeddable = bool(embedder.may_embed(doc.audience))
         model = embedder.model if embeddable else None
         by_sha: dict[str, list[StoredChunk]] = defaultdict(list)
-        for s in row.stored:
+        for s in doc.stored:
             by_sha[s.content_sha].append(s)
         keep: dict[Any, int] = {}
         write: list[NewChunk] = []
@@ -121,8 +113,7 @@ async def plan_chunks(
             write.append(nc)
             if embeddable:
                 pending.append((nc, _embed_text(c.heading_path, c.text)))
-        drop = [s.id for s in row.stored if s.id not in keep]
-        plan.docs.append(DocChunks(doc.doc_key, keep, drop, write))
+        plan.docs.append(DocChunks(doc.doc_key, keep, [s.id for s in doc.stored if s.id not in keep], write))
     if pending:
         vectors = await embedder.embed([t for _, t in pending])
         for (nc, _), vec in zip(pending, vectors, strict=True):
@@ -130,16 +121,15 @@ async def plan_chunks(
     return plan
 
 
-def _embed_text(heading_path: str, text: str) -> str:
-    return f"{heading_path}\n\n{text}" if heading_path else text
-
-
 def _vec(v: list[float] | None) -> str | None:
     return None if v is None else "[" + ",".join(repr(float(x)) for x in v) + "]"
 
 
 async def apply_chunks(conn: Any, plan: ChunkPlan) -> None:
-    """Write the chunk plan inside the sync transaction (documents must already be written)."""
+    """Write the chunk plan inside the sync transaction (the documents must already be written).
+
+    The ``chunks_inherit_owner`` trigger fills tier, audience, labels, stale and the owner columns.
+    """
     for d in plan.docs:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -151,7 +141,6 @@ async def apply_chunks(conn: Any, plan: ChunkPlan) -> None:
         doc_id = found[0]
         if d.drop:
             await conn.execute("DELETE FROM kh.chunks WHERE id = ANY(%s)", (d.drop,))
-        # Park kept ordinals out of the way is unnecessary: there is no unique constraint on ordinal.
         for chunk_id, ordinal in d.keep.items():
             await conn.execute(
                 "UPDATE kh.chunks SET ordinal = %s WHERE id = %s AND ordinal <> %s",
@@ -159,11 +148,9 @@ async def apply_chunks(conn: Any, plan: ChunkPlan) -> None:
             )
         for c in d.write:
             await conn.execute(
-                """
-                INSERT INTO kh.chunks (id, document_id, ordinal, heading_path, text, content_sha,
-                    embedding, embedding_model, owner_key, tier, required_audiences)
-                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s::vector, %s, '', 'T0', '{}')
-                """,
+                "INSERT INTO kh.chunks (document_id, ordinal, heading_path, text, content_sha,"
+                " embedding, embedding_model, owner_key, owner_created_at, tier, audience)"
+                " VALUES (%s, %s, %s, %s, %s, %s::vector, %s, '', now(), 'T0', '')",
                 (
                     doc_id,
                     c.ordinal,

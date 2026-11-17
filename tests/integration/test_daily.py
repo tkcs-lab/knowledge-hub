@@ -1,157 +1,71 @@
-"""``kh daily`` (plan 3.12) against PostgreSQL with a fake Grist."""
+"""``run_daily`` and ``requeue_embeddings``."""
 
 from __future__ import annotations
 
-import uuid
-from datetime import date
+from datetime import date, timedelta
 
+import psycopg
 import pytest
 
-from knowledge_hub.config import Config, parse_config
-from knowledge_hub.db.caller_tx import caller_tx
 from knowledge_hub.jobs.daily import run_daily
-from tests.integration.test_search_ranking import QUERY, add_doc, app_pool_of, deps, ids, search  # noqa: F401
-from tests.support.principals import alice_all, bob_mgmt
+from knowledge_hub.jobs.requeue import requeue_embeddings
+from tests.support.seed import add_chunk, add_doc, add_record
 
-TODAY = date(2026, 11, 15)
-CONTRACTS = type(alice_all)(
-    sub="carol", principal_type="claude_client", email="c@example.org",
-    audiences=frozenset({"all", "contracts"}), token_id=None,
-)
+DB = "kh_fresh"
 
 
-class FakeGrist:
-    def __init__(self, tables: dict[str, list[dict]]):
-        self.tables = tables
-
-    async def fetch_table(self, name: str) -> list[dict]:
-        return self.tables.get(name, [])
-
-
-def grist(*, cus: bool = True, extra=()) -> FakeGrist:
-    rows = {
-        "Products": [{"key": "prd:gateway", "name": "Gateway", "owner_team": "core", "status": "active",
-                      "links": "https://x"}],
-        "Components": [{"key": "cmp:auth", "name": "Auth"}],
-        "Versions": [{"key": "ver:v1", "name": "v1"}],
-        "Customers": [{"key": "cus:acme", "name": "Acme"}] if cus else [],
-    }
-    for table, row in extra:
-        rows[table] = rows[table] + [row]
-    return FakeGrist(rows)
+@pytest.fixture
+def world(fresh_db):
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute("INSERT INTO kh.groups (name, repo) VALUES ('all', 'kb-all')")
+    return fresh_db
 
 
-async def entity_ids(pool, caller) -> list[str]:
-    async with caller_tx(app_pool_of(pool), caller) as conn:
-        cur = await conn.execute("SELECT id FROM kh.entities_cache ORDER BY id")
-        return [r[0] for r in await cur.fetchall()]
+def conn_for(world):
+    return psycopg.connect(world.admin_dsn(DB), autocommit=True)
 
 
-async def set_review_by(pool, citation: str, review_by: str) -> None:
-    async with pool.connection() as conn:
-        await conn.execute("UPDATE kh.documents SET review_by = %s WHERE id = %s",
-                           (review_by, uuid.UUID(citation.removeprefix("doc:"))))
+async def test_stale_flips_both_ways_and_reaches_chunks(world, indexer_pool):
+    today = date.today()
+    with conn_for(world) as conn:
+        past = add_doc(conn, review_by=today - timedelta(days=1), stale=False)
+        future = add_doc(conn, review_by=today + timedelta(days=1), stale=True)
+        due = add_doc(conn, review_by=today, stale=False)
+        ok = add_doc(conn, review_by=today + timedelta(days=30), stale=False)
+        add_chunk(conn, document_id=past)
+    assert await run_daily(indexer_pool) == (2, 0)
+    with conn_for(world) as conn:
+        got = dict(conn.execute("SELECT id::text, stale FROM kh.documents").fetchall())
+        assert got == {past: True, future: False, due: False, ok: False}
+        assert conn.execute("SELECT stale FROM kh.chunks").fetchall() == [(True,)]
+    assert await run_daily(indexer_pool) == (0, 0)
 
 
-async def test_stale_flag_and_ranking(deps, indexer_pool, mcp_client):  # noqa: F811
-    old = await add_doc(indexer_pool, QUERY)
-    fresh = await add_doc(indexer_pool, QUERY)
-    await set_review_by(indexer_pool, old, "2026-11-14")
-    await set_review_by(indexer_pool, fresh, "2026-11-15")
-    res = await run_daily(indexer_pool, grist(), Config(), TODAY)
-    assert res["stale_changed"] == 1
-    out = await search(mcp_client, alice_all)
-    assert ids(out) == [fresh, old]
-    assert out.data["hits"][1]["stale"] is True and out.data["hits"][0]["stale"] is False
-
-
-async def test_customers_invisible_without_contracts(deps, indexer_pool):  # noqa: F811
-    await run_daily(indexer_pool, grist(), Config(), TODAY)
-    assert await entity_ids(indexer_pool, alice_all) == ["cmp:auth", "prd:gateway", "ver:v1"]
-    assert await entity_ids(indexer_pool, bob_mgmt) == ["cmp:auth", "prd:gateway", "ver:v1"]
-    assert "cus:acme" in await entity_ids(indexer_pool, CONTRACTS)
-    async with indexer_pool.connection() as conn:
-        cur = await conn.execute(
-            "SELECT kind, name, owner_team, status, attrs, required_audiences, allowed_emails "
-            "FROM kh.entities_cache WHERE id = 'prd:gateway'"
+async def test_expired_claims_are_purged(world, indexer_pool):
+    with conn_for(world) as conn:
+        conn.execute(
+            "INSERT INTO kh.claim_jti (jti, expires_at) VALUES"
+            " ('old', now() - interval '1 minute'), ('live', now() + interval '1 hour')"
         )
-        assert await cur.fetchone() == (
-            "prd", "Gateway", "core", "active", {"links": "https://x"}, ["all"], None)
+    assert await run_daily(indexer_pool) == (0, 1)
+    with conn_for(world) as conn:
+        assert conn.execute("SELECT jti FROM kh.claim_jti").fetchall() == [("live",)]
 
 
-async def test_config_change_applies_at_next_run(deps, indexer_pool):  # noqa: F811
-    await run_daily(indexer_pool, grist(), Config(), TODAY)
-    cfg = Config(entities={"prd": ["contracts"], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]})
-    await run_daily(indexer_pool, grist(), cfg, TODAY)
-    assert await entity_ids(indexer_pool, alice_all) == ["cmp:auth", "ver:v1"]
-
-
-async def test_empty_audience_config_refused(indexer_pool):
-    cfg = Config(entities={"prd": [], "cmp": ["all"], "ver": ["all"], "cus": ["contracts"]})
-    with pytest.raises(ValueError, match="no audience"):
-        await run_daily(indexer_pool, grist(), cfg, TODAY)
-
-
-async def test_removed_entity_disappears(deps, indexer_pool):  # noqa: F811
-    await run_daily(indexer_pool, grist(), Config(), TODAY)
-    res = await run_daily(indexer_pool, grist(cus=False), Config(), TODAY)
-    assert res["entities_removed"] == 1
-    assert "cus:acme" not in await entity_ids(indexer_pool, CONTRACTS)
-
-
-async def test_rows_with_wrong_prefix_are_skipped(deps, indexer_pool):  # noqa: F811
-    g = grist(extra=[("Products", {"key": "cus:oops", "name": "x"}), ("Products", {"name": "nokey"})])
-    res = await run_daily(indexer_pool, g, Config(), TODAY)
-    assert res["entities_skipped"] == 2
-    assert "cus:oops" not in await entity_ids(indexer_pool, CONTRACTS)
-
-
-async def test_expired_jti_purged(deps, indexer_pool, db_settings):  # noqa: F811
-    import psycopg
-
-    with psycopg.connect(f"{db_settings.dsn('migrator')}", autocommit=True) as admin:
-        admin.execute("INSERT INTO kh.claim_jti (jti, expires_at) VALUES ('old', now() - interval '1 hour'),"
-                      " ('live', now() + interval '1 hour')")
-        res = await run_daily(indexer_pool, grist(), Config(), TODAY)
-        assert res["jti_purged"] == 1
-        left = [r[0] for r in admin.execute("SELECT jti FROM kh.claim_jti").fetchall()]
-    assert left == ["live"]
-
-
-async def test_rerun_changes_nothing(deps, indexer_pool):  # noqa: F811
-    doc = await add_doc(indexer_pool, QUERY)
-    await set_review_by(indexer_pool, doc, "2026-01-01")
-    await run_daily(indexer_pool, grist(), Config(), TODAY)
-
-    async def snapshot():
-        async with indexer_pool.connection() as conn:
-            e = await (await conn.execute("SELECT * FROM kh.entities_cache ORDER BY id")).fetchall()
-            d = await (await conn.execute("SELECT id, stale, updated_at FROM kh.documents")).fetchall()
-            return e, d
-
-    before = await snapshot()
-    res = await run_daily(indexer_pool, grist(), Config(), TODAY)
-    assert await snapshot() == before
-    assert res["stale_changed"] == 0 and res["entities_removed"] == 0
-
-
-async def test_custom_kind_reads_its_table(deps, indexer_pool):  # noqa: F811
-    await run_daily(indexer_pool, grist(), Config(), TODAY)
-    cfg = parse_config({"entities": {"fam": {"table": "Family", "audiences": ["all"]}}})
-    g = FakeGrist({"Family": [{"key": "fam:kid1", "name": "Kid 1"}, {"key": "prd:x", "name": "x"}],
-                   "Products": [{"key": "prd:gateway"}]})
-    res = await run_daily(indexer_pool, g, cfg, TODAY)
-    assert await entity_ids(indexer_pool, alice_all) == ["fam:kid1"]
-    assert res["entities_skipped"] == 1
-
-
-async def test_multi_audience_kind_is_stored_as_one_clause(deps, indexer_pool):  # noqa: F811
-    cfg = parse_config({
-        "audiences": ["all", "mgmt", "hr", "contracts", "finance"],
-        "entities": {"fam": {"table": "Family", "audiences": ["mgmt", "finance"]}},
-    })
-    await run_daily(indexer_pool, FakeGrist({"Family": [{"key": "fam:kid1", "name": "Kid 1"}]}), cfg, TODAY)
-    async with indexer_pool.connection() as conn:
-        rows = await (await conn.execute(
-            "SELECT required_audiences FROM kh.entities_cache WHERE kind = 'fam'")).fetchall()
-    assert rows == [(["finance|mgmt"],)]
+async def test_requeue_inserts_a_job_per_record_without_chunks(world, indexer_pool):
+    with conn_for(world) as conn:
+        bare = add_record(conn)
+        covered = add_record(conn)
+        add_chunk(conn, record_id=covered, tier="T3")
+        waiting = add_record(conn)
+        conn.execute("DELETE FROM kh.index_jobs")  # the insert trigger queued one per record
+        conn.execute(
+            "INSERT INTO kh.index_jobs (kind, payload)"
+            " VALUES ('embed_record', jsonb_build_object('id', %s::text))",
+            (waiting,),
+        )
+    assert await requeue_embeddings(indexer_pool) == 1
+    with conn_for(world) as conn:
+        rows = conn.execute("SELECT kind, state, payload ->> 'id' FROM kh.index_jobs ORDER BY id").fetchall()
+    assert rows == [("embed_record", "queued", waiting), ("embed_record", "queued", bare)]
+    assert await requeue_embeddings(indexer_pool) == 0
