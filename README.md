@@ -17,7 +17,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 
 | Tool | Use |
 |---|---|
-| `search` | Hybrid search over T0 and T3, filtered by labels and group. |
+| `search` | Hybrid search over T0 and T3 (both by default; `min_tier=T0` for documents only), filtered by labels and group. |
 | `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |

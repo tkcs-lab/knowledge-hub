@@ -19,7 +19,7 @@ class SearchFilters:
     query: str
     query_vector: list[float]
     embedding_model: str
-    min_tier: str = "T0"
+    min_tier: str = "T3"
     labels: list[str] = field(default_factory=list)
     audience: str = ""
     limit: int = 10

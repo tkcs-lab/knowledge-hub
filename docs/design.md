@@ -13,7 +13,7 @@ This document records the decisions as built, the alternatives that were rejecte
 
 - A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name an n8n token carries and the access group of one T0 repo. Every group has exactly one repo.
 - A **label** matches `^[a-z0-9][a-z0-9_.:-]{0,62}$` (`product:ember` is legal), is defined in `kh.yaml` and stored in `kh.labels`. Label names are visible to every caller; do not put secrets in them.
-- Tools return the ids `doc:<uuid>` and `rec:<uuid>`. `search` defaults to `min_tier=T0`; tier weights are `T0:1.0,T3:0.4`.
+- Tools return the ids `doc:<uuid>` and `rec:<uuid>`. `search` defaults to `min_tier=T3`, which searches T0 and T3; `min_tier=T0` searches documents only; tier weights are `T0:1.0,T3:0.4`.
 
 ## Trust: Forgejo is the control
 
@@ -94,7 +94,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 
 ## Search
 
-One statement inside `caller_tx`: an exact vector order (no ANN index) fused by RRF with a full-text list, each limited to `KH_SEARCH_POOL`, weighted by tier and by the stale flag, one best chunk per owner. With `min_tier=T0` only T0 is searched; when no T0 hit exists but T3 hits do, the call fails with `only T3 records match; repeat with min_tier T3 to see them`. Cursors are HMAC-bound to the caller, the query and the filters, with a bounded offset.
+One statement inside `caller_tx`: an exact vector order (no ANN index) fused by RRF with a full-text list, each limited to `KH_SEARCH_POOL`, weighted by tier and by the stale flag, one best chunk per owner. By default (`min_tier=T3`) T0 and T3 are searched together, records weighted lower. With `min_tier=T0` only T0 is searched; when no T0 hit exists but T3 hits do, the call fails with `only T3 records match; repeat with min_tier T3 to see them`. Cursors are HMAC-bound to the caller, the query and the filters, with a bounded offset.
 
 ## Tools
 

@@ -156,14 +156,22 @@ async def test_cursor_pages_and_is_bound_to_caller_and_query(mcp_client, db):
 async def test_normative_when_only_t3_matches(mcp_client, db):
     rec = add_chunked_record(db, "platypus ledger")
     db.commit()
-    res = await mcp_client.call(alice_all, "search", {"query": "platypus"})
+    res = await mcp_client.call(alice_all, "search", {"query": "platypus", "min_tier": "T0"})
     assert res.is_error and res.text.endswith(NORMATIVE)
     out = await hits(mcp_client, alice_all, query="platypus", min_tier="T3")
     assert [h["id"] for h in out] == [f"rec:{rec}"]
     doc = add_chunked_doc(db, "platypus handbook")
     db.commit()
-    out = await hits(mcp_client, alice_all, query="platypus")  # T0 hit exists: T3 stays out
+    out = await hits(mcp_client, alice_all, query="platypus", min_tier="T0")  # T0 hit exists: T3 stays out
     assert [h["id"] for h in out] == [f"doc:{doc}"]
+
+
+async def test_default_searches_both_tiers(mcp_client, db):
+    doc = add_chunked_doc(db, "capybara handbook")
+    rec = add_chunked_record(db, "capybara ledger")
+    db.commit()
+    out = await hits(mcp_client, alice_all, query="capybara")
+    assert [h["id"] for h in out] == [f"doc:{doc}", f"rec:{rec}"]
 
 
 def test_tier_weights_setting_is_validated():

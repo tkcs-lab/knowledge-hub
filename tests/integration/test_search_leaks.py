@@ -61,7 +61,7 @@ async def test_a_caller_sees_only_held_audiences(mcp_client, seeded_db, caller, 
 
 @pytest.mark.parametrize("caller", CALLERS, ids=lambda c: c.sub)
 async def test_documents_only_search_sees_only_held_documents(mcp_client, seeded_db, caller):
-    res = await mcp_client.call(caller, "search", {"query": "chunk", "limit": 50})
+    res = await mcp_client.call(caller, "search", {"query": "chunk", "limit": 50, "min_tier": "T0"})
     if not caller.audiences:
         assert not res.is_error and res.data["hits"] == []
         return
@@ -89,7 +89,7 @@ async def test_naming_a_foreign_audience_reveals_nothing(mcp_client, seeded_db):
 
 async def test_a_foreign_record_does_not_trigger_normative(mcp_client, seeded_db):
     # bob's mgmt record matches, but alice cannot see it: she gets an empty result, not NORMATIVE
-    res = await mcp_client.call(alice_all, "search", {"query": "chunk of record mgmt"})
+    res = await mcp_client.call(alice_all, "search", {"query": "chunk of record mgmt", "min_tier": "T0"})
     assert not res.is_error, res.text
     assert not res.text.endswith(NORMATIVE)
     assert all(h["audience"] == "all" for h in res.data["hits"])
