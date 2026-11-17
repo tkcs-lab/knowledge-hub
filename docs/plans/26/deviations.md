@@ -33,7 +33,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-worker-webhook
 
-- pending
+- worker: Worker._git_push holds a per-repo asyncio.Lock on top of the one-job-at-a-time loop (p4 rule); not in the brief
+- worker: worker raises ValueError on any job kind other than git_push and embed_record; webhook drops pr_event unlike the old file
+- worker: test_metrics covers job-state and webhook counters only; tool-call and rate-limit paths covered by a direct METRICS.tool_call render test because no tools are registered yet
+- review: metrics.agent_write_failure and its Prometheus counter are leftovers of the old agent writes; metrics.py is outside p5 touches, to be removed by a later phase or the final review
 
 ## p6-rebuild-jobs-cli
 
