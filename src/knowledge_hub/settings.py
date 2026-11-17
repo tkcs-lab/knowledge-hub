@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from knowledge_hub.search.sql import parse_tier_weights
@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     propose_max_open: int = 20
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
+    usage_log: bool = True
+    usage_retention_days: int = Field(default=180, ge=1, le=3650)
 
     setup_pg_admin_dsn_file: Path | None = None
     setup_forgejo_admin_token_file: Path | None = None

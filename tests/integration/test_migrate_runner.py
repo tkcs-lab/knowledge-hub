@@ -8,6 +8,7 @@ from knowledge_hub.db import migrate as migrate_mod
 from knowledge_hub.db.migrate import MigrationError, migrate
 
 BASELINE = "0001_baseline.sql"
+USAGE = "0002_usage_events.sql"
 
 
 def _empty_db(cluster, name: str) -> str:
@@ -19,8 +20,8 @@ def _empty_db(cluster, name: str) -> str:
     return cluster.dsn("kh_migrator", name)
 
 
-def test_exactly_one_migration_is_shipped():
-    assert [n for n, _ in migrate_mod._migration_files()] == [BASELINE]
+def test_the_two_migrations_are_shipped():
+    assert [n for n, _ in migrate_mod._migration_files()] == [BASELINE, USAGE]
 
 
 def test_apply_twice_is_noop(fresh_db):
@@ -29,11 +30,14 @@ def test_apply_twice_is_noop(fresh_db):
     assert migrate(dsn) == []
 
 
-def test_schema_migrations_lists_the_baseline(fresh_db):
+def test_schema_migrations_lists_both_migrations(fresh_db):
     with psycopg.connect(fresh_db.dsn("kh_migrator", "kh_fresh")) as conn:
         rows = conn.execute("SELECT name, sha256 FROM kh.schema_migrations ORDER BY name").fetchall()
-    text = resources.files("knowledge_hub").joinpath(f"migrations/{BASELINE}").read_text()
-    assert rows == [(BASELINE, hashlib.sha256(text.encode()).hexdigest())]
+    want = []
+    for name in (BASELINE, USAGE):
+        text = resources.files("knowledge_hub").joinpath(f"migrations/{name}").read_text()
+        want.append((name, hashlib.sha256(text.encode()).hexdigest()))
+    assert rows == want
 
 
 def test_modified_applied_file_raises(fresh_db, monkeypatch):
@@ -46,7 +50,7 @@ def test_modified_applied_file_raises(fresh_db, monkeypatch):
 
 def test_missing_schema_migrations_means_nothing_applied(migrated_db):
     dsn = _empty_db(migrated_db, "kh_empty")
-    assert migrate(dsn) == [BASELINE]
+    assert migrate(dsn) == [BASELINE, USAGE]
 
 
 def test_foreign_schema_migrations_name_is_refused(fresh_db):
