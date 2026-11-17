@@ -96,6 +96,15 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_RATE_LIMIT_PER_MIN` | `120` | Tool calls per minute per caller `sub`. The bucket is in memory, so the limit is per process. |
 | `KH_METRICS_TOKEN_FILE` | none | Bearer token for `/metrics`. Without it the route does not exist. The file is read on every request, so the token can be rotated. |
 
+### Usage log
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KH_USAGE_LOG` | `true` | Log people's searches and opens in `kh.usage_events`. `false` switches logging off. Nothing is logged while `KH_CURSOR_KEY_FILE` is unset. |
+| `KH_USAGE_RETENTION_DAYS` | `180` | Days to keep usage events, 1 to 3650; `kh daily` deletes older ones, and the `usage` tool never reads past it. |
+
+`KH_CURSOR_KEY_FILE` is also the source of the searcher hash stored with each event, so rotating it resets the distinct-people counts of the usage log.
+
 Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES` (renamed), `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
 
 ## Commands
@@ -103,11 +112,11 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | Command | Use |
 |---|---|
 | `kh serve [--port 8080]` | Run the HTTP app and the job worker. |
-| `kh migrate` | Apply the migration as `kh_migrator`. Refuses a database that predates the baseline. |
+| `kh migrate` | Apply the pending migrations as `kh_migrator`. Refuses a database that predates the baseline. |
 | `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
 | `kh rebuild [--repo R]` | Forget the indexed head and sync again. Idempotent. |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>`). |
-| `kh daily` | Recompute `stale` flags and purge expired claim ids. |
+| `kh daily` | Recompute `stale` flags, purge expired claim ids and delete usage events past `KH_USAGE_RETENTION_DAYS`. |
 | `kh requeue-embeddings` | Queue an `embed_record` job for every record without chunks. |
 | `kh lint FILE...` | Offline frontmatter check, no settings or config needed; exit 1 on a problem. |
 
