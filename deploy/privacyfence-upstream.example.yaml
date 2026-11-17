@@ -29,3 +29,7 @@ upstreams:
       list_labels:
         gate: auto
         verb: read
+      ingest_record:
+        gate: popup
+        verb: add
+        effect: Stores a raw record readable by the named group.
