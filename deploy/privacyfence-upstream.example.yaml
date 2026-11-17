@@ -33,3 +33,7 @@ upstreams:
         gate: popup
         verb: add
         effect: Stores a raw record readable by the named group.
+      propose_doc:
+        gate: popup
+        verb: update
+        effect: Opens a pull request that proposes a document change.

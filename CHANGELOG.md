@@ -9,6 +9,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - Two-tier rewrite, step 1 (breaking, fresh install only): the old world is deleted: T1 notes, T2 derived records, candidates, conflicts, promotion, entities and Grist, the governance gates (`kh validate`, `kh domain-owners`, `kh governance`), the trust walk, the agent write tools, the webhook route and the worker. The server registers no tools until the new ones land. The CLI keeps `serve` and `migrate`.
 - Settings `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
 
+### Added
+
+- Two-tier rewrite, step 10: the `propose_doc` tool opens a pull request that proposes one document in a group's repository (checked path, text, labels and size; at most `KH_PROPOSE_MAX_OPEN` open proposals). New settings `KH_PROPOSE_MAX_BYTES` (131072) and `KH_PROPOSE_MAX_OPEN` (20); the PrivacyFence declaration lists the tool as a `popup` write.
+
 ### Changed
 
 - Two-tier rewrite, step 2 (breaking, fresh install only): the nine migrations are replaced by one `0001_baseline.sql` with the tables `groups`, `labels`, `documents`, `records`, `chunks` and the index tables. Row-level security reads one rule, `kh.can_read(audience)`; a record insert needs the audience and `created_by_sub = kh.caller_sub()`. Labels are checked by a trigger (SQLSTATE `P0K05`) and a label in use cannot be deleted (`P0K06`). The role `kh_provenance` and `kh.email` are gone; `kh migrate` refuses a database that holds an older migration name (`database predates the baseline; a fresh install is required`).

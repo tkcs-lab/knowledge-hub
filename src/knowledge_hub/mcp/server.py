@@ -24,16 +24,18 @@ class Deps:
     ratelimiter: Any = None
     reader: Any = None
     worker: Any = None
+    forgejo_bot: Any = None
 
 
 def register_tools(server: MCPServer, deps: Deps) -> None:
     """Register every tool; later phases add their modules here."""
-    from knowledge_hub.tools import docs, labels, records, search
+    from knowledge_hub.tools import docs, labels, propose, records, search
 
     search.register(server, deps)
     docs.register(server, deps)
     labels.register(server, deps)
     records.register(server, deps)
+    propose.register(server, deps)
 
 
 def build_mcp(deps: Deps) -> MCPServer:
