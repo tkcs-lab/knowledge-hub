@@ -82,7 +82,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p13-forgejo-admin
 
-- pending
+- worker: create_team takes extra fields (units_map, includes_all_repositories, can_create_org_repo); org_owners reads the members of the org team named Owners; whoami(token) builds its own request to override Authorization because reader.py is outside touches; the fake lets only site admins call anything except GET /user (non-admin gets 403)
+- review: endpoint paths written from the worker knowledge of Forgejo, not from the plan; to confirm in ma1: PUT /teams/{id}/repos/{org}/{repo}, GET /repos/{o}/{r}/collaborators/{login}/permission, /orgs/{org}/hooks; fake units_map accepts any values
 
 ## p14-forgejo-step
 
