@@ -88,3 +88,16 @@ def test_header_explains_people():
         if line.startswith("#")
     )
     assert "people" in header
+
+
+def test_header_names_membership_and_the_n8n_map():
+    header = []
+    for line in (ROOT / "deploy" / "privacyfence-upstream.example.yaml").read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        header.append(line)
+    text = "\n".join(header)
+    assert "people" in text
+    assert "membership" in text
+    assert "upstream_mcp.kh.groups" in text
+    assert "membership" not in DECLARATION, "the example keeps the default snapshot source"

@@ -5,10 +5,22 @@
 # Reads are `auto`, writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
 # private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
 # voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
-# A person's groups come from `people:` in kh.yaml through the verified email in the claim. An n8n token
-# carries group names as audiences.
+# A person's groups come from `people:` in kh.yaml through the verified email in the claim; people need
+# no entry in PrivacyFence's group map.
+# An n8n token's audiences are its creator's PrivacyFence audiences at each call, intersected with the
+# ones ticked when the token was made (PrivacyFence ADR 0298). So admin_config.json keeps
+# upstream_mcp.kh.groups with an entry only for each audience an n8n workflow uses (a Workspace group to
+# kh.yaml group names, such as "kh-n8n-all@company.example": ["all"]), and every administrator who
+# creates an n8n token is a member of those groups. Without the map every n8n token holds no audience,
+# and ingest_record and propose_doc answer "audience is not held by this caller or not configured".
+# Membership: this file sets no `membership` key, so PrivacyFence uses the default `snapshot` source,
+# which only a job calling privacyfence_update_group_membership fills; nothing in the hub runs that job.
+# With a few token creators, uncomment the `static` example below instead: no approvals, no job.
 # email_for_visibility lets PrivacyFence put the verified email in the claim; without it no person's claim carries an email, so no person holds any group.
 version: 1
+# membership:
+#   source: static
+#   file: /etc/privacyfence/kh-membership.json  # {"version": 1, "groups": {"kh-n8n-all@company.example": ["admin@company.example"]}}
 upstreams:
   - id: kh
     label: Knowledge hub

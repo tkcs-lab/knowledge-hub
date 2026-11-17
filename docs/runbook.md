@@ -23,17 +23,46 @@ Not run in the cloud, so yours to do and check by hand: the backup script's `pg_
 
    Until the model is available embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. To measure speed: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second.
 8. **Index.** Put the first documents in each repo through pull requests (see "Changing T0"), or run `kh rebuild` once, then `kh check` and expect exit 0.
-9. **PrivacyFence.** Declare the hub as an upstream and create the n8n tokens (sections below).
+9. **PrivacyFence.** Declare the hub as an upstream, give the audiences of n8n workflows a group map and the administrators who create tokens a membership source, and create the n8n tokens (sections below).
 
 ## PrivacyFence setup
 
 Copy `deploy/privacyfence-upstream.example.yaml` to the PrivacyFence host, set `PRIVACYFENCE_UPSTREAM_MCP_FILE` to it and restart PrivacyFence; the file and the hub's tool list are read at startup only. Its `audience` equals `KH_PF_AUDIENCE`.
 
-- A person needs no group mapping in PrivacyFence: their groups come from `people` in `kh.yaml`.
+- People need no entry in PrivacyFence's group map: their groups come from `people` in `kh.yaml`.
 - `email_for_visibility: true` stays in the declaration because a person's groups come from their verified email; without it no person reads anything.
-- n8n tokens carry group names as audiences (below).
+- n8n tokens need the map and a membership source (see "Groups for n8n tokens").
 
-If an older group-to-audience mapping for this upstream exists in `admin_config.json`, delete it, unless another upstream uses it.
+If `admin_config.json` already holds a group-to-audience map for this upstream, keep the entries for the audiences n8n workflows should hold; the entries that existed only for people can go.
+
+### Groups for n8n tokens
+
+People need no entry in PrivacyFence's group map. An n8n token is different: PrivacyFence gives a scoped token its creator's audiences at each call, intersected with the audiences ticked when the token was made (PrivacyFence ADR 0298), and the hub keeps the token's audiences that are groups of `kh.yaml`. So `admin_config.json` keeps a map for this upstream with an entry only for each audience an n8n workflow should hold, and every administrator who creates an n8n token is a member of those groups:
+
+```json
+"upstream_mcp": {
+  "kh": {"groups": {
+    "kh-n8n-all@company.example": ["all"],
+    "kh-n8n-mgmt@company.example": ["mgmt"]
+  }}
+}
+```
+
+Each audience is a group name of `kh.yaml`. PrivacyFence re-reads `admin_config.json` when it changes; edit it while nobody is saving on the Admin page. PrivacyFence's one unrestricted audience is also named `all`, like the example group `all` of `kh.yaml`; that works, and a member of a group mapped to `all` holds it at once, while a restricted audience such as `mgmt` is approved per person.
+
+Membership comes from one of two sources, set by the top-level `membership` key of the declaration file:
+
+- `static` (recommended when only a few administrators create tokens): uncomment the `membership` example in `deploy/privacyfence-upstream.example.yaml`, restart PrivacyFence, and write the JSON file it names, for example `{"version": 1, "groups": {"kh-n8n-all@company.example": ["admin@company.example"], "kh-n8n-mgmt@company.example": ["admin@company.example"]}}`. No approvals and no sync job; PrivacyFence re-reads the file when it changes.
+- `snapshot` (the default, used when the declaration sets no `membership` key, as the example does): a job of yours calls `privacyfence_update_group_membership` with the members of each mapped group. Nothing in the hub runs that job. An addition to `all` applies at once; an addition to a restricted audience such as `mgmt` waits until an administrator approves it in PrivacyFence, Admin, Group membership.
+
+Before the first token for a group an administrator:
+
+1. adds `"<Workspace group>": ["<kh.yaml group>"]` under `upstream_mcp.kh.groups` in `admin_config.json`;
+2. makes each administrator who creates tokens a member of that Workspace group: in the static file, or through the sync job and, for a restricted audience, an approval in Admin, Group membership.
+
+Then the token is created as in "Creating an n8n token": the group name as its audience, the gated tools ticked.
+
+When an n8n call answers `audience is not held by this caller or not configured`, check the token creator's PrivacyFence membership first: the creator must be a member of a Workspace group that the map sends to that audience (and be approved for it, if it is restricted), and the audience must be a group of `kh.yaml`. A creator who loses the membership takes the audience from the token at the next call.
 
 ### Creating an n8n token
 
@@ -41,7 +70,7 @@ Scoped tokens call gated upstream tools only through an administrator's tick. In
 
 1. name the token for the workflow and set an expiry;
 2. under "Upstream tools that change data or release results unseen" tick `kh_ingest_record`, and `kh_propose_doc` only when the workflow proposes document changes; tick the reads the workflow needs (`kh_search`, ...) as usual;
-3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`);
+3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`), and so does a group the creator does not hold: the box appears only for an audience the creator holds through the map and a membership source (see "Groups for n8n tokens");
 4. store the secret in n8n's credential store, never in chat.
 
 The tick is pinned to the declaration: changing a tool's gate, verb or effect, or the url, audience or claim mode, voids it and the token is created again. All n8n tokens from before this release are void and must be recreated.
