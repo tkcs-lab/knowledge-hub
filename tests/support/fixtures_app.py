@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from knowledge_hub.app import build_app
-from knowledge_hub.config import Config
+from knowledge_hub.config import KhConfig
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.settings import Settings
 from tests.support.claims import verifier_for_tests
@@ -22,7 +22,7 @@ def app_settings(db_settings) -> Settings:
 
 @pytest.fixture
 def deps(app_settings, app_pool, indexer_pool) -> Deps:
-    return Deps(settings=app_settings, config=Config(), app_pool=app_pool, indexer_pool=indexer_pool)
+    return Deps(settings=app_settings, config=KhConfig(), app_pool=app_pool, indexer_pool=indexer_pool)
 
 
 @pytest.fixture

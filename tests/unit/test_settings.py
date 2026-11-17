@@ -26,8 +26,8 @@ def test_defaults():
     assert s.db_host == "postgres" and s.db_port == 5432 and s.db_name == "kh"
     assert s.max_body_bytes == 1048576
     assert s.embed_model == "bge-m3" and s.embed_dim == 1024
-    assert s.s3_region == "garage" and s.forgejo_org == "kh"
-    assert s.rrf_k == 60 and s.search_pool == 50 and s.promotion_daily_limit == 5
+    assert s.s3_region == "garage"
+    assert s.rrf_k == 60 and s.search_pool == 50
     assert s.dev_identity is None and s.db_app_password_file is None
 
 
@@ -75,41 +75,20 @@ def test_cli_serve_exits_2_on_settings_error(monkeypatch, capsys):
     assert "refusing to start" in capsys.readouterr().err
 
 
-def test_cli_daily_exits_2_without_grist_url(monkeypatch, capsys):
-    monkeypatch.delenv("KH_GRIST_URL", raising=False)
-    assert cli.main(["daily"]) == 2
-    assert capsys.readouterr().err.strip()
-
-
-def test_agent_settings_defaults():
+def test_changed_and_removed_settings(monkeypatch):
     s = load_settings()
-    assert s.agent_notes_enabled is False and s.agent_proposals_enabled is False
-    assert s.forgejo_notes_token_file is None and s.agent_email_domains == ""
-    assert s.agent_note_daily_limit == 20 and s.agent_proposal_daily_limit == 5
-    assert s.agent_max_body_bytes == 131072 and s.ci_status_logins == "kh-ci"
-
-
-def test_agent_notes_flag_needs_url_token_and_domains(monkeypatch):
-    monkeypatch.setenv("KH_AGENT_NOTES_ENABLED", "true")
-    with pytest.raises(ValidationError, match="KH_AGENT_NOTES_ENABLED needs KH_FORGEJO_URL"):
-        load_settings()
-    monkeypatch.setenv("KH_FORGEJO_URL", "http://f")
-    monkeypatch.setenv("KH_FORGEJO_NOTES_TOKEN_FILE", "/t")
-    with pytest.raises(ValidationError, match="KH_AGENT_EMAIL_DOMAINS"):
-        load_settings()
-    monkeypatch.setenv("KH_AGENT_EMAIL_DOMAINS", "example.org")
-    assert load_settings().agent_notes_enabled is True
-
-
-def test_agent_proposals_flag_needs_url_token_and_domains(monkeypatch):
-    monkeypatch.setenv("KH_AGENT_PROPOSALS_ENABLED", "true")
-    with pytest.raises(
-        ValidationError,
-        match="KH_AGENT_PROPOSALS_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_BOT_TOKEN_FILE and "
-        "KH_AGENT_EMAIL_DOMAINS",
+    assert s.tier_weights == "T0:1.0,T3:0.4"
+    assert s.max_record_bytes == 1048576
+    for gone in (
+        "forgejo_org", "forgejo_notes_token_file", "agent_notes_enabled", "agent_proposals_enabled",
+        "agent_email_domains", "agent_note_daily_limit", "agent_proposal_daily_limit",
+        "agent_max_body_bytes", "ci_status_logins", "promotion_daily_limit", "superseded_weight",
+        "disputed_weight", "grist_url", "grist_doc_id", "grist_key_file", "max_raw_bytes",
     ):
-        load_settings()
-    monkeypatch.setenv("KH_FORGEJO_URL", "http://f")
-    monkeypatch.setenv("KH_FORGEJO_BOT_TOKEN_FILE", "/t")
-    monkeypatch.setenv("KH_AGENT_EMAIL_DOMAINS", "example.org")
-    assert load_settings().agent_proposals_enabled is True
+        assert gone not in Settings.model_fields, gone
+    monkeypatch.setenv("KH_MAX_RECORD_BYTES", "10")
+    assert load_settings().max_record_bytes == 10
+
+
+def test_cli_has_only_serve_and_migrate():
+    assert cli.COMMANDS == ("serve", "migrate")

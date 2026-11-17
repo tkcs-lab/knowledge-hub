@@ -1,25 +1,22 @@
-# Example kh.yaml (mounted at the path in KH_CONFIG_FILE). Values shown are the defaults.
-audiences: [all, mgmt, hr, contracts]
-participant_label: attendees
-domains: [portfolio, product, technical]
-repos:
-  canonical-all: {tier: T0, audience: all, trust_anchor: null}
-  canonical-mgmt: {tier: T0, audience: mgmt, trust_anchor: null}
-  canonical-hr: {tier: T0, audience: hr, trust_anchor: null}
-  canonical-contracts: {tier: T0, audience: contracts, trust_anchor: null}
-  notes-all: {tier: T1, audience: all, trust_anchor: null}
-# Map a raw-record series or folder to the audiences that may read it, for example:
-# raw_audience_map:
-#   "series:weekly-sync": [mgmt, finance]   # mgmt or finance may read
-raw_audience_map: {}
-ingest_principal_types: [n8n_workflow]
-restricted_audiences_imply_all: false
-self_merge_teams: []
-bot_logins: [kh-hub-bot]
-# Entity kinds: prefix -> Grist table, audiences, optional label. The list form "prd: [all]" still works for prd, cmp, ver and cus.
-entities:
-  prd: {table: Products, audiences: [all], label: product}
-  cmp: {table: Components, audiences: [all], label: component}
-  ver: {table: Versions, audiences: [all], label: version}
-  cus: {table: Customers, audiences: [contracts], label: customer, reference_audiences: [contracts, mgmt]}
-forgejo_web_url: null
+# Example kh.yaml (mounted at the path in KH_CONFIG_FILE and read by `kh setup`).
+# Values for org, bot_login and indexer_login are the defaults.
+org: kh                       # Forgejo organisation
+bot_login: kh-bot             # opens every T0 pull request and is stamped on every T3 record
+indexer_login: kh-indexer     # read-only token owner
+forgejo_web_url: null         # for example https://forgejo.example.com, used for source links
+hub_url: http://knowledge-hub:8080   # how Forgejo reaches the hub; only `kh setup` needs it
+# Forgejo login -> the email PrivacyFence verifies for that person. Every group member needs an entry.
+people:
+  alice: alice@example.com
+  bob: bob@example.com
+groups:
+  all:
+    repo: kb-all              # default: kb-<group>
+    members: [alice, bob]
+    approvers: [alice]        # non-empty subset of members
+  mgmt:
+    members: [alice]
+    approvers: [alice]
+labels:
+  product:ember: Ember product
+  topic:onboarding: Onboarding material

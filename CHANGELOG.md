@@ -4,6 +4,16 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Removed
+
+- Two-tier rewrite, step 1 (breaking, fresh install only): the old world is deleted: T1 notes, T2 derived records, candidates, conflicts, promotion, entities and Grist, the governance gates (`kh validate`, `kh domain-owners`, `kh governance`), the trust walk, the agent write tools, the webhook route and the worker. The server registers no tools until the new ones land. The CLI keeps `serve` and `migrate`.
+- Settings `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
+
+### Changed
+
+- `kh.yaml` is rewritten: `people` (Forgejo login to verified email), `groups` (members, approvers, optional repo) and `labels` replace `repos`, `audiences`, `entities` and the rest; unknown keys are refused. See `deploy/kh.example.yaml`.
+- `KH_MAX_RAW_BYTES` is now `KH_MAX_RECORD_BYTES`; the `KH_TIER_WEIGHTS` default is `T0:1.0,T3:0.4`; an embedder's `may_embed` takes the audience name.
+
 ### Added
 
 - CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.

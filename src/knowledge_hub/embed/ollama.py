@@ -39,7 +39,7 @@ class OllamaEmbedder:
         self.dim = dim
         self._client = httpx.AsyncClient(transport=transport, timeout=timeout)
 
-    def may_embed(self, visibility: object) -> bool:
+    def may_embed(self, audience: str) -> bool:
         return True
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
