@@ -2,105 +2,145 @@
 
 from __future__ import annotations
 
-import psycopg
 import pytest
 from psycopg import errors
 
 from knowledge_hub.db.caller_tx import caller_tx
-from tests.support.pg import FRESH_DB
-from tests.support.principals import PRINCIPALS
-from tests.support.seed import CASES, VISIBILITY_TABLES
+from tests.support.principals import (
+    KH_CONFIG,
+    alice_all,
+    bob_mgmt,
+    carol_hr,
+    dave_none,
+    multi,
+    wf_token,
+)
+from tests.support.seed import add_record
 
-# Principal -> seed cases it satisfies. dave_none matches only the attendee-only row because a
-# verified person with no audience still matches rows listing their email.
+CALLERS = {
+    "alice_all": alice_all,
+    "bob_mgmt": bob_mgmt,
+    "carol_hr": carol_hr,
+    "dave_none": dave_none,
+    "multi": multi,
+    "wf_token": wf_token,
+}
+# principal -> groups it reads
 EXPECTED = {
     "alice_all": {"all"},
-    "bob_mgmt": {"all", "mgmt", "all_mgmt", "mgmt_or_finance"},
-    "carol_hr": {"all", "hr"},
-    "dave_none": {"attendee"},
-    "eve_nobody": set(),
+    "bob_mgmt": {"mgmt"},
+    "carol_hr": {"hr"},
+    "dave_none": set(),
+    "multi": {"all", "mgmt"},
     "wf_token": {"all"},
-    "mgmt_only": {"mgmt", "mgmt_or_finance"},
-    "finance_only": {"mgmt_or_finance"},
-    "mgmt_finance": {"mgmt", "mgmt_or_finance", "mgmt_and_finance"},
 }
-
-# child table -> (parent visibility table, child column naming the parent)
-CHILDREN = {
-    "document_versions": ("documents", "document_id"),
-    "derived_sources": ("derived_records", "derived_id"),
-    "candidate_sources": ("candidates", "candidate_id"),
-    "conflict_items": ("conflicts", "conflict_id"),
-}
-
-PRINCIPAL_TABLE = [(p, t) for p in EXPECTED for t in VISIBILITY_TABLES]
+TABLES = ("documents", "records", "chunks")
 
 
-async def _ids(pool, caller, sql, params=()):
+async def _col(pool, caller, sql, params=()):
     async with caller_tx(pool, caller) as conn:
         cur = await conn.execute(sql, params)
         return {row[0] for row in await cur.fetchall()}
 
 
-def test_expected_covers_every_principal():
-    assert set(EXPECTED) == set(PRINCIPALS)
-    assert set().union(*EXPECTED.values()) <= set(CASES)
+def test_callers_come_from_the_shared_config():
+    assert set(EXPECTED) == set(CALLERS)
+    assert set().union(*EXPECTED.values()) <= set(KH_CONFIG.groups)
+    for name, caller in CALLERS.items():
+        assert caller.audiences == frozenset(EXPECTED[name]), name
 
 
-@pytest.mark.parametrize(("who", "table"), PRINCIPAL_TABLE)
-async def test_select_all_returns_exactly_visible_rows(app_pool, seeded_db, who, table):
-    got = await _ids(app_pool, PRINCIPALS[who], f"SELECT id::text FROM kh.{table}")
-    assert got == {seeded_db[table][c] for c in EXPECTED[who]}
+@pytest.mark.parametrize("table", TABLES)
+@pytest.mark.parametrize("who", list(EXPECTED))
+async def test_a_caller_reads_only_held_audiences(app_pool, seeded_db, who, table):
+    got = await _col(app_pool, CALLERS[who], f"SELECT DISTINCT audience FROM kh.{table}")
+    assert got == EXPECTED[who]
 
 
-@pytest.mark.parametrize(("who", "table"), PRINCIPAL_TABLE)
-async def test_guessed_id_of_hidden_row_returns_nothing(app_pool, seeded_db, who, table):
-    for case in set(CASES) - EXPECTED[who]:
-        got = await _ids(
-            app_pool, PRINCIPALS[who], f"SELECT id::text FROM kh.{table} WHERE id::text = %s",
-            (seeded_db[table][case],),
-        )
-        assert got == set(), f"{who} saw hidden {table} row {case}"
+@pytest.mark.parametrize("who", list(EXPECTED))
+async def test_select_returns_exactly_the_held_rows(app_pool, seeded_db, who):
+    held = EXPECTED[who]
+    for table in ("documents", "records"):
+        got = await _col(app_pool, CALLERS[who], f"SELECT id::text FROM kh.{table}")
+        assert got == {seeded_db[table][g] for g in held}, table
+    got = await _col(app_pool, CALLERS[who], "SELECT id::text FROM kh.chunks")
+    want = {seeded_db["chunks"][g] for g in held} | {seeded_db["record_chunks"][g] for g in held}
+    assert got == want
 
 
-@pytest.mark.parametrize("table", VISIBILITY_TABLES)
+@pytest.mark.parametrize("table", TABLES)
+@pytest.mark.parametrize("who", list(EXPECTED))
+async def test_guessed_id_of_a_hidden_row_returns_nothing(app_pool, seeded_db, who, table):
+    key = {"documents": "documents", "records": "records", "chunks": "chunks"}[table]
+    for group in set(KH_CONFIG.groups) - EXPECTED[who]:
+        got = await _col(app_pool, CALLERS[who], f"SELECT id::text FROM kh.{table} WHERE id = %s",
+                         (seeded_db[key][group],))
+        assert got == set(), f"{who} saw hidden {table} row of {group}"
+
+
+@pytest.mark.parametrize("table", TABLES)
 async def test_no_caller_settings_means_no_rows(app_pool, seeded_db, table):
     async with app_pool.connection() as conn:
         cur = await conn.execute(f"SELECT count(*) FROM kh.{table}")
         assert (await cur.fetchone())[0] == 0
 
 
-@pytest.fixture
-def all_tables(fresh_db, seeded_db):
-    """``{table: first non-generated column}`` for every table in schema ``kh``."""
-    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
-        return dict(
-            conn.execute(
-                "SELECT c.relname, (SELECT a.attname FROM pg_attribute a WHERE a.attrelid = c.oid"
-                " AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = '' ORDER BY a.attnum LIMIT 1)"
-                " FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-                " WHERE n.nspname = 'kh' AND c.relkind = 'r' ORDER BY 1"
-            ).fetchall()
-        )
+@pytest.mark.parametrize("who", list(EXPECTED))
+async def test_every_caller_reads_all_groups_and_labels(app_pool, seeded_db, who):
+    assert await _col(app_pool, CALLERS[who], "SELECT name FROM kh.groups") == set(KH_CONFIG.groups)
+    assert await _col(app_pool, CALLERS[who], "SELECT name FROM kh.labels") == {"ember", "other"}
 
 
-async def test_app_cannot_update_or_delete_any_table(app_pool, all_tables):
-    assert {"documents", "index_jobs", "claim_jti", "schema_migrations"} <= set(all_tables)
-    for table, col in all_tables.items():
-        for stmt in (f'UPDATE kh.{table} SET "{col}" = DEFAULT', f"DELETE FROM kh.{table}"):
-            with pytest.raises(errors.InsufficientPrivilege):
-                async with caller_tx(app_pool, PRINCIPALS["bob_mgmt"]) as conn:
-                    await conn.execute(stmt)
+@pytest.mark.parametrize("table", ["documents", "records", "chunks", "groups", "labels"])
+async def test_app_cannot_update_or_delete(app_pool, seeded_db, table):
+    col = {"groups": "repo", "labels": "description"}.get(table, "audience")
+    for stmt in (f"UPDATE kh.{table} SET {col} = {col}", f"DELETE FROM kh.{table}"):
+        with pytest.raises(errors.InsufficientPrivilege):
+            async with caller_tx(app_pool, multi) as conn:
+                await conn.execute(stmt)
 
 
-async def test_app_cannot_read_index_jobs(app_pool, seeded_db):
+@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts", "claim_jti"])
+async def test_app_cannot_read_internal_tables(app_pool, seeded_db, table):
     with pytest.raises(errors.InsufficientPrivilege):
-        async with caller_tx(app_pool, PRINCIPALS["bob_mgmt"]) as conn:
-            await conn.execute("SELECT * FROM kh.index_jobs")
+        async with caller_tx(app_pool, bob_mgmt) as conn:
+            await conn.execute(f"SELECT * FROM kh.{table}")
 
 
-@pytest.mark.parametrize(("who", "child"), [(p, c) for p in EXPECTED for c in CHILDREN])
-async def test_child_tables_follow_their_parent(app_pool, seeded_db, who, child):
-    parent, col = CHILDREN[child]
-    got = await _ids(app_pool, PRINCIPALS[who], f"SELECT {col}::text FROM kh.{child}")
-    assert got == {seeded_db[parent][c] for c in EXPECTED[who]}
+async def test_caller_tx_settings_do_not_leak_to_the_next_transaction(app_pool, seeded_db):
+    assert await _col(app_pool, alice_all, "SELECT DISTINCT audience FROM kh.records") == {"all"}
+    async with app_pool.connection() as conn:
+        cur = await conn.execute("SELECT count(*) FROM kh.records")
+        assert (await cur.fetchone())[0] == 0
+
+
+async def test_caller_tx_sets_no_email(app_pool, seeded_db):
+    async with caller_tx(app_pool, alice_all) as conn:
+        cur = await conn.execute("SELECT current_setting('kh.email', true)")
+        assert (await cur.fetchone())[0] in (None, "")
+
+
+async def test_insert_through_caller_tx(app_pool, seeded_db):
+    async with caller_tx(app_pool, alice_all) as conn:
+        await conn.execute(
+            "INSERT INTO kh.records (audience, source, source_ref, title, blob_key, excerpt,"
+            " content_type, occurred_at, written_by, created_by_sub, created_by_type)"
+            " VALUES ('all', 's', 'r', 't', 'k', 'e', 'text/plain', now(), 'kh-bot', %s, %s)",
+            (alice_all.sub, alice_all.principal_type),
+        )
+    with pytest.raises(errors.InsufficientPrivilege):
+        async with caller_tx(app_pool, alice_all) as conn:
+            await conn.execute(
+                "INSERT INTO kh.records (audience, source, source_ref, title, blob_key, excerpt,"
+                " content_type, occurred_at, written_by, created_by_sub, created_by_type)"
+                " VALUES ('hr', 's', 'r', 't', 'k', 'e', 'text/plain', now(), 'kh-bot', %s, %s)",
+                (alice_all.sub, alice_all.principal_type),
+            )
+
+
+def test_add_record_helper_returns_text_ids(fresh_db, seeded_db):
+    import psycopg
+
+    with psycopg.connect(fresh_db.admin_dsn("kh_fresh")) as conn:
+        rid = add_record(conn, audience="hr")
+    assert isinstance(rid, str) and len(rid) == 36

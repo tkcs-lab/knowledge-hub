@@ -37,6 +37,9 @@ def migrate(dsn: str, *, stop_after: str | None = None) -> list[str]:
     applied_now: list[str] = []
     with psycopg.connect(dsn, autocommit=True) as conn:
         applied = _applied(conn)
+        shipped = {name for name, _ in files}
+        if any(name not in shipped for name in applied):
+            raise MigrationError("database predates the baseline; a fresh install is required")
         for name, text in files:
             if stop_after is not None and name > stop_after:
                 continue

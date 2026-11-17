@@ -11,6 +11,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- Two-tier rewrite, step 2 (breaking, fresh install only): the nine migrations are replaced by one `0001_baseline.sql` with the tables `groups`, `labels`, `documents`, `records`, `chunks` and the index tables. Row-level security reads one rule, `kh.can_read(audience)`; a record insert needs the audience and `created_by_sub = kh.caller_sub()`. Labels are checked by a trigger (SQLSTATE `P0K05`) and a label in use cannot be deleted (`P0K06`). The role `kh_provenance` and `kh.email` are gone; `kh migrate` refuses a database that holds an older migration name (`database predates the baseline; a fresh install is required`).
 - A caller's groups now come from the verified email and the `people`/`groups` of `kh.yaml`; the audiences in a `claude_client` claim are format-checked but no longer grant anything. An `n8n_workflow` claim keeps only the audiences that are configured groups.
 - `kh.yaml` is rewritten: `people` (Forgejo login to verified email), `groups` (members, approvers, optional repo) and `labels` replace `repos`, `audiences`, `entities` and the rest; unknown keys are refused. See `deploy/kh.example.yaml`.
 - `KH_MAX_RAW_BYTES` is now `KH_MAX_RECORD_BYTES`; the `KH_TIER_WEIGHTS` default is `T0:1.0,T3:0.4`; an embedder's `may_embed` takes the audience name.

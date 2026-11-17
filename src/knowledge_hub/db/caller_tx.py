@@ -25,9 +25,9 @@ async def caller_tx(pool: AsyncConnectionPool, caller: Caller) -> AsyncIterator[
     audiences = ",".join(sorted(caller.audiences))
     async with pool.connection() as conn, conn.transaction():
         await conn.execute(
-            "SELECT set_config('kh.audiences', %s, true), set_config('kh.email', %s, true),"
+            "SELECT set_config('kh.audiences', %s, true),"
             " set_config('kh.principal_type', %s, true), set_config('kh.sub', %s, true)",
-            (audiences, caller.email or "", caller.principal_type, caller.sub),
+            (audiences, caller.principal_type, caller.sub),
         )
         await conn.execute("SET LOCAL statement_timeout = '5s'")
         yield conn
