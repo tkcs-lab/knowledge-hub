@@ -21,9 +21,9 @@ Give the planned n8n promotion agent evidence of what people really use, as aske
 ## 2. Current state
 
 - `search` (`src/knowledge_hub/tools/search.py:54-105`) runs one statement (`search/sql.py:84-120`) and returns hits; it keeps nothing about the call. `get_doc` (`tools/docs.py:80-115`) likewise.
-- `tool_guard` (`mcp/errors.py:95-160`) opens `caller_tx` (`db/caller_tx.py:15-35`), runs the tool and maps failures; `ToolCall` (`mcp/errors.py:64-69`) holds `conn`, `caller`, `deps`.
+- `tool_guard` (`mcp/errors.py:95-160`) opens `caller_tx` (`db/caller_tx.py:15-33`), runs the tool and maps failures; `ToolCall` (`mcp/errors.py:64-69`) holds `conn`, `caller`, `deps`.
 - The meta row of the search statement carries `total`, `t0_hits`, `t3_hits` (`search/sql.py:103-107`). These count owners in the fused pool, whose vector list always returns the nearest `KH_SEARCH_POOL` chunks however unrelated, so `t0_hits` is above 0 whenever the caller sees any embedded document. They cannot tell whether T0 answers a query (the architect review of this plan found this).
-- One migration exists, `0001_baseline.sql`; `tests/integration/test_migrate_runner.py:22-23` asserts exactly that one file. Every table has forced RLS and a `kh_migrator_all` policy; `tests/integration/test_rls_policies.py:15-21` lists the tables and the grant matrix.
+- One migration exists, `0001_baseline.sql`; `tests/integration/test_migrate_runner.py:22-23` asserts exactly that one file. Every table has forced RLS and a `kh_migrator_all` policy; `tests/integration/test_rls_policies.py:15-16` lists the tables and `:20-30` the grant matrix.
 - `kh daily` (`cli.py:75-80`, `jobs/daily.py`) recomputes stale flags and purges claim ids. Backups dump only `kh.records` (`docs/runbook.md` "Backup and restore").
 - Six tools are registered (`mcp/server.py:30-38`) and declared in `deploy/privacyfence-upstream.example.yaml`; `tests/unit/test_privacyfence_declaration.py:18-19` classifies them.
 
