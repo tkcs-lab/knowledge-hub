@@ -1,0 +1,369 @@
+"""The forgejo step: teams, repos, collaborators, branch protection and the org webhook (plan 3.7 step 3).
+
+``plan`` only reads. ``apply`` repairs what it can and reports what it did with the same lines; whatever it
+cannot repair stays a ``!`` line. Branch protection is read back after every write, because Forgejo silently
+drops a merge-whitelist team that has no read access to the repo.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from knowledge_hub.config import KhConfig
+from knowledge_hub.forgejo.admin import OWNERS_TEAM, ForgejoAdmin
+from knowledge_hub.forgejo.reader import q
+from knowledge_hub.setup.steps import Change
+
+UNITS = ("repo.code", "repo.pulls")
+REPO_SETTINGS: dict[str, Any] = {
+    "private": True,
+    "default_branch": "main",
+    "has_actions": False,
+    "default_delete_branch_after_merge": True,
+}
+HOOK_PATH = "/webhooks/forgejo"
+HOOK_EVENTS = ["push"]
+PUSH = frozenset({"write", "admin", "owner"})
+ADMIN = frozenset({"admin", "owner"})
+
+
+def team_fields(permission: str) -> dict[str, Any]:
+    return {
+        "permission": permission,
+        "units_map": {unit: permission for unit in UNITS},
+        "includes_all_repositories": False,
+        "can_create_org_repo": False,
+    }
+
+
+def protection_body(group: str) -> dict[str, Any]:
+    return {
+        "rule_name": "main",
+        "enable_push": False,
+        "enable_push_whitelist": False,
+        "enable_merge_whitelist": True,
+        "merge_whitelist_teams": [f"{group}-approve"],
+        "required_approvals": 0,
+        "block_on_rejected_reviews": True,
+        "apply_to_admins": True,
+    }
+
+
+def _units_differ(want: dict[str, str], have: Any) -> bool:
+    have = have if isinstance(have, dict) else {}
+    keys = set(want) | set(have)
+    return any(want.get(k, "none") != have.get(k, "none") for k in keys)
+
+
+def team_drift(want: dict[str, Any], have: dict[str, Any]) -> list[str]:
+    out = []
+    for field, value in want.items():
+        if field == "units_map":
+            if _units_differ(value, have.get(field)):
+                out.append(field)
+        elif have.get(field) != value:
+            out.append(field)
+    return out
+
+
+def protection_drift(want: dict[str, Any], have: dict[str, Any]) -> list[str]:
+    out = []
+    for field, value in want.items():
+        if field == "merge_whitelist_teams":
+            if sorted(have.get(field) or []) != sorted(value):
+                out.append(field)
+        elif have.get(field) != value:
+            out.append(field)
+    return out
+
+
+def _fold(logins: list[str]) -> dict[str, str]:
+    return {login.casefold(): login for login in logins}
+
+
+class ForgejoStep:
+    name = "forgejo"
+
+    def __init__(
+        self,
+        config: KhConfig,
+        admin: ForgejoAdmin,
+        *,
+        webhook_secret: str | None,
+        bot_token: str | None,
+        indexer_token: str | None,
+    ) -> None:
+        self._config = config
+        self._admin = admin
+        self._secret = webhook_secret
+        self._tokens = {config.bot_login: bot_token, config.indexer_login: indexer_token}
+
+    async def plan(self) -> list[Change]:
+        return await self._sync(write=False, prune=False)
+
+    async def apply(self, prune: bool) -> list[Change]:
+        return await self._sync(write=True, prune=prune)
+
+    # -- calls ForgejoAdmin has no public method for ----------------------------------------------
+
+    async def _account(self, login: str) -> dict[str, Any] | None:
+        return await self._admin._obj("GET", f"/users/{q(login)}", missing=True)  # noqa: SLF001
+
+    async def _delete_team(self, team_id: int) -> None:
+        await self._admin._request("DELETE", f"/teams/{team_id}", ok=(204,))  # noqa: SLF001
+
+    # -- the walk --------------------------------------------------------------------------------
+
+    async def _sync(self, *, write: bool, prune: bool) -> list[Change]:
+        out: list[Change] = []
+        cfg = self._config
+        owners = sorted(str(u.get("login")) for u in await self._admin.org_owners())
+        missing = await self._accounts(out, owners)
+        await self._identity(out)
+
+        teams = {str(t.get("name")): t for t in await self._admin.org_teams()}
+        repos = {str(r.get("name")): r for r in await self._admin.repos()}
+        for group, gc in cfg.groups.items():
+            repo = cfg.repo_for_group(group)
+            write_team = await self._team(out, teams, group, "write", gc.members, missing, write)
+            approve_team = await self._team(
+                out, teams, f"{group}-approve", "read", gc.approvers, missing, write
+            )
+            repo_exists = await self._repo(out, repos, repo, write)
+            for name, tid in ((group, write_team), (f"{group}-approve", approve_team)):
+                await self._team_repo(out, name, tid, repo, repo_exists, write)
+            for login, perm in ((cfg.bot_login, "write"), (cfg.indexer_login, "read")):
+                await self._collaborator(out, repo, repo_exists, login, perm, login in missing, write)
+            await self._protection(out, group, repo, repo_exists, write)
+
+        await self._webhook(out, write)
+        managed = {name for g in cfg.groups for name in (g, f"{g}-approve")} | {OWNERS_TEAM}
+        for name, team in teams.items():
+            if name in managed:
+                continue
+            if write and prune:
+                await self._delete_team(int(team["id"]))
+                out.append(Change("-", f"team {name}"))
+            else:
+                out.append(Change("?", f"unmanaged team {name}"))
+        wanted = {cfg.repo_for_group(g) for g in cfg.groups}
+        for name in repos:
+            if name not in wanted:
+                out.append(Change("?", f"unmanaged repo {name}"))
+        if owners:
+            out.append(Change("i", f"owners: {', '.join(owners)} can bypass protection"))
+        return out
+
+    async def _accounts(self, out: list[Change], owners: list[str]) -> set[str]:
+        """Every login the config names must exist; the bots must be neither org owner nor site admin."""
+        cfg = self._config
+        logins: dict[str, str] = {}
+        for login in [cfg.bot_login, cfg.indexer_login]:
+            logins.setdefault(login.casefold(), login)
+        for gc in cfg.groups.values():
+            for login in gc.members + gc.approvers:
+                logins.setdefault(login.casefold(), login)
+        owner_set = {o.casefold() for o in owners}
+        missing: set[str] = set()
+        for folded, login in logins.items():
+            account = await self._account(login)
+            if account is None:
+                missing.add(login)
+                out.append(Change("!", f"account {login}: does not exist"))
+                continue
+            if login in cfg.bots:
+                if folded in owner_set:
+                    out.append(Change("!", f"account {login}: is an org owner"))
+                if account.get("is_admin"):
+                    out.append(Change("!", f"account {login}: is a site admin"))
+        return missing
+
+    async def _identity(self, out: list[Change]) -> None:
+        for login, token in self._tokens.items():
+            if token is None:
+                continue
+            me = await self._admin.whoami(token)
+            actual = str(me.get("login", ""))
+            if actual.casefold() != login.casefold():
+                out.append(Change("!", f"token {login}: belongs to {actual or 'nobody'}"))
+            if me.get("is_admin"):
+                out.append(Change("!", f"token {login}: is a site admin"))
+
+    async def _team(
+        self,
+        out: list[Change],
+        teams: dict[str, dict[str, Any]],
+        name: str,
+        permission: str,
+        members: list[str],
+        missing: set[str],
+        write: bool,
+    ) -> int | None:
+        want = team_fields(permission)
+        team = teams.get(name)
+        wanted = {k: v for k, v in _fold(members).items() if v not in missing}
+        if team is None:
+            out.append(Change("+", f"team {name}: members {', '.join(wanted.values()) or '-'}"))
+            if not write:
+                return None
+            team = await self._admin.create_team(name, permission, f"kh {name}", **{
+                k: v for k, v in want.items() if k != "permission"
+            })
+            teams[name] = team
+            tid = int(team["id"])
+            for login in wanted.values():
+                await self._admin.add_team_member(tid, login)
+            return tid
+        tid = int(team["id"])
+        drift = team_drift(want, team)
+        for field in drift:
+            out.append(Change("~", f"team {name}: {field}"))
+        if drift and write:
+            await self._admin.edit_team(tid, **want)
+        have = _fold([str(u.get("login")) for u in await self._admin.team_members(tid)])
+        add = [v for k, v in wanted.items() if k not in have]
+        remove = [v for k, v in have.items() if k not in _fold(members)]
+        if add or remove:
+            detail = " ".join([f"+{x}" for x in add] + [f"-{x}" for x in remove])
+            out.append(Change("~", f"team {name}: members {detail}"))
+            if write:
+                for login in add:
+                    await self._admin.add_team_member(tid, login)
+                for login in remove:
+                    await self._admin.remove_team_member(tid, login)
+        return tid
+
+    async def _repo(self, out: list[Change], repos: dict[str, dict[str, Any]], repo: str,
+                    write: bool) -> bool:
+        have = repos.get(repo)
+        if have is None:
+            out.append(Change("+", f"repo {repo}"))
+            if not write:
+                return False
+            created = await self._admin.create_repo(repo)
+            fix = {k: v for k, v in REPO_SETTINGS.items() if created.get(k) != v}
+            repos[repo] = await self._admin.edit_repo(repo, **fix) if fix else created
+            return True
+        drift = {k: v for k, v in REPO_SETTINGS.items() if have.get(k) != v}
+        for field in drift:
+            out.append(Change("~", f"repo {repo}: {field}"))
+        if drift and write:
+            repos[repo] = await self._admin.edit_repo(repo, **drift)
+        return True
+
+    async def _team_repo(self, out: list[Change], name: str, tid: int | None, repo: str,
+                         repo_exists: bool, write: bool) -> None:
+        if tid is None or not repo_exists:
+            out.append(Change("+", f"team repo {name}: {repo}"))
+            return
+        names = [str(r.get("name")) for r in await self._admin.team_repos(tid)]
+        if repo not in names:
+            out.append(Change("+", f"team repo {name}: {repo}"))
+            if write:
+                await self._admin.add_team_repo(tid, repo)
+        for other in names:
+            if other != repo:
+                out.append(Change("!", f"team repo {name}: {other} is not the group repo; remove it"))
+
+    async def _collaborator(self, out: list[Change], repo: str, repo_exists: bool, login: str,
+                            perm: str, account_missing: bool, write: bool) -> None:
+        label = f"collaborator {repo}/{login}"
+        if account_missing:
+            return
+        if not repo_exists:
+            out.append(Change("+", f"{label}: {perm}"))
+            return
+        listed = {str(u.get("login")).casefold() for u in await self._admin.collaborators(repo)}
+        effective = await self._effective(repo, login)
+        if login.casefold() not in listed:
+            change = Change("+", f"{label}: {perm}")
+        elif effective != perm:
+            change = Change("~", f"{label}: permission {effective}, want {perm}")
+        else:
+            return
+        if not write:
+            out.append(change)
+            return
+        await self._admin.put_collaborator(repo, login, perm)
+        effective = await self._effective(repo, login)
+        out.append(change)
+        if effective != perm:
+            out.append(Change("!", f"{label}: permission {effective} after apply, want {perm}"))
+
+    async def _effective(self, repo: str, login: str) -> str:
+        data = await self._admin.user_repo_permission(repo, login)
+        return str(data.get("permission", "none"))
+
+    async def _protection(self, out: list[Change], group: str, repo: str, repo_exists: bool,
+                          write: bool) -> None:
+        label = f"protection {repo}/main"
+        want = protection_body(group)
+        have = await self._admin.protection(repo) if repo_exists else None
+        if have is None:
+            out.append(Change("+", label))
+        else:
+            drift = protection_drift(want, have)
+            for field in drift:
+                out.append(Change("~", f"{label}: {field}"))
+            if not drift:
+                return
+        if not write:
+            return
+        await self._admin.put_protection(repo, want)
+        back = await self._admin.protection(repo)
+        if back is None:
+            out.append(Change("!", f"{label}: missing after write"))
+            return
+        for field in protection_drift(want, back):
+            out.append(Change("!", f"{label}: {field} not kept after write"))
+
+    async def _webhook(self, out: list[Change], write: bool) -> None:
+        hub = self._config.hub_url
+        if hub is None:
+            out.append(Change("!", "hub_url: not set"))
+            return
+        url = hub.rstrip("/") + HOOK_PATH
+        label = f"webhook {url}"
+        hook = next(
+            (h for h in await self._admin.org_hooks()
+             if isinstance(h.get("config"), dict) and h["config"].get("url") == url),
+            None,
+        )
+        drift: list[str] = []
+        if hook is not None:
+            config = hook["config"]
+            if hook.get("type") != "forgejo":
+                drift.append("type")
+            if sorted(hook.get("events") or []) != HOOK_EVENTS:
+                drift.append("events")
+            if config.get("content_type") != "json":
+                drift.append("content_type")
+            if hook.get("active") is not True:
+                drift.append("active")
+        if not write:
+            if hook is None:
+                out.append(Change("+", label))
+            for field in drift:
+                out.append(Change("~", f"{label}: {field}"))
+            out.append(Change("i", "webhook secret not verifiable"))
+            return
+        if not self._secret:
+            out.append(Change("!", f"{label}: no secret (KH_WEBHOOK_HMAC_FILE not set)"))
+            return
+        body = {
+            "config": {"url": url, "content_type": "json", "secret": self._secret},
+            "events": HOOK_EVENTS,
+            "active": True,
+        }
+        if hook is None:
+            await self._admin.create_org_hook({"type": "forgejo", **body})
+            out.append(Change("+", label))
+            return
+        if "type" in drift:
+            # Forgejo cannot change the type of a hook; refuse rather than leave a second hook.
+            out.append(Change("!", f"{label}: type is {hook.get('type')}; delete the hook in Forgejo"))
+            return
+        await self._admin.edit_org_hook(int(hook["id"]), body)
+        for field in drift:
+            out.append(Change("~", f"{label}: {field}"))
+        out.append(Change("i", f"{label}: secret rewritten"))
