@@ -54,7 +54,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p8-doc-tools
 
-- pending
+- worker: list_labels returns a bare list that the MCP SDK wraps as {"result": [...]}; list_stale returns {documents, next_cursor} with entries id, title, audience, labels, repo, path, review_by, stale (3.8 does not fix these fields)
+- worker: get_doc falls back to the record excerpt when deps.blobs is None or the blob is missing
 
 ## p9-ingest-record
 
