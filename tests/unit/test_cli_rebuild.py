@@ -8,6 +8,7 @@ from knowledge_hub import cli
 from knowledge_hub.indexer import rebuild as rebuild_mod
 from knowledge_hub.jobs import daily as daily_mod
 from knowledge_hub.jobs import requeue as requeue_mod
+from knowledge_hub.jobs import usage as usage_mod
 
 pytestmark = pytest.mark.unit
 
@@ -17,7 +18,7 @@ def stubs(monkeypatch):
     for k in [k for k in __import__("os").environ if k.startswith("KH_")]:
         monkeypatch.delenv(k)
     state = SimpleNamespace(closed=0, calls=[])
-    deps = SimpleNamespace(indexer_pool="pool")
+    deps = SimpleNamespace(indexer_pool="pool", settings=SimpleNamespace(usage_retention_days=180))
 
     async def build_deps(settings, config):
         return deps
@@ -78,11 +79,18 @@ def test_daily_and_requeue(monkeypatch, capsys):
         assert pool == "pool"
         return 4
 
+    async def purge_usage(pool, days):
+        assert pool == "pool"
+        assert days == 180
+        return 5
+
     monkeypatch.setattr(daily_mod, "run_daily", run_daily)
+    monkeypatch.setattr(usage_mod, "purge_usage", purge_usage)
     monkeypatch.setattr(requeue_mod, "requeue_embeddings", requeue)
     assert cli.main(["daily"]) == 0
     assert cli.main(["requeue-embeddings"]) == 0
     out = capsys.readouterr().out
+    assert out.splitlines()[0].endswith("; usage events purged: 5")
     assert "3" in out and "2" in out and "queued 4 embed_record jobs" in out
 
 
