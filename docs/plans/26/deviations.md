@@ -25,7 +25,11 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-sync-core
 
-- pending
+- worker: sync_repo returns the SyncPlan; plan_chunks(embedder, repo, docs, *, chunker_version) takes ChunkDoc and no config; apply_chunks(conn, plan) reads the repo from the plan
+- worker: sync_plan also exports changed_paths and is_included so only changed blobs are fetched
+- worker: a stored row is deleted when its path now holds a different id; a rename keeps row and chunks, paths are parked as moving:<id> so two files can swap
+- worker: documents.stale is set at upsert as review_by < today; excluded or oversize files raise no alert, and a stored file that becomes excluded is deleted
+- worker: chunk planning reads stored chunks outside the write lock, so concurrent syncs of one repo could plan from stale state; p5 must run one sync per repo at a time
 
 ## p5-worker-webhook
 
