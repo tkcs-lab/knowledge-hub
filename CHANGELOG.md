@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Changed
+
+- `search` now searches T0 and T3 by default (`min_tier` defaults to `T3`); `min_tier="T0"` still searches documents only and fails with `only T3 records match; repeat with min_tier T3 to see them` when only records match. The tool description says there are exactly two tiers.
+
 ### Fixed
 
 - `ingest_record` refuses a NUL character in any text argument with `argument <name> is invalid` before storing anything; before, a NUL late in the body was stored and its embedding job failed on every attempt.

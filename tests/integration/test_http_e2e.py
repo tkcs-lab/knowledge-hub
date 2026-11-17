@@ -27,7 +27,7 @@ def deps(deps):
 
 async def test_each_read_tool_answers_through_the_http_app(mcp_client, seeded_db):
     doc = f"doc:{seeded_db['documents']['all']}"
-    found = await mcp_client.call(alice_all, "search", {"query": "chunk"})
+    found = await mcp_client.call(alice_all, "search", {"query": "chunk", "min_tier": "T0"})
     assert not found.is_error, found.text
     assert [h["id"] for h in found.data["hits"]] == [doc]
     got = await mcp_client.call(alice_all, "get_doc", {"id": doc})
