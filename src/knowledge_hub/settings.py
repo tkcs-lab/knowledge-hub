@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
 
+    setup_pg_admin_dsn_file: Path | None = None
+    setup_forgejo_admin_token_file: Path | None = None
+
     @field_validator("dev_identity", mode="before")
     @classmethod
     def _parse_dev_identity(cls, v):
