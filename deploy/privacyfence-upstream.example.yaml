@@ -20,3 +20,12 @@ upstreams:
       search:
         gate: auto
         verb: search
+      get_doc:
+        gate: auto
+        verb: read
+      list_stale:
+        gate: auto
+        verb: read
+      list_labels:
+        gate: auto
+        verb: read
