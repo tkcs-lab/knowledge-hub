@@ -5,7 +5,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-demolish-and-config
 
-- pending
+- None.
 
 ## p1b-claim-resolution
 
