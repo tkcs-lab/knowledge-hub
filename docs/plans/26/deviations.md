@@ -77,7 +77,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p12-setup-ollama-s3
 
-- pending
+- worker: ollama: model name matches <name> or <name>:latest in /api/tags; after an apply pull the dimension is re-checked
+- worker: S3Step also needs KH_S3_BUCKET (else raises) and, without an injected client, endpoint and key files; head_bucket errors other than 404/NoSuchBucket/NotFound print ! probe failed <code>; failed creation prints ! create failed <code>; a created bucket is probed at once
 
 ## p13-forgejo-admin
 
