@@ -29,13 +29,14 @@ class Deps:
 
 def register_tools(server: MCPServer, deps: Deps) -> None:
     """Register every tool; later phases add their modules here."""
-    from knowledge_hub.tools import docs, labels, propose, records, search
+    from knowledge_hub.tools import docs, labels, propose, records, search, usage
 
     search.register(server, deps)
     docs.register(server, deps)
     labels.register(server, deps)
     records.register(server, deps)
     propose.register(server, deps)
+    usage.register(server, deps)
 
 
 def build_mcp(deps: Deps) -> MCPServer:
