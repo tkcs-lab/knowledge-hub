@@ -49,11 +49,12 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 - With required approvals 0 the approver must review the final diff before merging.
 - The verified email is the identity: a Workspace email that is reassigned gives its new holder the old person's groups until `people` is edited. Remove a leaver from `people` first.
 - Exact vector scans take time in proportion to the number of hidden rows; this timing is the accepted residual of the no-existence-leak rule.
+- Stored query text can hold sensitive words. Readers are limited by the subset rule, retention is `KH_USAGE_RETENTION_DAYS`, and `KH_USAGE_LOG=false` switches logging off.
 
 ## Roles and RLS matrix
 
 - Three roles, none superuser, none BYPASSRLS: `kh_migrator` (owns schema `kh`, migrations and backups), `kh_app` (request path) and `kh_indexer` (worker, rebuild, daily, requeue).
-- Roles are created outside the migrations (tests: `tests/support/pg.py`; production: `kh setup apply` with an admin DSN, or the operator). The one migration, `0001_baseline.sql`, only grants. `kh migrate` refuses a database whose `kh.schema_migrations` holds a name the package does not ship: a fresh install is required.
+- Roles are created outside the migrations (tests: `tests/support/pg.py`; production: `kh setup apply` with an admin DSN, or the operator). The migrations `0001_baseline.sql` and `0002_usage_events.sql` only grant and create tables. `kh migrate` refuses a database whose `kh.schema_migrations` holds a name the package does not ship: a fresh install is required.
 - Every table has `ENABLE` and `FORCE ROW LEVEL SECURITY` and an explicit `kh_migrator_all` policy (`USING (true)`), because FORCE also binds the owner.
 - Per request `caller_tx` opens a transaction on the `kh_app` pool and sets the audiences, principal type and `sub` with `set_config(..., true)` plus `statement_timeout = 5s`.
 
@@ -66,6 +67,9 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 | `records` | SELECT where `can_read(audience)`; INSERT with check `can_read(audience) AND created_by_sub = kh.caller_sub()`; no UPDATE or DELETE | SELECT |
 | `chunks` | SELECT where `can_read(audience)` | ALL |
 | `index_jobs`, `repo_state`, `index_alerts` | none | ALL |
+| `usage_events` | INSERT for the caller's own group set (people only); SELECT where every group of the searcher is held | SELECT, DELETE |
+
+- `usage_events` is read under the subset rule: an event is visible when `audiences <@ kh.caller_audiences()`, that is, when the reader holds every group of the searcher. This leaks nothing, because each key in an event's `owner_keys` is a hit the searcher could read, so its audience is one of the searcher's groups, and the searcher's groups are a subset of the reader's. Records cannot be updated or deleted, and `kh setup apply --prune` refuses to remove a group that still has records, so this holds over time. The searcher's hash (`who`) and `audiences` are never returned by any tool.
 
 - Triggers: `chunks_inherit_owner` copies tier, audience, labels, stale, owner key and created time from the owner row; `owner_propagate_to_chunks` pushes later changes of a document down; `records_enqueue_embed` is a definer function (`kh_app` has no grant on `index_jobs`) that queues an `embed_record` job; `kh.assert_labels_exist` raises SQLSTATE `P0K05` for an unknown label; a BEFORE DELETE trigger on `labels` raises `P0K06` while a document or record uses the label.
 - Dedupe: re-ingesting the same `(audience, source, source_ref)` returns the existing row's id through a SELECT under RLS. This is safe because inserting already requires the audience, so it never reveals a record of another audience. A concurrent duplicate is caught as a unique violation and answered by the same SELECT.
@@ -96,9 +100,21 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 
 One statement inside `caller_tx`: an exact vector order (no ANN index) fused by RRF with a full-text list, each limited to `KH_SEARCH_POOL`, weighted by tier and by the stale flag, one best chunk per owner. By default (`min_tier=T3`) T0 and T3 are searched together, records weighted lower. With `min_tier=T0` only T0 is searched; when no T0 hit exists but T3 hits do, the call fails with `only T3 records match; repeat with min_tier T3 to see them`. Cursors are HMAC-bound to the caller, the query and the filters, with a bounded offset.
 
+## Usage log
+
+`kh.usage_events` records what people search and open, so an n8n promotion agent can find T3 records worth promoting to T0 and queries no T0 document answers.
+
+- **What is stored.** One row per event: the time, the kind (`search` or `open`), the searcher as a keyed hash, the searcher's group set, and the ids (`doc:` or `rec:`) of the hits returned or the one document opened. A search row also holds the query text (at most 500 characters, NUL removed; a normalised form is generated from it), the `min_tier` asked for and two counts of documents whose chunks match the full-text query, one for T0 and one for T3. An open row holds no query and no tier.
+- **Who is logged.** Only `claude_client` callers, so n8n workflows and the promotion agent's own calls stay out of the signal and out of the table. Only searches at offset 0 are logged, because paging would inflate counts, and `get_doc` is logged only when it finds the row. A `min_tier=T0` search that fails with `only T3 records match` is logged too. Nothing is logged when `KH_USAGE_LOG` is `false` or `KH_CURSOR_KEY_FILE` is unset.
+- **Searcher hash.** HMAC-SHA256 of the `sub`, keyed with a sub-key derived from the content of `KH_CURSOR_KEY_FILE`; no name, email or `sub` is stored. Rotating that file resets the distinct-people counts.
+- **Write after the transaction.** `tool_guard` writes the events after the tool's own transaction has closed, on success and on a refused call, never on another exception or on cancellation. The write takes one pooled connection and waits at most 0.25 s for it. A failure of any kind, a timeout included, drops the events, logs a warning and adds to `kh_usage_events_dropped_total`; it never fails the tool. A second connection is not opened inside the tool's transaction, which could exhaust the pool of 10.
+- **Two signals.** A record is worth promoting when many distinct people find or open it (`usage` with `view=records`, ranked by distinct people because searches and opens inflate when Claude searches on its own), and `outranked_t0` counts the searches in which it ranked above every T0 hit. A query is a gap when no T0 document matches its full-text query (`view=queries`); `t3_matches` above 0 means records exist, 0 means nothing exists. Both views list only what at least two distinct people did, so what one person alone did never produces an item.
+- **Why not pool counts.** The search statement's `t0_hits` and `t3_hits` count owners in the fused pool, whose vector list always returns the nearest chunks however unrelated, so they are above 0 whenever the caller sees any embedded document. The log stores counts of documents that match the full-text query (all terms), whatever labels or group filter the search carried, and compares the rank of a record with the first T0 key.
+- **Retention.** `kh daily` deletes events older than `KH_USAGE_RETENTION_DAYS` (default 180), and `usage` never reads past that window.
+
 ## Tools
 
-Six tools, all with flat arguments: `search`, `get_doc`, `list_stale`, `list_labels` (reads, `auto`) and `ingest_record`, `propose_doc` (writes, `popup`). The declaration in `deploy/privacyfence-upstream.example.yaml` allows `claude_client` and `n8n_workflow`.
+Seven tools, all with flat arguments: `search`, `get_doc`, `list_stale`, `list_labels`, `usage` (reads, `auto`) and `ingest_record`, `propose_doc` (writes, `popup`). The declaration in `deploy/privacyfence-upstream.example.yaml` allows `claude_client` and `n8n_workflow`.
 
 - `ingest_record` refuses unless the caller holds `audience` and it is a configured group, when the body exceeds `KH_MAX_RECORD_BYTES`, or when a label is unknown, or when a text argument (`source`, `source_ref`, `title`, `body`, `source_url`, `content_type` or a label) contains a NUL character, which Postgres text cannot store (`argument <name> is invalid`); other control characters are kept. It stores the body at `records/<uuid>`, keeps the first 2000 characters as excerpt and stamps the config's `bot_login` as `written_by`.
 - `propose_doc` requires the caller to hold `group`. The path matches `^[a-z0-9][a-z0-9/_-]*\.md$` with no `..`, `//` or dot segment and is not `README.md`; `base_blob` empty means the path must not exist, otherwise Forgejo enforces the race through `sha`. Text with control characters other than tab and newline, bidirectional controls, HTML comments or tags is refused, as is a body over `KH_PROPOSE_MAX_BYTES`. The hub renders the file itself, parses it back with the indexer's parser, creates the branch `bot/propose/<uuid4>` from the head of `main`, puts the one file and opens a pull request to `main`. The bot is refused any branch outside `bot/` and any pull request whose base is not `main`; it stops at `KH_PROPOSE_MAX_OPEN` open pull requests. The pull-request body lists `Requested-by`, `Principal` and `Written-by` as information, not enforced.
@@ -131,3 +147,12 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | A global unique `(source, source_ref)` | It leaks the existence of records of other audiences. |
 | Building the new modules beside the old ones | Two schemas and double test-support work; the old world was deleted instead. |
 | `get_doc` fetching from Forgejo | Slow and unfiltered; `get_doc` is an indexed lookup under RLS. |
+| Rank-by-pool hit counts (`t0_hits`) as the "T0 answers it" signal | Always above 0; replaced by full-text match counts and the rank of the record against the first T0 key. |
+| Writing the usage event inside the tool transaction | The `normative` error rolls it back, and a failed insert would fail the tool. |
+| Writing the usage event in a `finally` | Runs on cancellation; awaiting the pool there is unsafe. |
+| A second connection opened inside the tool's transaction | Can exhaust the pool of 10 under load. |
+| Daily rollup tables for usage | Need one rollup per audience set to keep the subset rule; more code; lose the open-to-query link. |
+| Metrics or log export of usage | No row-level security; the design rejects filtering outside the database. |
+| `outcome`, `page_offset`, `labels`, `audience_filter` and a stored `query_norm` column in the usage log | Derivable or unused by either view (`query_norm` is a generated column). |
+| A separate usage key file | One more secret; the sub-key derived from the cursor key is enough. |
+| Logging n8n workflows | They are not people, and the agent's own searches would feed back into its signal. |

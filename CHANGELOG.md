@@ -4,6 +4,18 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- The table `kh.usage_events` and migration `0002_usage_events.sql`: people's searches and opens, stored for 180 days, the searcher as a keyed hash.
+- The tool `usage` (`kh_usage`) with the views `records` and `queries`.
+- Settings `KH_USAGE_LOG` and `KH_USAGE_RETENTION_DAYS`.
+- The metric `kh_usage_events_dropped_total`.
+
+### Changed
+
+- `kh daily` also deletes usage events past the retention and prints their count.
+- The search statement returns `t0_fts_hits` and `t3_fts_hits` (internal).
+
 ## [0.3.1] - 2026-11-17
 
 ### Changed

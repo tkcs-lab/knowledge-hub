@@ -21,6 +21,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
+| `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group. |
 | `propose_doc` | Open a pull request that proposes a document change in a group's repo. |
 
@@ -42,11 +43,11 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | Command | Use |
 |---|---|
 | `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
-| `kh migrate` | Apply the SQL migration as `kh_migrator`. |
+| `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
-| `kh daily` | Recompute stale flags and purge expired claim ids. |
+| `kh daily` | Recompute stale flags, purge expired claim ids and delete usage events past the retention. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
 | `kh lint FILE...` | Offline frontmatter check of Markdown files; exit 1 on a problem. |
 
