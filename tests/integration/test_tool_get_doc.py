@@ -53,6 +53,19 @@ async def test_document_fields(seeded_db, mcp_client):
     assert res.data["entities"] == ["prd:a"]
 
 
+async def test_agent_written_flag(seeded_db, fresh_db, mcp_client):
+    doc_id = seeded_db["documents"]["all"]
+    raw_id = seeded_db["raw_records"]["all"]
+    res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{doc_id}"})
+    assert res.data["agent_written"] is False
+    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB), autocommit=True) as conn:
+        conn.execute("UPDATE kh.documents SET agent_written = true WHERE id = %s", (doc_id,))
+    res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{doc_id}"})
+    assert res.data["agent_written"] is True
+    raw = await mcp_client.call(alice_all, "get_doc", {"id": f"raw:{raw_id}"})
+    assert raw.data["agent_written"] is False
+
+
 async def test_successor_is_shown_only_if_visible(seeded_db, fresh_db, mcp_client):
     old, new = seeded_db["documents"]["all"], seeded_db["documents"]["mgmt"]
     with psycopg.connect(fresh_db.admin_dsn(FRESH_DB), autocommit=True) as conn:

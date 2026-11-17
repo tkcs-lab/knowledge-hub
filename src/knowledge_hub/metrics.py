@@ -19,6 +19,7 @@ REJECTION_CODES = frozenset(
     }
 )  # fmt: skip
 WEBHOOK_RESULTS = frozenset({"queued", "ignored", "bad_signature", "bad_request", "too_large"})
+WRITE_FAILURE_REASONS = frozenset({"refused", "forgejo_error"})
 JOB_STATES = ("queued", "running", "done", "failed")
 
 
@@ -36,6 +37,7 @@ class Metrics:
             self._calls: dict[tuple[str, str], int] = {}
             self._rejections: dict[str, int] = {}
             self._webhooks: dict[str, int] = {}
+            self._write_failures: dict[tuple[str, str], int] = {}
             self._seconds: dict[str, list[float]] = {}  # tool -> [sum, count]
 
     def tool_call(self, tool: str, outcome: str, seconds: float) -> None:
@@ -56,6 +58,11 @@ class Metrics:
         with self._lock:
             self._webhooks[result] = self._webhooks.get(result, 0) + 1
 
+    def agent_write_failure(self, tool: str, reason: str) -> None:
+        reason = reason if reason in WRITE_FAILURE_REASONS else "forgejo_error"
+        with self._lock:
+            self._write_failures[(tool, reason)] = self._write_failures.get((tool, reason), 0) + 1
+
     def render(self, job_states: dict[str, int] | None = None) -> str:
         out: list[str] = []
 
@@ -69,6 +76,7 @@ class Metrics:
             rejections = sorted(self._rejections.items())
             webhooks = sorted(self._webhooks.items())
             seconds = sorted(self._seconds.items())
+            failures = sorted(self._write_failures.items())
         block(
             "kh_tool_calls_total",
             "counter",
@@ -86,6 +94,15 @@ class Metrics:
             "counter",
             "Forgejo webhook deliveries by result.",
             [(f'kh_webhook_events_total{{result="{r}"}}', n) for r, n in webhooks],
+        )
+        block(
+            "kh_agent_write_failures_total",
+            "counter",
+            "Failed agent writes by tool and reason.",
+            [
+                (f'kh_agent_write_failures_total{{tool="{_escape(t)}",reason="{r}"}}', n)
+                for (t, r), n in failures
+            ],
         )
         block(
             "kh_tool_seconds_sum",

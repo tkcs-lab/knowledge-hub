@@ -19,21 +19,21 @@ CONFIG_REPO = "__config__"
 DRIFT_SQL = """
 SELECT c.id FROM kh.chunks c JOIN kh.documents d ON d.id = c.document_id
  WHERE (c.owner_key, c.tier, c.domain, c.status, c.stale, c.superseded, c.entities,
-        c.owner_created_at, c.required_audiences, c.allowed_emails)
+        c.owner_created_at, c.required_audiences, c.allowed_emails, c.agent_written)
        IS DISTINCT FROM ('doc:' || d.id, d.tier, d.domain, d.status, d.stale, d.status = 'superseded',
-                         d.entities, d.indexed_at, d.required_audiences, d.allowed_emails)
+                         d.entities, d.indexed_at, d.required_audiences, d.allowed_emails, d.agent_written)
 UNION ALL
 SELECT c.id FROM kh.chunks c JOIN kh.raw_records r ON r.id = c.raw_id
  WHERE (c.owner_key, c.tier, c.domain, c.status, c.stale, c.superseded, c.entities,
-        c.owner_created_at, c.required_audiences, c.allowed_emails)
+        c.owner_created_at, c.required_audiences, c.allowed_emails, c.agent_written)
        IS DISTINCT FROM ('raw:' || r.id, 'T3'::text, r.domain, 'current'::text, false, false,
-                         r.entities, r.ingested_at, r.required_audiences, r.allowed_emails)
+                         r.entities, r.ingested_at, r.required_audiences, r.allowed_emails, false)
 UNION ALL
 SELECT c.id FROM kh.chunks c JOIN kh.derived_records r ON r.id = c.derived_id
  WHERE (c.owner_key, c.tier, c.domain, c.status, c.stale, c.superseded, c.entities,
-        c.owner_created_at, c.required_audiences, c.allowed_emails)
+        c.owner_created_at, c.required_audiences, c.allowed_emails, c.agent_written)
        IS DISTINCT FROM ('derived:' || r.id, 'T2'::text, r.domain, 'current'::text, false, false,
-                         r.entities, r.created_at, r.required_audiences, r.allowed_emails)
+                         r.entities, r.created_at, r.required_audiences, r.allowed_emails, false)
 """
 
 

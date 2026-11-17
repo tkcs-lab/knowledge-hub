@@ -137,3 +137,39 @@ async def test_pr_event_is_recorded_done(fresh_db, indexer_pool):
     enqueue(fresh_db, "pr_event")
     assert await worker(indexer_pool, ForgejoFake({})).run_once() is True
     assert rows(fresh_db, "SELECT state FROM kh.index_jobs") == [("done",)]
+
+
+async def test_propose_branch_pr_event_reaches_the_proposal_handler(fresh_db, indexer_pool):
+    import uuid
+
+    from tests.support.forgejo_fake import FakeCommit, FakeRepo
+
+    pid = str(uuid.uuid4())
+    rows(
+        fresh_db,
+        "INSERT INTO kh.proposals (id, kind, state, repo, path, doc_key, domain, title, content_sha,"
+        " dedupe_key, branch, pr_number, requester_login, created_by_sub, required_audiences)"
+        " VALUES (%s, 'doc', 'pr_open', 'canonical-all', 'p/x.md', 'x', 'p', 't', 's', %s, %s, 3,"
+        " 'alice', 'sub', '{all}') RETURNING id",
+        pid,
+        pid,
+        f"bot/propose/{pid}",
+    )
+    forgejo = ForgejoFake({"canonical-all": FakeRepo(commits=[FakeCommit("c1")])})
+    forgejo.repos["canonical-all"].pulls.append(
+        {
+            "number": 3,
+            "merged": True,
+            "state": "closed",
+            "head": {"ref": f"bot/propose/{pid}"},
+            "base": {"ref": "main"},
+        }
+    )
+    rows(
+        fresh_db,
+        "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES ('pr_event', 'canonical-all', %s::jsonb)"
+        " RETURNING id",
+        '{"repo": "canonical-all", "action": "closed", "number": 3}',
+    )
+    assert await worker(indexer_pool, forgejo).run_once() is True
+    assert rows(fresh_db, "SELECT state FROM kh.proposals") == [("merged",)]

@@ -7,6 +7,15 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 ### Added
 
 - CI: the `ci` workflow lints, runs the whole test suite on Python 3.12 and 3.13 against PostgreSQL 16 with pgvector, and builds the image on every pull request and every push to `main`.
+- Agent writes (off by default): `write_note` saves an unreviewed note as `agent/<id>.md` in a `notes-*` repo, `propose_doc` and `propose_edit` open a T0 pull request on a `bot/propose/<uuid>` branch, `pr_status` and `list_my_proposals` read the state. Settings `KH_AGENT_NOTES_ENABLED`, `KH_AGENT_PROPOSALS_ENABLED`, `KH_FORGEJO_NOTES_TOKEN_FILE`, `KH_AGENT_EMAIL_DOMAINS`, `KH_AGENT_NOTE_DAILY_LIMIT`, `KH_AGENT_PROPOSAL_DAILY_LIMIT`, `KH_AGENT_MAX_BODY_BYTES` and `KH_CI_STATUS_LOGINS`.
+- Table `kh.proposals` (migration 0009_proposals), the `agent_written` flag on documents and chunks, three Forgejo client roles (`read`, `bot`, `notes`), the `kh/requested-by` commit status and the metric `kh_agent_write_failures_total`.
+
+### Changed
+
+- `kh domain-owners` and the trust walk ignore the requester's approval of an agent proposal and fail closed (`agent proposal has no valid requester record from kh-hub-bot`) when its `kh/requested-by` record is missing or invalid; a requester named by such a record never passes as an owner self-merge.
+- Search ranks agent notes like T2, never counts them as a normative answer and flags them with `agent_written`; `get_doc` carries the flag.
+- Agent proposals count `propose_change` candidates toward the daily limit per `(domain, repo)`; `propose_change` itself still counts candidates only.
+- The PrivacyFence declaration example lists the five new tools; the three write tools need an explicit tick on each scoped token.
 
 ## [0.2.0] - 2026-11-16
 

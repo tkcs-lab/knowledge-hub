@@ -131,3 +131,48 @@ def test_guard_refuses(ref):
 
 def test_guard_accepts():
     assert _guard_ref("bot/promote/abc") == "bot/promote/abc"
+
+
+async def test_last_commit():
+    c, seen = make(lambda r: js([{"sha": "c1"}]))
+    assert await c.last_commit("r", "agent/x.md", "main") == "c1"
+    q = dict(seen[0].url.params)
+    assert seen[0].url.path == "/api/v1/repos/kh/r/commits"
+    assert q == {"path": "agent/x.md", "sha": "main", "limit": "1", "stat": "false",
+                 "verification": "false", "files": "false"}
+    c, _ = make(lambda r: js([]))
+    assert await c.last_commit("r", "agent/x.md", "main") is None
+    c, _ = make(lambda r: js({}, 500))
+    with pytest.raises(ForgejoError, match="HTTP 500"):
+        await c.last_commit("r", "p", "main")
+
+
+async def test_blob_sha():
+    def h(r):
+        assert r.url.params["ref"] == "main"
+        return js({"sha": "b1"}) if r.url.path.endswith("/a.md") else js({}, 404)
+
+    c, _ = make(h)
+    assert await c.blob_sha("r", "a.md", "main") == "b1"
+    assert await c.blob_sha("r", "b.md", "main") is None
+
+
+async def test_pull_for_head():
+    c, seen = make(lambda r: js({"number": 4}))
+    assert await c.pull_for_head("r", "bot/propose/x") == {"number": 4}
+    assert seen[0].url.raw_path == b"/api/v1/repos/kh/r/pulls/main/bot/propose/x"
+    c, _ = make(lambda r: js({}, 404))
+    assert await c.pull_for_head("r", "bot/propose/x") is None
+    c, _ = make(lambda r: js({}, 500))
+    with pytest.raises(ForgejoError, match="HTTP 500"):
+        await c.pull_for_head("r", "bot/propose/x")
+
+
+async def test_org_member():
+    codes = {"alice": 204, "bob": 404, "eve": 500}
+    c, seen = make(lambda r: httpx.Response(codes[r.url.path.rsplit("/", 1)[1]]))
+    assert await c.org_member("alice") is True
+    assert await c.org_member("bob") is False
+    with pytest.raises(ForgejoError, match="HTTP 500"):
+        await c.org_member("eve")
+    assert seen[0].url.path == "/api/v1/orgs/kh/members/alice"

@@ -69,6 +69,7 @@ async def add_doc(
     domain: str = "product",
     entities: tuple[str, ...] = (),
     embed: bool = True,
+    agent_written: bool = False,
 ) -> str:
     """A document with one chunk, written as ``kh_indexer``; returns its citation id."""
     doc = uuid.uuid4()
@@ -76,11 +77,11 @@ async def add_doc(
         await conn.execute(
             "INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, status, stale,"
             " owner, entities, commit_sha, content_sha, approved_by, approved_at, review_by,"
-            " stamp, required_audiences, allowed_emails)"
+            " stamp, required_audiences, allowed_emails, agent_written)"
             " VALUES (%s, 'canonical-all', %s, %s, %s, %s, 'T', %s, %s, %s, 'team', %s, 'c1', %s,"
-            " '{x}', now(), '2027-01-01', 'reviewed', %s, %s)",
+            " '{x}', now(), '2027-01-01', 'reviewed', %s, %s, %s)",
             (doc, f"p/{doc}.md", str(doc), tier, domain, text, status, stale, list(entities),
-             uuid.uuid4().hex, list(audiences), emails),
+             uuid.uuid4().hex, list(audiences), emails, agent_written),
         )
         await _chunk(conn, "document_id", doc, text, embed=embed)
     return f"doc:{doc}"
@@ -265,3 +266,27 @@ async def test_older_embedding_model_is_not_compared(indexer_pool, mcp_client, a
         await conn.execute("UPDATE kh.chunks SET embedding_model = 'other'")
     res = await search(mcp_client, alice_all, "something else completely")
     assert other not in ids(res)  # vector list skips it; full text does not match
+
+
+async def test_agent_note_ranks_below_an_equal_human_t1_note(indexer_pool, mcp_client):
+    agent = await add_doc(indexer_pool, QUERY, tier="T1", agent_written=True)
+    human = await add_doc(indexer_pool, QUERY, tier="T1")
+    res = await search(mcp_client, alice_all)
+    assert not res.is_error, res.text
+    assert ids(res) == [human, agent]
+    assert [h["agent_written"] for h in res.data["hits"]] == [False, True]
+
+
+async def test_only_agent_notes_raise_normative_unless_min_tier_is_t2(indexer_pool, mcp_client):
+    await add_doc(indexer_pool, QUERY, tier="T1", agent_written=True)
+    res = await search(mcp_client, alice_all)  # the default min_tier is T1
+    assert res.is_error and res.text.endswith(
+        "cannot answer normatively from T2/T3 only: 1 lower-tier hits; "
+        'call search with min_tier="T3" to see them'
+    ), res.text
+    ok = await search(mcp_client, alice_all, min_tier="T2")
+    assert not ok.is_error and [h["agent_written"] for h in ok.data["hits"]] == [True]
+    # A human note of the same topic makes the answer normative again.
+    await add_doc(indexer_pool, QUERY, tier="T1")
+    both = await search(mcp_client, alice_all)
+    assert not both.is_error and [h["agent_written"] for h in both.data["hits"]] == [False, True]

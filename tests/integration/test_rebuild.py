@@ -141,6 +141,18 @@ async def test_rebuild_twice_with_offset_dates_changes_nothing(fresh_db, indexer
     assert rows(fresh_db, SNAP) == first
 
 
+async def test_check_reports_chunk_agent_written_drift(fresh_db, indexer_pool):
+    deps = make_deps(indexer_pool, two_docs())
+    await rebuild(deps)
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute("ALTER TABLE kh.chunks DISABLE TRIGGER chunks_inherit_owner")
+        conn.execute(
+            "UPDATE kh.chunks SET agent_written = true WHERE id = (SELECT id FROM kh.chunks LIMIT 1)"
+        )
+        conn.execute("ALTER TABLE kh.chunks ENABLE TRIGGER chunks_inherit_owner")
+    assert len((await check(deps)).chunk_drift) == 1
+
+
 # --- stored merge verdicts and --rejudge (plan sections 3.5 and 3.6) ---
 
 CASE = {c["name"]: c for c in load_cases()}["owner-self-merge-in-own-domain"]

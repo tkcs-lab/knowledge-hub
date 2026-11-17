@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from knowledge_hub.approvals import current_approvals
+from knowledge_hub.approvals import current_approvals, requester_from_statuses
 from knowledge_hub.config import Config
 from knowledge_hub.forgejo.client import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
@@ -68,6 +68,7 @@ class DocUpsert:
     stamp: str | None
     required_audiences: list[str]
     allowed_emails: list[str] | None
+    agent_written: bool = False
     changed: bool = True  # differs from the existing row
 
 
@@ -137,6 +138,7 @@ async def _gather_trust(
     reviews: dict[int, list[dict[str, Any]]] = {}
     changed: dict[str, list[str]] = {}
     inputs: dict[str, MergeInput] = {}
+    requesters: dict[int, tuple[tuple[str, ...], str | None]] = {}
     directory = TeamDirectory(forgejo)
     bots = config.bots
     for c in oldest_first[start:]:
@@ -151,7 +153,15 @@ async def _gather_trust(
         prs.append(pull)
         pr_reviews = await forgejo.pull_reviews(repo, pull["number"])
         reviews[pull["number"]] = pr_reviews
-        if not config.self_merge_teams or current_approvals(pull, pr_reviews, bots):
+        record = requester_from_statuses(pull, await forgejo.commit_statuses(repo, pull["head"]["sha"]))
+        if record != ((), None):
+            requesters[pull["number"]] = record
+        logins, problem = record
+        if (
+            problem is not None
+            or not config.self_merge_teams
+            or current_approvals(pull, pr_reviews, bots, exclude_logins=logins)
+        ):
             continue
         user, merger = pull.get("user") or {}, pull.get("merged_by") or {}
         author = user.get("login")
@@ -176,6 +186,7 @@ async def _gather_trust(
         stored=stored,
         inputs=inputs,
         self_merge_teams=config.self_merge_teams,
+        requesters=requesters,
     )
     return result, changed
 
@@ -187,6 +198,11 @@ def _last_commit_for(
         if path in changed.get(c["sha"], ()):
             return c["sha"]
     return default
+
+
+def _is_agent_written(tier: str, path: str, doc: ParsedDoc) -> bool:
+    """A T1 file under ``agent/`` or of type ``agent-note``; removing the type key does not unmark it."""
+    return tier == "T1" and (path.startswith("agent/") or doc.type == "agent-note")
 
 
 def _approved(f: _File) -> bool:
@@ -205,11 +221,14 @@ def _doc_changed(row: Mapping[str, Any] | None, up: DocUpsert) -> bool:
         ("approved_at", up.approved_at),
         ("merge_pr", up.merge_pr),
         ("stamp", up.stamp),
+        ("agent_written", up.agent_written),
     )
     for key, value in pairs:
         old = row.get(key)
         if key == "approved_by":
             old = list(old or [])
+        if key == "agent_written":
+            old = bool(old)
         if key == "approved_at":
             old, value = parse_forgejo_ts(old), parse_forgejo_ts(value)
             old = old and old.replace(microsecond=0)
@@ -340,8 +359,14 @@ async def build_sync_plan(
             # The one file last changed by an approved merge could stay, but only when no other
             # file with the id was also approved; with two or more approved all are rejected.
             approved = [f for f in group if _approved(f)]
+            human = [f for f in group if not _is_agent_written(rc.tier, f.path, f.doc)]
+            keep = None
             if len(approved) == 1:
                 keep = approved[0]
+            elif rc.tier == "T1" and len(human) == 1:
+                # A squatted id cannot remove a human note: keep it, reject only the agent notes.
+                keep = human[0]
+            if keep is not None:
                 rejected_paths.remove(keep.path)
                 files[doc_id] = keep
         else:
@@ -388,6 +413,7 @@ async def build_sync_plan(
             stamp=v.stamp if trusted_file and v is not None else None,
             required_audiences=[rc.audience],
             allowed_emails=None,
+            agent_written=_is_agent_written(rc.tier, f.path, d),
         )
         row = existing_docs.get(key)
         up.changed = _doc_changed(row, up)

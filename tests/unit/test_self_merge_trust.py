@@ -103,3 +103,33 @@ def test_case_data_is_consistent():
             assert c["domain_owners"] == "pass", c["name"]
         if c["trust"] == "disputed" and c["domain_owners"] == "pass":
             assert c.get("ci_gap"), c["name"]
+
+
+def _requested_by(login, uuid="x"):
+    return {
+        "context": "kh/requested-by",
+        "state": "success",
+        "description": f"{login} {uuid}",
+        "creator": "kh-hub-bot",
+    }
+
+
+async def test_requester_named_by_a_record_never_self_merges():
+    # Plan 16: a requester recorded by kh-hub-bot on the PR head cannot pass as an owner self-merge.
+    case = BY_NAME["owner-self-merge-in-own-domain"]
+    repos, config = build_trust_world(case)
+    fake = make_fake(case, repos)
+    head = repos[REPO].pulls[0]["head"]["sha"]
+    fake.statuses[(REPO, head)] = [_requested_by(case["author"])]
+    plan = await build_sync_plan(fake, config, REPO, None, {})
+    assert [(u.status, u.stamp) for u in touched(plan)] == [("disputed", None)]
+    assert plan.verdicts["m1"].status == "disputed"
+
+
+async def test_proposal_without_record_is_disputed_even_for_an_owner():
+    case = BY_NAME["owner-self-merge-in-own-domain"]
+    repos, config = build_trust_world(case)
+    repos[REPO].pulls[0]["head"]["ref"] = "bot/propose/11111111-1111-1111-1111-111111111111"
+    plan = await build_sync_plan(make_fake(case, repos), config, REPO, None, {})
+    assert [(u.status, u.stamp) for u in touched(plan)] == [("disputed", None)]
+    assert plan.verdicts["m1"].reason == "no requester record"

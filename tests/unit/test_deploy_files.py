@@ -21,6 +21,7 @@ TABLES = [
     "derived_records",
     "derived_sources",
     "candidates",
+    "proposals",
     "candidate_sources",
     "conflicts",
     "conflict_items",

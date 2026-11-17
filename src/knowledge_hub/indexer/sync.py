@@ -42,7 +42,7 @@ async def _load(conn: Any, repo: str) -> tuple[dict | None, dict[str, dict], dic
         state = await cur.fetchone()
         await cur.execute(
             "SELECT id, doc_key, path, content_sha, commit_sha, status, approved_by, approved_at, merge_pr,"
-            " stamp"
+            " stamp, agent_written"
             " FROM kh.documents WHERE repo = %s",
             (repo,),
         )
@@ -93,9 +93,9 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
             """
             INSERT INTO kh.documents (id, repo, path, doc_key, tier, domain, title, body, frontmatter,
                 status, review_by, owner, entities, supersedes, commit_sha, content_sha, approved_by,
-                approved_at, merge_pr, pr_url, stamp, required_audiences, allowed_emails)
+                approved_at, merge_pr, pr_url, stamp, required_audiences, allowed_emails, agent_written)
             VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (repo, doc_key) DO UPDATE SET
                 path = EXCLUDED.path, tier = EXCLUDED.tier, domain = EXCLUDED.domain,
                 title = EXCLUDED.title, body = EXCLUDED.body, frontmatter = EXCLUDED.frontmatter,
@@ -106,13 +106,14 @@ async def _write(conn: Any, plan: SyncPlan, ids: dict[str, Any]) -> None:
                 merge_pr = EXCLUDED.merge_pr, pr_url = EXCLUDED.pr_url, stamp = EXCLUDED.stamp,
                 required_audiences = EXCLUDED.required_audiences,
                 allowed_emails = EXCLUDED.allowed_emails,
+                agent_written = EXCLUDED.agent_written,
                 indexed_at = now(), updated_at = now()
             """,
             (
                 repo, u.path, u.doc_key, u.tier, u.domain, u.title, u.body, Jsonb(u.frontmatter),
                 u.status, date.fromisoformat(u.review_by), u.owner, u.entities, u.supersedes,
                 u.commit_sha, u.content_sha, u.approved_by, _parse_ts(u.approved_at), u.merge_pr,
-                u.pr_url, u.stamp, u.required_audiences, u.allowed_emails,
+                u.pr_url, u.stamp, u.required_audiences, u.allowed_emails, u.agent_written,
             ),
         )  # fmt: skip
     # Resolve ``superseded_by`` from doc_key to uuid once every document exists.

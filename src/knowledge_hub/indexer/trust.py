@@ -113,6 +113,7 @@ def _merge_verdict(
     commit_date: datetime | None,
     rules_trusted: bool,
     commit: dict[str, Any],
+    requesters: Mapping[int, tuple[tuple[str, ...], str | None]] | None = None,
 ) -> tuple[Verdict, bool]:
     """The verdict of merge commit ``sha`` (plan section 3.1) and whether it is worth storing."""
     pr = next(
@@ -128,7 +129,11 @@ def _merge_verdict(
     if pr is None:
         return Verdict(DISPUTED, reason="no merged pull request for merge commit"), False
     link = {"merge_pr": pr["number"], "pr_url": pr.get("html_url")}
-    approvals = current_approvals(pr, reviews.get(pr["number"], []), bots)
+    logins, problem = (requesters or {}).get(pr["number"], ((), None))
+    if problem is not None:
+        # An agent proposal without a valid kh/requested-by record fails closed (plan 16, 3.7).
+        return Verdict(DISPUTED, reason="no requester record", **link), True
+    approvals = current_approvals(pr, reviews.get(pr["number"], []), bots, exclude_logins=logins)
     if approvals:
         names = tuple(sorted({r["user"]["login"] for r in approvals}))
         stamps = [parse_forgejo_ts(r.get("submitted_at")) for r in approvals]
@@ -138,7 +143,12 @@ def _merge_verdict(
         return Verdict(TRUSTED, names, at, pr["number"], pr.get("html_url"), stamp=REVIEWED), True
 
     merged_by = pr.get("merged_by") or {}
-    if merge_input is not None and rules_trusted:
+    requested = {login.casefold() for login in logins}
+    by_requester = any(
+        isinstance(x, str) and x.casefold() in requested
+        for x in (merged_by.get("login"), (pr.get("user") or {}).get("login"))
+    )
+    if merge_input is not None and rules_trusted and not by_requester:
         parents = commit.get("parents") or []
         real_merge = len(parents) >= 2 and parents[1].get("sha") == (pr.get("head") or {}).get("sha")
         widened = any(
@@ -183,6 +193,7 @@ def evaluate_chain(
     stored: Mapping[str, Verdict] | None = None,
     inputs: Mapping[str, MergeInput] | None = None,
     self_merge_teams: Collection[str] = (),
+    requesters: Mapping[int, tuple[tuple[str, ...], str | None]] | None = None,
 ) -> TrustResult:
     bots = set(bot_logins)
     stored = stored or {}
@@ -236,6 +247,7 @@ def evaluate_chain(
                     _commit_date(c),
                     rules_trusted,
                     c,
+                    requesters,
                 )
                 if store:
                     result.judged[sha] = verdict

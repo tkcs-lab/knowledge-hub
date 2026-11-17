@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     forgejo_bot_token_file: Path | None = None
     forgejo_indexer_token_file: Path | None = None
     webhook_hmac_file: Path | None = None
+    forgejo_notes_token_file: Path | None = None
+
+    agent_notes_enabled: bool = False
+    agent_proposals_enabled: bool = False
+    agent_email_domains: str = ""
+    agent_note_daily_limit: int = 20
+    agent_proposal_daily_limit: int = 5
+    agent_max_body_bytes: int = 131072
+    ci_status_logins: str = "kh-ci"
 
     embed_provider: Literal["ollama", "http", "fake"] = "ollama"
     ollama_url: str | None = None
@@ -92,6 +101,20 @@ class Settings(BaseSettings):
             raise ValueError("KH_DEV_IDENTITY is set while KH_ENV=prod; refusing to start")
         if self.embed_provider == "fake" and self.env not in ("dev", "test"):
             raise ValueError("KH_EMBED_PROVIDER=fake is only allowed when KH_ENV is dev or test")
+        if self.agent_notes_enabled and not (
+            self.forgejo_url and self.forgejo_notes_token_file and self.agent_email_domains.strip()
+        ):
+            raise ValueError(
+                "KH_AGENT_NOTES_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_NOTES_TOKEN_FILE and "
+                "KH_AGENT_EMAIL_DOMAINS"
+            )
+        if self.agent_proposals_enabled and not (
+            self.forgejo_url and self.forgejo_bot_token_file and self.agent_email_domains.strip()
+        ):
+            raise ValueError(
+                "KH_AGENT_PROPOSALS_ENABLED needs KH_FORGEJO_URL, KH_FORGEJO_BOT_TOKEN_FILE and "
+                "KH_AGENT_EMAIL_DOMAINS"
+            )
         return self
 
     def dsn(self, role: Literal["migrator", "app", "indexer"]) -> str:

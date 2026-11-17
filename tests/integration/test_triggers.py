@@ -114,6 +114,20 @@ def test_raw_chunk_is_t3_and_derived_chunk_is_t2(admin):
     assert row[8:] == (["all"], None)
 
 
+def test_chunk_inherits_agent_written_from_its_document_and_is_false_otherwise(admin):
+    agent, plain = doc(admin, agent_written=True), doc(admin)
+    c_agent, c_plain = chunk(admin, "document_id", agent), chunk(admin, "document_id", plain)
+    c_raw = chunk(admin, "raw_id", raw(admin), agent_written=True)
+    c_der = chunk(admin, "derived_id", derived(admin), agent_written=True)
+    got = {c: admin.execute("SELECT agent_written FROM kh.chunks WHERE id = %s", (c,)).fetchone()[0]
+           for c in (c_agent, c_plain, c_raw, c_der)}
+    assert got == {c_agent: True, c_plain: False, c_raw: False, c_der: False}
+    # A change of the document propagates down.
+    admin.execute("UPDATE kh.documents SET agent_written = false WHERE id = %s", (agent,))
+    after = admin.execute("SELECT agent_written FROM kh.chunks WHERE id = %s", (c_agent,)).fetchone()
+    assert after == (False,)
+
+
 def test_chunk_update_cannot_change_inherited_values(admin):
     d = doc(admin)
     cid = chunk(admin, "document_id", d)

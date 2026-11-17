@@ -31,3 +31,16 @@ async def test_every_registered_tool_passes_privacyfence_skip_rules():
         assert not keys & set(FORBIDDEN_KEYS), tool.name
         assert "reason" not in schema.get("properties", {}), tool.name
         assert len(json.dumps(schema).encode()) < MAX_SCHEMA_BYTES, tool.name
+
+
+AGENT_TOOLS = {"write_note", "propose_doc", "propose_edit", "pr_status", "list_my_proposals"}
+FORBIDDEN_ARGUMENTS = {"tier", "visibility", "reason", "approved_by", "audiences"}
+
+
+async def test_agent_tools_are_registered_without_forbidden_arguments():
+    deps = Deps(settings=Settings(env="test"), config=Config(), app_pool=None, indexer_pool=None)
+    tools = {t.name: t for t in await build_mcp(deps).list_tools()}
+    assert AGENT_TOOLS <= set(tools)
+    for name in AGENT_TOOLS:
+        assert not set(tools[name].input_schema.get("properties", {})) & FORBIDDEN_ARGUMENTS, name
+    assert tools["write_note"].input_schema["properties"]["audience"]["type"] == "string"

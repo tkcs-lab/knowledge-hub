@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from knowledge_hub.approvals import current_approvals
+from knowledge_hub.approvals import current_approvals, requester_from_statuses
 from knowledge_hub.config import Config, owner_teams_for
 from knowledge_hub.forgejo.client import ForgejoClient, ForgejoError
 from knowledge_hub.governance.messages import (
@@ -249,7 +249,9 @@ async def _domain_owners(
         if change.get("previous_filename"):
             paths.add(change["previous_filename"])
     reviews = await read.pull_reviews(repo, number)
-    counted = current_approvals(pr, reviews, config.bots)
+    statuses = await read.commit_statuses(repo, pr["head"]["sha"])
+    requesters, problem = requester_from_statuses(pr, statuses)
+    counted = current_approvals(pr, reviews, config.bots, exclude_logins=requesters)
     labels = [lab["name"] for lab in pr.get("labels") or [] if isinstance(lab.get("name"), str)]
     widen, label_problem = _widen(config, labels)
 
@@ -283,14 +285,23 @@ async def _domain_owners(
         )
 
     lines = owner_lines(waived=False)
+    if problem is not None:
+        # An agent proposal without a valid requester record fails closed; no self-merge waiver.
+        return CheckResult(sorted([*lines, problem]), False)
     if not lines:
         approvers = sorted({login for team in members.values() for login in team})
         message = f"approved by {', '.join(approvers)}" if paths and approvers else "no owner approval needed"
         return CheckResult([message], True, message)
     message = ""
-    if config.self_merge_teams and not any(n.startswith("widen-audience") for n in labels):
-        user = pr.get("user") or {}
-        author = user.get("login")
+    user = pr.get("user") or {}
+    author = user.get("login")
+    # A requester never merges their own agent-written change alone (plan 16, 3.7).
+    requested = isinstance(author, str) and author.casefold() in {r.casefold() for r in requesters}
+    if (
+        config.self_merge_teams
+        and not requested
+        and not any(n.startswith("widen-audience") for n in labels)
+    ):
         tree_changed = await tree_paths_changed(
             read, repo, pr.get("merge_base") or base_sha, pr["head"]["sha"]
         )

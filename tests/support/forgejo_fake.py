@@ -12,6 +12,7 @@ The fake does not guard: the guard lives in the real client and is tested there.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -94,6 +95,18 @@ class ForgejoFake:
         self.labels: dict[str, set[str]] = {}
         self.opened: list[dict[str, Any]] = []
         self.written_refs: list[str] = []
+        # Commits made on branches by ``put_file``; never part of ``repos[repo].commits`` (the main chain).
+        self.branch_commits: dict[str, list[FakeCommit]] = {}
+        self.messages: list[tuple[str, str, str, str]] = []
+        self.statuses: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self.unknown_users: set[str] = set()
+        self.fail_after_commit = False
+        self.on_put_file: Callable[[], None] | None = None
+        self._counter = 0
+
+    def _next(self) -> int:
+        self._counter += 1
+        return self._counter
 
     def _repo(self, repo: str) -> FakeRepo:
         try:
@@ -102,7 +115,7 @@ class ForgejoFake:
             raise ForgejoError(f"unknown repo {repo}") from None
 
     def _commit(self, repo: str, sha: str) -> FakeCommit:
-        for c in self._repo(repo).commits:
+        for c in [*self._repo(repo).commits, *self.branch_commits.get(repo, [])]:
             if c.sha == sha:
                 return c
         raise ForgejoError(f"unknown commit {sha}")
@@ -133,6 +146,8 @@ class ForgejoFake:
 
     async def head_sha(self, repo: str, branch: str) -> str:
         self.calls.append("head_sha")
+        if (repo, branch) in self.branches:
+            return self.branches[(repo, branch)]
         return self._repo(repo).commits[-1].sha
 
     async def list_tree(self, repo: str, sha: str) -> list[dict[str, Any]]:
@@ -225,13 +240,106 @@ class ForgejoFake:
             raise ForgejoError("POST branches failed: HTTP 409")
         self.branches[(repo, name)] = from_sha
 
-    async def put_file(self, repo: str, branch: str, path: str, content: str, message: str) -> None:
+    async def put_file(
+        self, repo: str, branch: str, path: str, content: str, message: str
+    ) -> dict[str, Any]:
         self._write("put_file")
         self.calls.append("put_file")
         self.written_refs.append(branch)
         if (repo, branch) not in self.branches:
             raise ForgejoError("PUT contents failed: HTTP 404")
+        if self.on_put_file is not None:
+            self.on_put_file()
+        parent = self.branches[(repo, branch)]
+        commit = FakeCommit(f"b{self._next()}", parents=[parent], files={path: content})
+        self.branch_commits.setdefault(repo, []).append(commit)
+        self.branches[(repo, branch)] = commit.sha
         self.files[(repo, branch, path)] = content
+        self.messages.append((repo, branch, path, message))
+        return {"sha": commit.sha, "parents": [parent]}
+
+    def _resolve(self, repo: str, ref: str) -> str:
+        if (repo, ref) in self.branches:
+            return self.branches[(repo, ref)]
+        if ref == "main":
+            return self._repo(repo).commits[-1].sha
+        return ref
+
+    async def compare_files(self, repo: str, base: str, head: str) -> list[dict[str, Any]]:
+        self.calls.append("compare_files")
+        a, b = self._tree_at(repo, base), self._tree_at(repo, head)
+        out = []
+        for p in sorted(set(a) | set(b)):
+            if a.get(p) == b.get(p):
+                continue
+            status = "added" if p not in a else "removed" if p not in b else "modified"
+            out.append({"filename": p, "status": status})
+        return out
+
+    async def blob_sha(self, repo: str, path: str, ref: str) -> str | None:
+        self.calls.append("blob_sha")
+        text = self._tree_at(repo, ref).get(path)
+        if text is None:
+            return None
+        data = text.encode("utf-8")
+        return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()  # noqa: S324
+
+    async def last_commit(self, repo: str, path: str, ref: str) -> str | None:
+        self.calls.append("last_commit")
+        cur: str | None = self._resolve(repo, ref)
+        while cur is not None:
+            c = self._commit(repo, cur)
+            if path in c.files:
+                return c.sha
+            cur = c.parents[0] if c.parents else None
+        return None
+
+    async def put_note(
+        self, repo: str, path: str, content: str, message: str, prev_blob: str | None
+    ) -> str:
+        self._write("put_note")
+        self.calls.append("put_note")
+        current = await self.blob_sha(repo, path, "main")
+        if prev_blob is None and current is not None:
+            raise ForgejoError("POST contents failed: HTTP 422")
+        if prev_blob is not None and prev_blob != current:
+            raise ForgejoError("PUT contents failed: HTTP 409")
+        repo_obj = self._repo(repo)
+        commit = FakeCommit(
+            f"n{self._next()}", parents=[repo_obj.commits[-1].sha], files={path: content}
+        )
+        repo_obj.commits.append(commit)
+        self.messages.append((repo, "main", path, message))
+        self.written_refs.append("main")
+        if self.fail_after_commit:
+            raise ForgejoError("PUT contents failed: timeout")
+        return commit.sha
+
+    async def commit_statuses(self, repo: str, sha: str) -> list[dict[str, Any]]:
+        self.calls.append("commit_statuses")
+        return list(self.statuses.get((repo, sha), []))
+
+    async def post_requester(self, repo: str, sha: str, login: str, proposal_id: str) -> None:
+        self._write("post_requester")
+        self.calls.append("post_requester")
+        self.statuses.setdefault((repo, sha), []).append(
+            {
+                "context": "kh/requested-by",
+                "state": "success",
+                "description": f"{login} {proposal_id}",
+                "creator": "kh-hub-bot",
+            }
+        )
+
+    async def pull_for_head(self, repo: str, branch: str) -> dict[str, Any] | None:
+        self.calls.append("pull_for_head")
+        return next(
+            (p for p in self._repo(repo).pulls if (p.get("head") or {}).get("ref") == branch), None
+        )
+
+    async def org_member(self, login: str) -> bool:
+        self.calls.append("org_member")
+        return login not in self.unknown_users
 
     async def open_pull(
         self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]
@@ -252,7 +360,8 @@ class ForgejoFake:
             "merged": False,
             "user": {"login": "kh-hub-bot"},
             "base": {"ref": base},
-            "head": {"ref": head},
+            "head": {"ref": head, "sha": self.branches[(repo, head)]},
+            "state": "open",
             "title": title,
             "body": body,
             "labels": [{"name": n} for n in labels],

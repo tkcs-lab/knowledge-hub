@@ -24,7 +24,7 @@ MAX_LIST_LIMIT = 50
 _DOC_SQL = """
 SELECT d.id, d.repo, d.path, d.body AS text, d.tier, d.domain, d.owner, d.approved_by, d.approved_at, d.stamp,
        d.review_by, d.status, d.stale, d.entities, d.supersedes, s.id AS superseded_by,
-       d.commit_sha, d.indexed_at
+       d.commit_sha, d.indexed_at, d.agent_written
   FROM kh.documents d
   LEFT JOIN kh.documents s ON s.id = d.superseded_by
  WHERE d.id = %s
@@ -107,6 +107,7 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
             "commit_sha": row["commit_sha"],
             "indexed_at": _iso(row["indexed_at"]),
             "source_link": source_link(call.deps, row["repo"], row["commit_sha"], row["path"]),
+            "agent_written": bool(row["agent_written"]),
         }
     else:
         row = await _one(call, _RAW_SQL if kind == "raw" else _DERIVED_SQL, key)
@@ -129,6 +130,7 @@ async def get_doc(call: ToolCall, id: str, version: str = "") -> dict[str, Any]:
             "commit_sha": "",
             "indexed_at": _iso(row["indexed_at"]),
             "source_link": (row["source_url"] or "") if kind == "raw" else "",
+            "agent_written": False,
         }
     if version:
         out = await _at_version(call, kind, key, version, out, row)

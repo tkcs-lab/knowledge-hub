@@ -22,6 +22,7 @@ class Deps:
     blobs: Any = None
     forgejo: Any = None  # read-only (indexer token)
     forgejo_bot: Any = None  # bot token; used only by propose_change
+    forgejo_notes: Any = None  # notes token; writes agent notes on T1 repos
     grist: Any = None
     verifier: Any = None
     ratelimiter: Any = None
@@ -30,7 +31,19 @@ class Deps:
 
 def register_tools(server: MCPServer, deps: Deps) -> None:
     """Register every tool. Later phases add their modules here."""
-    from knowledge_hub.tools import conflicts, derived, docs, entities, promote, raw, search
+    from knowledge_hub.tools import (
+        agent_edit,
+        agent_notes,
+        agent_proposals,
+        agent_status,
+        conflicts,
+        derived,
+        docs,
+        entities,
+        promote,
+        raw,
+        search,
+    )
 
     docs.register(server, deps)
     search.register(server, deps)
@@ -39,6 +52,10 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
     promote.register(server, deps)
     conflicts.register(server, deps)
     entities.register(server, deps)
+    agent_notes.register(server, deps)
+    agent_proposals.register(server, deps)
+    agent_edit.register(server, deps)
+    agent_status.register(server, deps)
 
 
 def build_mcp(deps: Deps) -> MCPServer:

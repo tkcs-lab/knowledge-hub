@@ -1,13 +1,13 @@
 # knowledge-hub
 
-The trusted core of the company knowledge layer: one MCP interface over canonical documents in git and machine-written records in Postgres. Every result carries its trust tier and is filtered by the caller's audiences inside Postgres (row-level security), not in Python. Agents reach it through PrivacyFence, where its tools appear as `kh_search`, `kh_get_doc`, `kh_propose_change` and so on.
+The trusted core of the company knowledge layer: one MCP interface over canonical documents in git and machine-written records in Postgres. Every result carries its trust tier and is filtered by the caller's audiences inside Postgres (row-level security), not in Python. Agents reach it through PrivacyFence, where its tools appear as `kh_search`, `kh_get_doc`, `kh_propose_change`, `kh_write_note`, `kh_propose_doc`, `kh_propose_edit`, `kh_pr_status`, `kh_list_my_proposals` and so on.
 
 ## The four tiers
 
 | Tier | Source | Trust |
 |---|---|---|
 | T0 | canonical Forgejo repos, merged after an approved pull request | normative |
-| T1 | `notes-*` repos, any merge | notes |
+| T1 | `notes-*` repos, any merge; agents through `write_note` (marked, unreviewed) | notes |
 | T2 | derived records written by `write_derived`, citing their sources | machine summary |
 | T3 | raw records ingested by workflows, bodies in S3-compatible storage | raw material |
 

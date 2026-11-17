@@ -9,7 +9,7 @@ This document records the decisions as built, the alternatives that were rejecte
 | Tier | Source | Written by | Trust |
 |---|---|---|---|
 | T0 | canonical repos (`canonical-<audience>`) | merged, approved pull requests | normative |
-| T1 | `notes-*` repos | any merge, no approval needed | notes |
+| T1 | `notes-*` repos | any merge; agents through `write_note` | notes |
 | T2 | `derived_records` | `write_derived` | machine summary, cites sources |
 | T3 | `raw_records` | `ingest_raw` | raw material, blob in S3 |
 
@@ -73,6 +73,41 @@ This document records the decisions as built, the alternatives that were rejecte
 
 `search` and `get_doc` return `stamp` next to `approved_by`.
 
+## Agent writes
+
+Agents write through five tools: `write_note` (T1), `propose_doc` and `propose_edit` (T0 pull requests), and the reads `pr_status` and `list_my_proposals`. PrivacyFence shows them as `kh_write_note` and so on. Both write families are off until `KH_AGENT_NOTES_ENABLED` and `KH_AGENT_PROPOSALS_ENABLED` are set; each also needs `KH_AGENT_EMAIL_DOMAINS`.
+
+### Trust boundary
+
+- **T1 is writable by agents, unreviewed.** `write_note` commits one file, `agent/<id>.md`, straight to `main` of a `notes-<audience>` repo. No person reviews it, so a note written after an agent read hostile text can enter the index.
+- **Marking.** The hub renders the frontmatter itself: `type: agent-note`, `owner: <login>`. No tool argument can set `tier`, `audience`, `visibility` or `approved_*`. The indexer sets `agent_written` on the document and its chunks when the path starts with `agent/` or the type is `agent-note`, so removing the `type` key does not unmark a note. Hits and `get_doc` carry `agent_written`.
+- **Search rule.** An agent-written chunk is weighted like T2 and never counts as a normative answer. A query answered only by agent notes gets the `NORMATIVE` error when `min_tier` is T0 or T1 and passes with `min_tier` T2 or T3. When exactly one non-agent file holds an id, it is kept and the agent notes with that id are rejected, so a squatted id cannot remove a human note.
+- **Limits.** One note is at most `KH_AGENT_MAX_BODY_BYTES` (128 KiB); at most `KH_AGENT_NOTE_DAILY_LIMIT` notes per requester a day; ids are unique per repo. Only the author (login and `sub`) updates a note, and an update needs `base_commit`, the commit the caller read. Text with control, hidden or bidirectional characters, HTML comments, HTML tags or link reference definitions is refused.
+- **What Forgejo still allows.** `kh-notes-bot` has team write on the notes repos, so a leaked token can write any path or branch there and force-push an unprotected `main`. The restriction to `agent/<id>.md` on `main` exists only in the hub's client. The indexer's `main of <repo> was rewritten` alert detects a rewritten `main`.
+- **Residual risk, accepted.** A person who approves the PrivacyFence popup can still store false but plausible text for agents of the same audience to read. The marking makes it visible and low-ranked, not impossible. Removal is a revert in the notes repo and `kh rebuild --repo notes-<audience>` (see the runbook).
+
+### Callers and the requester
+
+Only a `claude_client` with a verified email in `KH_AGENT_EMAIL_DOMAINS` may write; n8n is refused. The requester login is the email local part, lower-cased, and must be a member of the Forgejo organisation. Every commit message and PR body ends with `Written-by`, `Requested-by` (login, email, `sub`) and `Proposal` lines. The git author is the token's user: `kh-notes-bot` for T1, `kh-hub-bot` for T0. Targets are chosen from the audiences the caller holds, never from content, and text that cites records wider than or restricted differently from the target repo is refused.
+
+### Three client roles
+
+`ForgejoClient` has a role. `read` (the indexer) refuses every write. `bot` writes `bot/promote/*` and `bot/propose/*` branches, opens pull requests and posts the commit statuses; it never writes `main` and refuses `put_note`. `notes` has one write: `agent/<id>.md` on `main` of a listed T1 repo. The CI status client keeps role `bot`, but only `post_status` is reachable from the CLI and its guard accepts only `kh/validate` and `kh/domain-owners`.
+
+### The requester record and its binding
+
+A person who asks an agent for a T0 change must not be the person who approves it, but the pull request author is the bot. So the hub posts the commit status `kh/requested-by` as `kh-hub-bot` on the PR head, with the description `<login> <proposal-uuid>`. The hub writes a branch only in the call that creates it, checks that the commit has the base as its single parent and changes exactly one path, and posts the record on that commit only. The record is valid only on the current `head.sha`, from a login in `REQUESTER_POSTERS`, with the uuid equal to the suffix of the branch `bot/propose/<uuid>`. A person's commit on top moves the head, so the record is missing; the PR then fails closed and must be closed and proposed again.
+
+### Approval exclusion and authority
+
+`kh domain-owners` and the trust walk both ignore the requester's approval of a `bot/propose/*` PR and fail closed when there is no valid record (`agent proposal has no valid requester record from kh-hub-bot`; the trust walk marks the document `disputed`). For other PRs a record that names an approver also excludes that approver. `propose_change` PRs have no record and keep today's rule.
+
+Authority: the trust walk is the authoritative control. The `kh/domain-owners` status is advisory, because a person with write access can post any status context and Forgejo does not stop a requester approving a bot-authored PR. A requester who approves, posts a fake `kh/domain-owners: success` and merges leaves the document `disputed` in the index and raises `file <path> on <repo>/main has no approved merge PR`. The CI status token must never belong to `kh-hub-bot`, or the record could be forged.
+
+### Proposal rows
+
+`kh.proposals` holds one row per write (kind `note`, `doc` or `edit`), under row-level security of the creator's `sub` and the visibility of the repo. State changes go through the definer function `kh.proposal_mark`. Daily counts use the definer function `kh.count_proposals_today`, which returns only a number so a token with fewer audiences cannot multiply a person's limit. T0 proposals are limited per `(domain, repo)` by `KH_PROMOTION_DAILY_LIMIT` (counting `propose_change` candidates as well) and per requester by `KH_AGENT_PROPOSAL_DAILY_LIMIT`; `propose_change` counts candidates only, so agents cannot exhaust the workflows' budget.
+
 ## Provenance exception
 
 A workflow token that ingested a raw record can cite it in `write_derived` although it cannot read it back (the record may be restricted to attendees the token's person does not match).
@@ -127,3 +162,11 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | Policy requiring a non-empty audience list | It would hide email-only rows from people in no group. |
 | Two visibility columns (any and all) | Lossy for derived rows; a set of OR-clauses in the existing column is exact. |
 | `get_doc` fetching from Forgejo | Slow and unfiltered; `get_doc` is an indexed lookup under RLS and Forgejo is read only for `version=`. |
+| Flat path `<domain>/<id>.md` for agent T0 documents | Fails `kh validate` for every PR; the path follows the governance layout and the hub fills `type` and `owner`. |
+| Requester only in a commit trailer or the PR body | Writers can edit the body; the status is posted by a login only the hub holds. |
+| Requester record valid on any commit of the PR | A person's commit on top, or a force-push of another proposal's commit, would carry a foreign record; it is valid on the head only. |
+| Embedding similarity to restricted chunks as the "email-scoped" check | Slow and gives wrong refusals; the hub requires a verified-email person caller plus a citation check. |
+| Refusing every caller who sees an email-restricted row | Refuses nearly everyone. |
+| Reusing `kh.candidates` for agent proposals | It requires sources and a derived-record link; proposals have their own table. |
+| One Forgejo client role for all | A bug could push to `main` of a canonical repo; three roles. |
+| Two approvals by different people for every agent PR | Slower for every PR; excluding the requester is enough. |

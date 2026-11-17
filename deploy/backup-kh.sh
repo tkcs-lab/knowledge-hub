@@ -45,6 +45,7 @@ pg_dump -Fc --no-owner --enable-row-security --inserts \
   -t kh.derived_records \
   -t kh.derived_sources \
   -t kh.candidates \
+  -t kh.proposals \
   -t kh.candidate_sources \
   -t kh.conflicts \
   -t kh.conflict_items \

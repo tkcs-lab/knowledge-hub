@@ -35,6 +35,10 @@ services:
       KH_FORGEJO_URL: "http://forgejo:3000"
       KH_FORGEJO_BOT_TOKEN_FILE: /run/secrets/kh_hub_bot_token
       KH_FORGEJO_INDEXER_TOKEN_FILE: /run/secrets/kh_indexer_token
+      # KH_FORGEJO_NOTES_TOKEN_FILE: /run/secrets/kh_notes_bot_token
+      KH_AGENT_NOTES_ENABLED: "false"
+      KH_AGENT_PROPOSALS_ENABLED: "false"
+      KH_AGENT_EMAIL_DOMAINS: ""
       KH_WEBHOOK_HMAC_FILE: /run/secrets/kh_webhook_hmac
       KH_EMBED_PROVIDER: ollama
       KH_OLLAMA_URL: "http://ollama:11434"

@@ -90,8 +90,8 @@ WITH {main_lists},
 {low_lists},
 scored AS (
   SELECT c.id, c.owner_key, c.tier, c.domain, c.status, c.stale, c.entities, c.text,
-         c.document_id, c.raw_id, c.derived_id, c.owner_created_at,
-         m.rrf * (%(tier_weights)s::jsonb ->> c.tier)::float8
+         c.document_id, c.raw_id, c.derived_id, c.owner_created_at, c.agent_written,
+         m.rrf * (%(tier_weights)s::jsonb ->> CASE WHEN c.agent_written THEN 'T2' ELSE c.tier END)::float8
                * CASE WHEN c.stale THEN %(stale_weight)s ELSE 1 END
                * CASE WHEN c.superseded THEN %(superseded_weight)s ELSE 1 END
                * CASE WHEN c.status = 'disputed' THEN %(disputed_weight)s ELSE 1 END AS score
@@ -110,17 +110,19 @@ low_owners AS (
 ),
 meta AS (
   SELECT (SELECT count(*) FROM best) AS total,
-         (SELECT count(*) FROM best WHERE tier IN ('T0', 'T1') AND status <> 'disputed') AS normative_hits,
+         (SELECT count(*) FROM best WHERE tier IN ('T0', 'T1') AND status <> 'disputed'
+                                       AND NOT agent_written) AS normative_hits,
+         (SELECT count(*) FROM best WHERE agent_written) AS agent_hits,
          (SELECT count(*) FROM low_owners WHERE tier = 'T2') AS low_t2,
          (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS low_t3,
          (SELECT max(owner_created_at) FROM low_owners) AS low_newest_at
 )
-SELECT p.id, p.owner_key, p.tier, p.domain, p.status, p.stale, p.entities, p.text, p.score,
+SELECT p.id, p.owner_key, p.tier, p.domain, p.status, p.stale, p.entities, p.text, p.score, p.agent_written,
        d.repo AS doc_repo, d.path AS doc_path, d.commit_sha AS doc_commit_sha, d.owner AS doc_owner,
        d.approved_by AS doc_approved_by, d.approved_at AS doc_approved_at,
        d.stamp AS doc_stamp, d.review_by AS doc_review_by,
        r.source_url AS raw_source_url,
-       meta.total, meta.normative_hits, meta.low_t2, meta.low_t3, meta.low_newest_at
+       meta.total, meta.normative_hits, meta.agent_hits, meta.low_t2, meta.low_t3, meta.low_newest_at
   FROM meta
   LEFT JOIN page p ON true
   LEFT JOIN kh.documents d ON d.id = p.document_id
