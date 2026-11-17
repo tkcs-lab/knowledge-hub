@@ -273,3 +273,10 @@ class FakeForgejo:
         }
         repo.pulls.append(pull)
         return httpx.Response(201, json=pull)
+
+
+def md(doc_id: str, title: str = "T", *, labels: list[str] | None = None, review_by: str = "2099-01-01",
+       body: str = "Body text.\n") -> str:
+    """A Markdown file with the required frontmatter (``labels`` omitted when None)."""
+    lab = "" if labels is None else f"labels: [{', '.join(labels)}]\n"
+    return f"---\nid: {doc_id}\ntitle: {title}\nreview_by: {review_by}\n{lab}---\n{body}"
