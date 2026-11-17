@@ -107,6 +107,12 @@ def _lint(files: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "setup":
+        from knowledge_hub.setup.cli import main as setup_main
+
+        return setup_main(argv[1:])
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in COMMANDS:
@@ -117,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         if name == "rebuild":
             p.add_argument("--repo")
+    sub.add_parser("setup", help="plan or apply the deployment setup (kh setup --help)")
     sub.add_parser("lint").add_argument("files", nargs="+", metavar="FILE")
     args = parser.parse_args(argv)
     if args.command == "lint":
