@@ -28,6 +28,13 @@ def _applied(conn: psycopg.Connection) -> dict[str, str]:
     return {name: sha for name, sha in conn.execute("SELECT name, sha256 FROM kh.schema_migrations")}
 
 
+def pending(dsn: str) -> list[str]:
+    """Names of shipped migration files that are not applied yet (read-only)."""
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        applied = _applied(conn)
+    return [name for name, _ in _migration_files() if name not in applied]
+
+
 def migrate(dsn: str, *, stop_after: str | None = None) -> list[str]:
     """Apply pending migrations; return the names applied in this run.
 
