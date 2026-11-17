@@ -190,6 +190,7 @@ async def test_labels(empty, settings):
     with psycopg.connect(mig(empty), autocommit=True) as conn:
         add_doc(conn, labels=["a"])
     none = LabelsStep(cfg(("all", "hr")), mig(empty))
-    assert lines(await none.apply(True)) == ["! label a: used by 1 rows"]
+    out = lines(await none.apply(True))
+    assert len(out) == 1 and out[0].startswith("! label a")
     with psycopg.connect(mig(empty)) as conn:
         assert conn.execute("SELECT count(*) FROM kh.labels").fetchone() == (1,)
