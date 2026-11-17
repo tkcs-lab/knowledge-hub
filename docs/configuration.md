@@ -1,6 +1,6 @@
 # Knowledge hub configuration
 
-Every `KH_*` environment variable read by `knowledge_hub/settings.py`, and every key of the `kh.yaml` file named by `KH_CONFIG_FILE`.
+Every `KH_*` environment variable read by `knowledge_hub/settings.py`, every key of the `kh.yaml` file named by `KH_CONFIG_FILE`, the `kh` commands and `kh setup`.
 Secrets are never variables: a `*_FILE` setting names a file that holds the secret.
 
 ## Environment variables
@@ -12,7 +12,7 @@ Unknown `KH_*` variables are ignored. `kh serve` and every other command exit 2 
 | Variable | Default | Meaning |
 |---|---|---|
 | `KH_ENV` | `prod` | `dev`, `test` or `prod`. `prod` refuses `KH_DEV_IDENTITY` and the fake embedder. |
-| `KH_DEV_IDENTITY` | none | JSON `{"sub", "principal_type", "audiences", "email"?}` used for requests with no claim header. `principal_type` is `claude_client` or `n8n_workflow`. Refused when `KH_ENV=prod`. |
+| `KH_DEV_IDENTITY` | none | JSON `{"sub", "principal_type", "audiences", "email"?}` used for requests with no claim header. `principal_type` is `claude_client` or `n8n_workflow`. Refused when `KH_ENV=prod`. `audiences` is ignored for a `claude_client`: its groups come from its `email` through `people` in `kh.yaml`, so a dev identity without a listed email reads nothing. For an `n8n_workflow` the audiences that are configured groups are held. |
 | `KH_PF_ISSUER` | none | Issuer (`iss`) the verifier accepts: the address PrivacyFence is served at, with no path, for example `https://pf.tkcs.name`. |
 | `KH_PF_AUDIENCE` | none | Audience (`aud`) the claim must carry. |
 | `KH_PF_JWKS_URL` | none | URL of PrivacyFence's signing keys, `<issuer>/upstream-mcp/jwks`. It may use another host address than the issuer: see below. |
@@ -32,37 +32,28 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_DB_HOST` | `postgres` | Postgres host; a directory path means a unix socket. |
 | `KH_DB_PORT` | `5432` | Postgres port. |
 | `KH_DB_NAME` | `kh` | Database name. |
-| `KH_DB_MIGRATOR_PASSWORD_FILE` | none | Password file for `kh_migrator` (used by `kh migrate`). No file means no password. |
+| `KH_DB_MIGRATOR_PASSWORD_FILE` | none | Password file for `kh_migrator` (`kh migrate`, `kh setup`). No file means no password. |
 | `KH_DB_APP_PASSWORD_FILE` | none | Password file for `kh_app` (the request path). |
-| `KH_DB_INDEXER_PASSWORD_FILE` | none | Password file for `kh_indexer` (worker, rebuild, check, daily, recompute, requeue). |
+| `KH_DB_INDEXER_PASSWORD_FILE` | none | Password file for `kh_indexer` (worker, rebuild, check, daily, requeue). |
 
 ### Config file, Forgejo and webhook
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KH_CONFIG_FILE` | none | Path of `kh.yaml`. Without it the built-in defaults apply. |
-| `KH_FORGEJO_URL` | none | Forgejo base URL. The worker and promotion exist only when it is set. |
-| `KH_FORGEJO_ORG` | `kh` | Forgejo organisation that holds the repos. Webhook events from other owners are ignored. `kh validate` and `kh domain-owners` use it too. |
-| `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of `kh-hub-bot`, used only for promotion branches and pull requests. |
-| `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token the indexer uses to fetch commits, reviews and files. Required when `KH_FORGEJO_URL` is set. It needs `read:organization` when `self_merge_teams` is not empty (team reads). |
-| `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. |
+| `KH_CONFIG_FILE` | none | Path of `kh.yaml`. Without it the built-in defaults apply (no people, no groups). |
+| `KH_FORGEJO_URL` | none | Forgejo base URL. The worker exists only when it is set. The Forgejo organisation is `org` in `kh.yaml`. |
+| `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of the `bot_login` account, used only to open `propose_doc` pull requests. |
+| `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token of the `indexer_login` account. Required when `KH_FORGEJO_URL` is set. |
+| `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. `kh setup` also writes it into the org webhook. |
 
-### Agent writes
+### Setup credentials (`kh setup` only)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KH_AGENT_NOTES_ENABLED` | `false` | Registers `write_note`. Needs `KH_FORGEJO_URL`, `KH_FORGEJO_NOTES_TOKEN_FILE` and `KH_AGENT_EMAIL_DOMAINS`, or startup fails. |
-| `KH_AGENT_PROPOSALS_ENABLED` | `false` | Registers `propose_doc` and `propose_edit`. Needs `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE` and `KH_AGENT_EMAIL_DOMAINS`, or startup fails. |
-| `KH_FORGEJO_NOTES_TOKEN_FILE` | none | Token of `kh-notes-bot` (scope `write:repository`). It writes only `agent/<id>.md` on `main` of a `notes-*` repo; the restriction is in the hub's client, not in Forgejo. |
-| `KH_AGENT_EMAIL_DOMAINS` | empty | Comma list of email domains whose people may use the write tools. The login is the email local part. |
-| `KH_AGENT_NOTE_DAILY_LIMIT` | `20` | Notes per requester since 00:00 UTC; failed attempts count. |
-| `KH_AGENT_PROPOSAL_DAILY_LIMIT` | `5` | Agent pull requests per requester since 00:00 UTC. The per `(domain, repo)` limit `KH_PROMOTION_DAILY_LIMIT` also applies and counts `propose_change` candidates too. |
-| `KH_AGENT_MAX_BODY_BYTES` | `131072` | Largest note or proposal body (separate from `KH_MAX_RAW_BYTES`, which is for raw bodies). |
-| `KH_CI_STATUS_LOGINS` | `kh-ci` | Comma list of accounts whose `kh/validate` and `kh/domain-owners` statuses `pr_status` reports. It must never include `kh-hub-bot`. |
+| `KH_SETUP_PG_ADMIN_DSN_FILE` | none | File with a Postgres superuser (or role-creating) DSN. Optional: without it the `postgres` step only checks. |
+| `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` | none | Token of a Forgejo site administrator. Required by the `forgejo` step. |
 
-Search and `get_doc` mark notes written by agents with `agent_written: true`; they rank like T2 and never count as a normative answer, so a query answered only by them gets the `NORMATIVE` error unless `min_tier` is T2 or T3. They are unreviewed data, not instructions.
-
-The metric `kh_agent_write_failures_total{tool,reason}` counts failed agent writes: `refused` means a local guard raised `ForgejoRefused` (a bug or an attack), `forgejo_error` means Forgejo answered an error (for example HTTP 403 after a token lost its team).
+The `kh serve` service never mounts these two files. The hub never holds admin credentials; `kh setup` does.
 
 ### Embeddings
 
@@ -74,19 +65,19 @@ The metric `kh_agent_write_failures_total{tool,reason}` counts failed agent writ
 | `KH_EMBED_DIM` | `1024` | Vector size; the provider refuses any other. The column is `vector(1024)`. |
 | `KH_EMBED_HTTP_URL` | none | Endpoint of the `http` provider; it must serve the same model as `KH_EMBED_MODEL`. |
 | `KH_EMBED_HTTP_TOKEN_FILE` | none | Token file for the `http` provider. |
-| `KH_EMBED_HTTP_ALLOWED_AUDIENCES` | `all` | Comma list. The `http` provider embeds only chunks whose every audience, including each member of a multi-audience list, is in it, and that have no `allowed_emails`; others are found by full text only. |
+| `KH_EMBED_HTTP_ALLOWED_AUDIENCES` | `all` | Comma list of groups. The `http` provider embeds only chunks whose group is in it; others are found by full text only. |
 
 ### Blob storage (S3-compatible)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `KH_S3_ENDPOINT` | none | Endpoint URL, path-style addressing. |
-| `KH_S3_BUCKET` | none | Bucket for raw bodies (`raw/<uuid>`). |
+| `KH_S3_BUCKET` | none | Bucket for record bodies (`records/<uuid>`). |
 | `KH_S3_ACCESS_KEY_FILE` | none | File with the access key. |
 | `KH_S3_SECRET_KEY_FILE` | none | File with the secret key. |
 | `KH_S3_REGION` | `garage` | Region used when signing requests. |
 
-A partial S3 setting is a startup error. With no S3 setting the raw-record tools are unavailable.
+A partial S3 setting is a startup error. With no S3 setting `ingest_record` and `get_doc` of a record are unavailable.
 
 ### Search, limits and tools
 
@@ -94,105 +85,102 @@ A partial S3 setting is a startup error. With no S3 setting the raw-record tools
 |---|---|---|
 | `KH_CURSOR_KEY_FILE` | none | HMAC key for `search` and list cursors. Without it `search` fails with an internal error. |
 | `KH_CHUNKER_VERSION` | `1` | Part of the chunk hash; raising it re-chunks every document on the next sync. |
-| `KH_PROMOTION_DAILY_LIMIT` | `5` | Proposals per `(domain, target repo)` since 00:00 UTC. |
 | `KH_RRF_K` | `60` | Reciprocal-rank-fusion constant. |
 | `KH_SEARCH_POOL` | `50` | Candidates per list (vector and full text) before fusion. |
-| `KH_TIER_WEIGHTS` | `T0:1.0,T1:0.85,T2:0.6,T3:0.4` | Score multiplier per tier. |
+| `KH_TIER_WEIGHTS` | `T0:1.0,T3:0.4` | Score multiplier per tier; it must name exactly `T0` and `T3`. |
 | `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit. |
-| `KH_SUPERSEDED_WEIGHT` | `0.3` | Multiplier for a superseded hit. |
-| `KH_DISPUTED_WEIGHT` | `0.5` | Multiplier for a disputed hit. |
 | `KH_SEARCH_MAX_OFFSET` | `100` | Largest offset a `search` cursor may carry; above it `CURSOR_FOREIGN`. |
-| `KH_MAX_RAW_BYTES` | `1048576` | Largest `ingest_raw` body. |
+| `KH_MAX_RECORD_BYTES` | `1048576` | Largest `ingest_record` body (was `KH_MAX_RAW_BYTES`). |
+| `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body. |
+| `KH_PROPOSE_MAX_OPEN` | `20` | Open bot pull requests per repo; above it `propose_doc` is refused. |
 | `KH_RATE_LIMIT_PER_MIN` | `120` | Tool calls per minute per caller `sub`. The bucket is in memory, so the limit is per process. |
 | `KH_METRICS_TOKEN_FILE` | none | Bearer token for `/metrics`. Without it the route does not exist. The file is read on every request, so the token can be rotated. |
 
-### Grist (daily job)
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `KH_GRIST_URL` | none | Grist base URL. |
-| `KH_GRIST_DOC_ID` | none | Document that holds the Grist table of every kind in `entities` (by default `Products`, `Components`, `Versions`, `Customers`). |
-| `KH_GRIST_KEY_FILE` | none | API key file. `kh daily` exits 2 unless all three Grist settings are set. |
+Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES` (renamed), `KH_FORGEJO_NOTES_TOKEN_FILE`, every `KH_AGENT_*`, `KH_CI_STATUS_LOGINS`, `KH_PROMOTION_DAILY_LIMIT`, `KH_SUPERSEDED_WEIGHT`, `KH_DISPUTED_WEIGHT` and `KH_GRIST_*`.
 
 ## Commands
 
 | Command | Use |
 |---|---|
-| `kh migrate` | Apply migrations as `kh_migrator`. |
-| `kh serve [--port 8080]` | Run the HTTP app and the webhook worker. |
-| `kh rebuild [--repo R] [--rejudge]` | Re-walk trust from the anchor and re-index, reusing the stored merge verdicts. Idempotent. `--rejudge` makes a fresh judgement of every merge and replaces the stored verdicts (see the [runbook](runbook.md#merge-verdicts-and---rejudge)). |
-| `kh check` | Compare the index with Forgejo and the config; exit 1 on drift. |
-| `kh recompute-visibility` | Rewrite visibility from the config. Run once after install or restore, and after any change to audiences, repos or `raw_audience_map`. |
-| `kh requeue-embeddings` | Queue embedding jobs for raw and derived records without chunks (after a restore). |
-| `kh daily` | Mark stale documents, sync entities from Grist, purge expired claim ids. |
-| `kh validate --repo R --base SHA --head SHA` | CI gate for a canonical repo pull request: frontmatter, layout, ids, entities. Exit 0, 1 or 2. See [governance](governance.md). |
-| `kh domain-owners --repo R --pr N` | CI gate: owner-team approvals or self-merge by an owner of a pull request. Exit 0, 1 or 2. See [governance](governance.md). |
-| `kh governance render --repo R --audience A --out DIR` | Write the schema, `owners.yml`, CODEOWNERS, PR template and workflow for a new canonical repo. |
+| `kh serve [--port 8080]` | Run the HTTP app and the job worker. |
+| `kh migrate` | Apply the migration as `kh_migrator`. Refuses a database that predates the baseline. |
+| `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
+| `kh rebuild [--repo R]` | Forget the indexed head and sync again. Idempotent. |
+| `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>`). |
+| `kh daily` | Recompute `stale` flags and purge expired claim ids. |
+| `kh requeue-embeddings` | Queue an `embed_record` job for every record without chunks. |
+| `kh lint FILE...` | Offline frontmatter check, no settings or config needed; exit 1 on a problem. |
 
-The CI runner needs `KH_CONFIG_FILE` in its environment when `kh.yaml` is not the default config.
-
-`kh check` reports config drift until `kh recompute-visibility` has recorded the first config hash.
+Exit 2 means a settings or config error.
 
 ## kh.yaml
 
-Unknown keys are refused. Every error text starts with `config:`.
+One file for the hub and for `kh setup`. Unknown keys are refused and every error text starts with `config:`. `KhConfig()` with no file is valid: no people, no groups, no labels.
 
-| Key | Default | Meaning |
+| Key | Default | Validation and meaning |
 |---|---|---|
-| `audiences` | `[all, mgmt, hr, contracts]` | Audience names allowed in `required_audiences`. Names are 1-63 characters of lowercase letters, digits, `_` or `-`, starting with a letter or digit; a name containing anything else is refused. |
-| `participant_label` | `attendees` | Name shown for email-scoped raw records. It is not an audience. |
-| `domains` | `[portfolio, product, technical]` | Valid values of `domain` for documents, raw, derived and proposals. |
-| `repos` | see example | Map of Forgejo repo name to `{tier: T0 or T1, audience, trust_anchor}`. `audience` must be in `audiences`; at most one T0 repo per audience. `trust_anchor` is a commit sha on `main`, or null for none (set one for T0 once its first reviewed pull request is merged; see the runbook, "Bootstrapping the trust anchor"). |
-| `raw_audience_map` | `{}` | `series:<id>` or `folder:<id>` mapped to the audiences that may read matching raw records. A list means ANY of these audiences may read the rows (a wider audience, not a narrower one); the ingesting token must hold every listed audience. Unknown audiences are refused. |
-| `ingest_principal_types` | `[n8n_workflow]` | Who may call `ingest_raw`. Only `n8n_workflow` is allowed. |
-| `restricted_audiences_imply_all` | `false` | When true, a promotion whose sources span `all` and another audience routes to the other audience's repo instead of failing. |
-| `self_merge_teams` | `[]` | Teams whose members may merge their own pull requests on the paths the team owns in `owners.yml`; the merge is then trusted with stamp `owner_merge`. Names match `^[a-z0-9][a-z0-9_-]*$`. Needs `read:organization` on the indexer token. Governance paths need `kh-admins`. |
-| `bot_logins` | `[kh-hub-bot]` | Logins that are bots. `kh-hub-bot` is always included. Bots never self-merge and their approvals never count. |
-| `entities` | `prd, cmp, ver, cus` (see example) | Map of entity kind (the id prefix) to `{table, audiences, label, reference_audiences}`: the Grist table to read, the audiences of its cache rows (a list means ANY of these audiences may read the rows: a wider audience, not a narrower one), an optional display name. Setting it replaces the defaults. The list form `prd: [all]` is accepted for the four default kinds. Applied on every `kh daily` run. |
-| `entities.<kind>.reference_audiences` | `[contracts, mgmt]` for `cus`, unset for the other default kinds | Repository audiences whose documents may cite the kind. Unset means any repository may cite it. Members must be in `audiences`, otherwise `config: entities <kind> has unknown reference audience ...`. Enforced by `kh validate`. See [entities](#entities). |
-| `governance.owner_teams` | `{}` | Map of audience to the Forgejo teams whose approval allows widening a PR into that audience (`kh domain-owners`). Keys must be in `audiences`; names match `^[a-z0-9][a-z0-9_-]{0,62}$`. Default: `owners-<audience>`, and the three domain teams for `all`. See [governance](governance.md). |
-| `forgejo_web_url` | null | Base URL for `source_link`; empty links when null. |
+| `org` | `kh` | Forgejo organisation that holds the repos. A webhook from another owner is ignored. |
+| `bot_login` | `kh-bot` | Account that opens every T0 pull request and is stamped as `written_by` on every T3 record. |
+| `indexer_login` | `kh-indexer` | Owner of the read-only token. Must differ from `bot_login`; neither may appear in `people` or a member list. |
+| `forgejo_web_url` | null | Null or an `https://` URL; the base of `source_link` (empty links when null). |
+| `hub_url` | null | Null or an http(s) URL without a path: how Forgejo reaches the hub. Only `kh setup` needs it (webhook target). |
+| `people` | `{}` | Map of Forgejo login to the email PrivacyFence verifies for that person. Logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$` and are unique case-folded; an email has exactly one `@`, at most 254 characters, is stored lower-case and is unique (`config: email <e> belongs to two people`). |
+| `groups` | `{}` | Map of group name to `{repo, members, approvers}`. |
+| `groups.<g>.repo` | `kb-<g>` | Repo name, `^[a-z0-9][a-z0-9._-]{0,99}$`, unique. Immutable once applied. |
+| `groups.<g>.members` | `[]` | Logins; each must be in `people` (`config: group <g> member <login> is not in people`). Members read and write. |
+| `groups.<g>.approvers` | required | Non-empty subset of `members` (`config: group <g> approver <login> is not a member`). Approvers merge. |
+| `labels` | `{}` | Map of label name (`^[a-z0-9][a-z0-9_.:-]{0,62}$`) to a description of at most 200 characters; at most 500 labels. |
 
-Example (see `deploy/kh.example.yaml` for the defaults):
+Group names match `^[a-z0-9][a-z0-9_-]{0,62}$`, are not `owners` in any case, and `<name>-approve` may not itself be a group name. Forgejo teams are derived: `<group>` (write on its repo) and `<group>-approve` (read on its repo, in the merge whitelist).
 
 ```yaml
-audiences: [all, mgmt, hr, contracts]
-domains: [portfolio, product, technical]
-repos:
-  canonical-all: {tier: T0, audience: all, trust_anchor: 0123456789abcdef0123456789abcdef01234567}
-  canonical-mgmt: {tier: T0, audience: mgmt, trust_anchor: 89abcdef0123456789abcdef0123456789abcdef}
-  canonical-hr: {tier: T0, audience: hr, trust_anchor: null}
-  canonical-contracts: {tier: T0, audience: contracts, trust_anchor: null}
-  notes-all: {tier: T1, audience: all, trust_anchor: null}
-raw_audience_map:
-  "series:weekly-sync": [mgmt]
-  "folder:hr-interviews": [hr]
-ingest_principal_types: [n8n_workflow]
-restricted_audiences_imply_all: false
-self_merge_teams: []
-bot_logins: [kh-hub-bot]
-entities:
-  prd: {table: Products, audiences: [all], label: product}
-  cmp: {table: Components, audiences: [all], label: component}
-  ver: {table: Versions, audiences: [all], label: version}
-  cus: {table: Customers, audiences: [contracts], label: customer, reference_audiences: [contracts, mgmt]}
-  # a home install might use only kinds such as this one
-  # fam: {table: Family, audiences: [all], label: family member}
-forgejo_web_url: https://forgejo.example.invalid
+org: kh
+bot_login: kh-bot
+indexer_login: kh-indexer
+hub_url: http://knowledge-hub:8080
+people:
+  alice: alice@example.com
+  bob: bob@example.com
+groups:
+  all:
+    members: [alice, bob]
+    approvers: [alice]
+  mgmt:
+    members: [alice]
+    approvers: [alice]
+labels:
+  product:ember: Ember product
 ```
 
-### restricted_audiences_imply_all
+The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart. `deploy/kh.example.yaml` is the maintained example.
 
-Documents of a restricted audience such as `hr` usually also cite `all` sources, so the sources' clauses are `all` and `hr`. With `restricted_audiences_imply_all: false` the router refuses that proposal (`SPAN`). With `true`, every audience implies `all`: a clause that contains `all` counts as `all` alone, and `all` is dropped when another clause is present, so the proposal goes to the `hr` repo. When the remaining sources fit more than one canonical repo, the proposal fails with `ambiguous` and asks for a `target_id`. The stored visibility of the candidate keeps every clause; only the routing changes. Leave it `false` unless people in a restricted audience always also hold `all`.
+## kh setup
 
-### Upgrading to ANY-of
+`kh setup plan|apply --config kh.yaml [--only postgres|labels|forgejo|ollama|s3] [--prune] [--create-bucket]`. `plan` is strictly read-only. `apply` performs every possible change, prints the same lines and is idempotent. `--create-bucket` matters only for `apply`. `--prune` removes objects the config no longer lists.
 
-From 0007, multi-audience lists mean ANY-of; check them before upgrading. Every `entities.<kind>.audiences` and `raw_audience_map` list with two or more audiences becomes readable by each member on its own. Derived records, candidates and conflicts still need every source.
+Steps run in this order: `postgres`, `labels`, `forgejo`, `ollama`, `s3`. A step that fails prints `setup: <step>: <message>` and the later steps are skipped.
 
-A change to `audiences`, `repos`, `raw_audience_map` or the visibility of `entities` changes the config hash: run `kh recompute-visibility` after deploying it. Document visibility follows `repos`, raw and derived rows follow the map, entity rows follow `entities` at the next `kh daily`.
+**Lines.** `<prefix> <object kind> <name>[: <detail>]`:
 
-### entities
+| Prefix | Meaning |
+|---|---|
+| `+` | create |
+| `~` | update |
+| `-` | remove (only with `--prune`) |
+| `!` | refused: a change the script will not make, for example `! group all: changed repo; remove the group and add a new one` |
+| `?` | unmanaged object (`? unmanaged`) |
+| `i` | information (`i webhook secret not verifiable`, `i owners: <logins> can bypass protection`) |
 
-A kind is the id prefix (`fam` in `fam:kid1`): 1-16 lowercase letters, digits, `_` or `-`, starting with a letter; `doc`, `raw` and `derived` are reserved. Each kind reads one Grist table (letters, digits or `_`, starting with a letter), and two kinds cannot share a table. `entities.<kind>.reference_audiences` (optional) lists the repository audiences whose documents may cite the kind; `kh validate` enforces it (default for `cus`: `[contracts, mgmt]`; when unset, any repository may cite the kind). The optional `label` is 1-40 characters without control characters and appears in the tool descriptions. At most 32 kinds are allowed.
+Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit code.
 
-The rows of a kind removed from the config are deleted at the next `kh daily`. Adding or removing a kind, or changing its audiences, changes the config hash (run `kh recompute-visibility`); a `table` or `label` change does not.
+**Exit codes.** `plan`: 0 no drift, 1 drift, 2 error. `apply`: 0, or 2 when an error occurred or any `!` line remains.
+
+**Credential files.** Never in the YAML: `KH_SETUP_PG_ADMIN_DSN_FILE` (optional), `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, and the existing `KH_DB_*_PASSWORD_FILE`, `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE`, `KH_FORGEJO_INDEXER_TOKEN_FILE`, `KH_WEBHOOK_HMAC_FILE`, `KH_OLLAMA_URL`, `KH_EMBED_MODEL`, `KH_S3_*`. A missing required file prints `setup: <name> is not set` and exits 2. Setup never creates Forgejo users or tokens: a missing `bot_login` or `indexer_login` account is an error.
+
+**Steps.**
+
+1. `postgres`. With an admin DSN: create the roles `kh_migrator`, `kh_app` and `kh_indexer` (passwords from the `KH_DB_*_PASSWORD_FILE` files, re-set on every apply because they cannot be read back), the database owned by `kh_migrator`, `CREATE EXTENSION vector`, then run pending migrations. Without an admin DSN it only checks, and pending migrations count as drift. It then syncs `kh.groups`: groups are added; a removed group goes only with `--prune`, is refused when records exist, and its documents are deleted.
+2. `labels`. Inserts new labels and updates descriptions. A removed label is deleted only with `--prune` and only when unused (`! label <x>: in use`). After a label is added, apply queues one `git_push` job per repo so files rejected for an unknown label are retried.
+3. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only, and repos are never deleted.
+4. `ollama`. `plan` checks that the model is listed and that one embedding has length `KH_EMBED_DIM`; `apply` pulls it.
+5. `s3`. Checks that the bucket exists and takes a put, get and delete of `kh-setup-probe/<uuid>`. `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
