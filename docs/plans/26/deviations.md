@@ -63,7 +63,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-propose-doc
 
-- pending
+- worker: render_file always emits a labels flow list (labels: [] when empty) with JSON-quoted labels; title must be non-empty single-line else BAD_ARG; check_text also runs on title and summary; a tag is < or </ followed by a letter
+- worker: a label failing LABEL_RE answers BAD_LABEL without a query; TOO_LARGE counts the rendered file plus summary in bytes; a parse-back mismatch answers BAD_TEXT; ForgejoError, KeyError or TypeError from the Forgejo section become PROPOSE_FAILED
+- worker: error order: not configured, audience, path, id, review_by, title, text, labels, size, parse-back, open-PR cap, base_blob/path, ID_IN_USE, then branch, put, pull; deps.close_deps also closes forgejo_bot; tools/propose.py has no from __future__ annotations
+- review: known gaps: concurrent proposals of one id on different paths can open two PRs (the indexer duplicate-id rejection covers it after merge); a put_file race on a stale prev_blob leaves an orphan bot/propose branch with no cleanup
 
 ## p11-setup-core
 
