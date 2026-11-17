@@ -22,6 +22,8 @@ class Deps:
     blobs: Any = None
     verifier: Any = None
     ratelimiter: Any = None
+    reader: Any = None
+    worker: Any = None
 
 
 def register_tools(server: MCPServer, deps: Deps) -> None:
