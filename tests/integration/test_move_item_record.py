@@ -132,12 +132,6 @@ async def test_workflow_principal_is_refused(mcp_client, db):
     assert res.is_error and res.text.endswith(errors.AUDIENCE_NOT_HELD)
 
 
-async def test_doc_id_is_refused_until_p2(mcp_client, db):
-    # p2 removes this test: the document move replaces the refusal.
-    res = await move(mcp_client, multi, "doc:00000000-0000-4000-8000-000000000000")
-    assert res.is_error and res.text.endswith(errors.BAD_ARG.format(name="id"))
-
-
 async def test_log_line(mcp_client, db, caplog):
     rec = add_record(db)
     db.commit()

@@ -151,3 +151,27 @@ async def test_errors_never_leak_token_or_body(fake, bot):
     assert str(exc.value) == "POST /repos/kh/kb-all/branches failed: HTTP 500"
     assert "secret-token" not in str(exc.value) and "injected" not in str(exc.value)
     assert json.loads(json.dumps(fake.bodies[-1]))["new_branch_name"] == "bot/x"
+
+
+async def test_delete_file_removes_it_on_the_branch(fake, bot):
+    await bot.create_branch("kb-all", "bot/move/x", fake.head("kb-all"))
+    commit = await bot.delete_file("kb-all", "bot/move/x", "a.md", "msg", blob_sha("one"))
+    assert commit == {"sha": fake.head("kb-all", "bot/move/x")}
+    assert "a.md" not in fake.files("kb-all", "bot/move/x")
+    assert "a.md" in fake.files("kb-all", "main")
+    assert fake.requests[-1][0] == "DELETE"
+    assert fake.bodies[-1] == {"branch": "bot/move/x", "message": "msg", "sha": blob_sha("one")}
+
+
+async def test_delete_file_stale_sha_conflicts(fake, bot):
+    await bot.create_branch("kb-all", "bot/move/x", fake.head("kb-all"))
+    with pytest.raises(ForgejoError, match="HTTP 409"):
+        await bot.delete_file("kb-all", "bot/move/x", "a.md", "m", "0" * 40)
+
+
+@pytest.mark.parametrize("name", BAD_BRANCHES)
+async def test_delete_file_refuses_a_non_bot_branch(fake, bot, name):
+    n = len(fake.requests)
+    with pytest.raises(ForgejoRefused):
+        await bot.delete_file("kb-all", name, "a.md", "m", blob_sha("one"))
+    assert len(fake.requests) == n

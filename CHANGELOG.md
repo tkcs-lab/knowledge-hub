@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- `move_item` moves a document (`doc:`) between two groups you hold with two pull requests: one adds the file to the target group's repo, one removes it from the source group's repo (merge the add first). Calling it again returns the open pulls or opens the missing removal; the moved document gets a new id once the target repo is indexed. `ForgejoBot.delete_file` backs the removal.
 - Tech repos are kept current: a push to a tech repo's default branch queues an index job, the worker re-syncs every tech repo hourly (`KH_TECH_POLL_MINUTES`, default 60, 0 switches it off), and `kh rebuild` and `kh check` cover tech repos and check each document's tier.
 - `get_doc` returns the document's real `tier` and links a T0a document under `tech_org`; its description warns that T0a text is unreviewed data. `usage` counts only T0 documents for `outranked_t0` and `related_docs`.
 - `tech_org` and `tech_repos` in `kh.yaml` name the Forgejo org and repositories whose technical docs the hub will index (audience `all`); a tech repo may list `labels`.

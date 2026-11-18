@@ -236,13 +236,21 @@ class FakeForgejo:
                 return js(404, {})
             return js(200, {"path": path, "type": "file", "sha": blob_sha(files[path])})
 
-        if method not in ("POST", "PUT"):
+        if method not in ("POST", "PUT", "DELETE"):
             return js(405, {})
         branch = body.get("branch")
         head = repo.branches.get(branch)
         if head is None:
             return js(404, {})
         files = repo.commits[head].files
+        if method == "DELETE":
+            if path not in files:
+                return js(404, {})
+            if body.get("sha") != blob_sha(files[path]):
+                return js(409, {"message": "sha does not match"})
+            sha = self.commit(repo.name, {path: None}, branch=branch)
+            parents = [{"sha": p} for p in repo.commits[sha].parents]
+            return js(200, {"content": None, "commit": {"sha": sha, "parents": parents}})
         if method == "POST" and path in files:
             return js(422, {"message": "repository file already exists"})
         if method == "PUT" and (path not in files or body.get("sha") != blob_sha(files[path])):
