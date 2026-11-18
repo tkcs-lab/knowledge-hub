@@ -9,7 +9,7 @@ Not run in the cloud, so yours to do and check by hand: the backup script's `pg_
 ## Install order
 
 1. **Accounts.** In Forgejo create the organisation named by `org` in `kh.yaml` and two ordinary accounts, `bot_login` (default `kh-bot`) and `indexer_login` (default `kh-indexer`), neither an org owner nor a site admin. `kh setup` never creates users or tokens.
-2. **Secrets.** One file per secret under the secrets directory, named by the matching `*_FILE` variable: the three database passwords, the bot token, the indexer token (read only), the webhook secret `KH_WEBHOOK_HMAC_FILE`, the S3 access and secret key, `kh_cursor_key` and, for metrics, `kh_metrics_token`. For `kh setup` only: `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` (a site administrator's token) and, when setup should create the roles, `KH_SETUP_PG_ADMIN_DSN_FILE`. The `kh serve` service never mounts those two.
+2. **Secrets.** One file per secret under the secrets directory, named by the matching `*_FILE` variable: the three database passwords, the bot token, the indexer token (read only), the webhook secret `KH_WEBHOOK_HMAC_FILE`, the S3 access and secret key, `kh_cursor_key` and, for metrics, `kh_metrics_token`. For `kh setup` only: `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` (a site administrator's token) when setup should create the roles, `KH_SETUP_PG_ADMIN_DSN_FILE`, and, only when groups set `slack_channel`, `KH_SETUP_SLACK_WEBHOOKS_FILE`. The `kh serve` service never mounts those.
 3. **Write `kh.yaml`.** Start from `deploy/kh.example.yaml`: `people`, `groups`, `labels`, `hub_url`.
 4. **Plan.** `kh setup plan --config kh.yaml`. Expect `+` lines and exit 1. Read every `!` line: it is a change the script will not make.
 5. **Apply.** `kh setup apply --config kh.yaml`. It creates the Postgres roles, database, extension and tables, groups and labels, the Forgejo teams, repos, branch protection and org webhook, and pulls the Ollama model. Run `kh setup plan` again and expect only `i` lines and exit 0. Without an admin DSN the `postgres` step only checks: create the roles and database yourself, then run `kh migrate`. The S3 bucket is only checked unless you pass `--create-bucket`.
@@ -112,6 +112,16 @@ One file decides both what a person can read and which Forgejo teams they are in
 
 First check that their PrivacyFence email equals their `people` email in `kh.yaml` (compared in lower case). A different address, a missing `people` entry or a missing group membership all give no groups. Then check that `kh serve` was restarted after the last edit, and that the declaration still carries `email_for_visibility: true`.
 
+### Slack notifications for approvers
+
+1. In Slack, create an incoming webhook for each approver channel (Slack: *Apps → Incoming Webhooks*, one per channel).
+2. Write the URLs into the `KH_SETUP_SLACK_WEBHOOKS_FILE` file as `<group>: <url>`, one line each, file mode 600.
+3. Set `slack_channel: "#<channel>"` on those groups in `kh.yaml`.
+4. `kh setup plan`, expect `+ slack hook <repo>: #<channel>`, then `kh setup apply`.
+5. Open a test pull request and check that the channel gets the message.
+
+The message names the pull request's author, which for `propose_doc` is the bot account. To stop the notifications remove `slack_channel` and run `kh setup apply --prune`. To rotate a URL, change the file and run `kh setup apply --only forgejo`.
+
 ### Changing T0
 
 People do not push to `main`: direct push is off. They open a pull request (in Forgejo, or through `propose_doc`) and an approver of the group merges it. Required approvals are 0, so an approver may merge their own pull request: review the final diff before merging. After the merge Forgejo calls the webhook and the document is indexed within seconds. A pull request opened by `propose_doc` is on a `bot/propose/<uuid>` branch; closing it unmerged changes nothing.
@@ -183,6 +193,8 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 ## Rotating secrets
 
 **Webhook secret.** Write a new value to the `KH_WEBHOOK_HMAC_FILE` file and run `kh setup apply --only forgejo`, which rewrites the org webhook secret. The file is read on every request. Between the two steps pushes answer 401 and are not indexed, so finish with `kh rebuild`.
+
+**Slack webhook URLs.** Create the new incoming webhook in Slack, put it in the `KH_SETUP_SLACK_WEBHOOKS_FILE` file and run `kh setup apply --only forgejo`, which rewrites the URL in the Forgejo hook. Then revoke the old webhook in Slack.
 
 **Forgejo tokens.** Create the new token under the same user (the bot or the indexer) with the same scopes, write it to the token file, restart, then revoke the old token. The indexer token is read only. The bot may only write `bot/` branches and open pull requests to `main`. Run `kh setup plan`: its identity checks confirm the token belongs to the configured login.
 

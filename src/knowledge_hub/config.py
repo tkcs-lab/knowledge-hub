@@ -24,6 +24,7 @@ GROUP_RE = AUDIENCE_RE
 LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,38}")
 LABEL_RE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,62}")
 REPO_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+SLACK_CHANNEL_RE = re.compile(r"#[a-z0-9][a-z0-9_-]{0,79}")
 
 MAX_LABELS = 500
 MAX_LABEL_DESCRIPTION = 200
@@ -47,12 +48,20 @@ class GroupConfig(BaseModel):
     members: list[str] = []
     approvers: list[str]
     archived: bool = False
+    slack_channel: str | None = None
 
     @field_validator("repo")
     @classmethod
     def _repo_name(cls, value: str | None) -> str | None:
         if value is not None and not REPO_RE.fullmatch(value):
             raise ValueError(f"repo {value!r} is not a valid repository name")
+        return value
+
+    @field_validator("slack_channel")
+    @classmethod
+    def _slack_channel(cls, value: str | None) -> str | None:
+        if value is not None and not SLACK_CHANNEL_RE.fullmatch(value):
+            raise ValueError(f"slack_channel {value!r} is not a valid Slack channel (#name, lower case)")
         return value
 
 

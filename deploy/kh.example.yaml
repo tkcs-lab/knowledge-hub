@@ -14,6 +14,7 @@ groups:
     repo: kb-all              # default: kb-<group>
     members: [alice, bob]
     approvers: [alice]        # non-empty subset of members
+#     slack_channel: "#kh-all-approvers"   # optional: Slack hook on the repo for pull requests; URL in KH_SETUP_SLACK_WEBHOOKS_FILE
   mgmt:
     members: [alice]
     approvers: [alice]
