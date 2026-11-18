@@ -28,7 +28,7 @@ GRANTS = {
         "claim_jti": {"SELECT", "DELETE"}, "usage_events": {"SELECT", "DELETE"},
     },
 }
-DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard")
+DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated")
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
@@ -334,3 +334,13 @@ def test_a_reader_of_another_group_never_sees_the_duplicate(seeded_db, fresh_db)
     with role_conn(fresh_db, "kh_app", "mgmt") as conn:
         got = conn.execute("SELECT count(*) FROM kh.records WHERE source = 'seed' AND source_ref = 'ref-all'")
         assert got.fetchone() == (0,)
+
+
+def test_mark_record_outdated_is_not_executable_by_public_or_indexer(fresh_db):
+    q = ("SELECT has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
+         " WHERE p.proname = 'mark_record_outdated' AND p.pronamespace = 'kh'::regnamespace")
+    with psycopg.connect(fresh_db.admin_dsn(DB)) as conn:
+        assert conn.execute(q, ("kh_app",)).fetchone()[0]
+        assert not conn.execute(q, ("kh_indexer",)).fetchone()[0]
+        assert conn.execute("SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a"
+                            " WHERE p.proname = 'mark_record_outdated' AND a.grantee = 0").fetchone() == (0,)
