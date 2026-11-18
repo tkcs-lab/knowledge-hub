@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-18
+
 ### Added
 
 - `kh label add|rename|archive|unarchive|remove|list`: edit the labels of `kh.yaml` (comments kept) and apply the change.
