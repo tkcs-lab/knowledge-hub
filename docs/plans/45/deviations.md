@@ -35,7 +35,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-retire
 
-- pending
+- review: no deviation found in the diff review; workers had no tld, so the orchestrator ran roles required (none) and the scope check (clean); no docs index in this repository
 
 ## Final review
 
