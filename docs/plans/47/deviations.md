@@ -19,7 +19,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: move_item logged a move on paths where no pull request was opened (p2); fixed in fix-1.
 
 ## Finishing
 
