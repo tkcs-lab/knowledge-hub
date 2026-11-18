@@ -13,19 +13,19 @@ DB = "kh_fresh"
 SUB = "n8n-token:a"
 NOW = datetime.now(UTC)
 TABLES = ("schema_migrations", "claim_jti", "groups", "labels", "documents", "records", "chunks",
-          "index_jobs", "repo_state", "index_alerts")
+          "index_jobs", "repo_state", "index_alerts", "usage_events")
 
 # role -> table -> commands granted (a role or table not listed has no grant)
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
 GRANTS = {
     "kh_app": {
         "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": {"SELECT"},
-        "records": {"SELECT", "INSERT"}, "chunks": {"SELECT"},
+        "records": {"SELECT", "INSERT"}, "chunks": {"SELECT"}, "usage_events": {"SELECT", "INSERT"},
     },
     "kh_indexer": {
         "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": ALL, "records": {"SELECT"},
         "chunks": ALL, "index_jobs": ALL, "repo_state": ALL, "index_alerts": ALL,
-        "claim_jti": {"SELECT", "DELETE"},
+        "claim_jti": {"SELECT", "DELETE"}, "usage_events": {"SELECT", "DELETE"},
     },
 }
 DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard")
@@ -125,6 +125,13 @@ def test_policy_texts(fresh_db):
     assert by[("records", "kh_indexer_select")][1] == "true"
     for t in ("documents", "chunks", "index_jobs", "repo_state", "index_alerts"):
         assert by[(t, "kh_indexer_all")][0] == "ALL"
+    select_qual = by[("usage_events", "kh_app_select")][1]
+    assert "cardinality(audiences) > 0" in select_qual and "<@ kh.caller_audiences()" in select_qual
+    insert_check = by[("usage_events", "kh_app_insert")][2]
+    assert "audiences = kh.caller_audiences()" in insert_check
+    assert "kh.caller_type()" in insert_check and "claude_client" in insert_check
+    assert by[("usage_events", "kh_indexer_select")][1] == "true"
+    assert by[("usage_events", "kh_indexer_delete")][1] == "true"
 
 
 def test_grant_matrix(fresh_db):

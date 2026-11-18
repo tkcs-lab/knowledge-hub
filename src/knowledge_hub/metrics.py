@@ -38,6 +38,7 @@ class Metrics:
             self._rejections: dict[str, int] = {}
             self._webhooks: dict[str, int] = {}
             self._write_failures: dict[tuple[str, str], int] = {}
+            self._usage_dropped = 0
             self._seconds: dict[str, list[float]] = {}  # tool -> [sum, count]
 
     def tool_call(self, tool: str, outcome: str, seconds: float) -> None:
@@ -63,6 +64,10 @@ class Metrics:
         with self._lock:
             self._write_failures[(tool, reason)] = self._write_failures.get((tool, reason), 0) + 1
 
+    def usage_dropped(self, n: int) -> None:
+        with self._lock:
+            self._usage_dropped += n
+
     def render(self, job_states: dict[str, int] | None = None) -> str:
         out: list[str] = []
 
@@ -77,6 +82,7 @@ class Metrics:
             webhooks = sorted(self._webhooks.items())
             seconds = sorted(self._seconds.items())
             failures = sorted(self._write_failures.items())
+            dropped = self._usage_dropped
         block(
             "kh_tool_calls_total",
             "counter",
@@ -103,6 +109,12 @@ class Metrics:
                 (f'kh_agent_write_failures_total{{tool="{_escape(t)}",reason="{r}"}}', n)
                 for (t, r), n in failures
             ],
+        )
+        block(
+            "kh_usage_events_dropped_total",
+            "counter",
+            "Usage events dropped before they were stored.",
+            [("kh_usage_events_dropped_total", dropped)],
         )
         block(
             "kh_tool_seconds_sum",

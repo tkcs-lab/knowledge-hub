@@ -12,6 +12,7 @@ from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.search.cursor import decode_cursor, encode_cursor
 from knowledge_hub.search.sql import SearchFilters, build_search_query, parse_tier_weights
+from knowledge_hub.usage import UsageEvent
 
 MAX_LIMIT = 50
 SNIPPET_CHARS = 400
@@ -93,9 +94,15 @@ async def search(
         await cur.execute(sql, params)
         rows = await cur.fetchall()
     meta = rows[0]  # the statement always returns at least the aggregate row
+    hits = [_hit(r) for r in rows if r["id"] is not None]
+    if offset == 0:
+        call.events.append(
+            UsageEvent.searched(
+                query, min_tier, meta["t0_fts_hits"], meta["t3_fts_hits"], [h["id"] for h in hits]
+            )
+        )
     if min_tier == "T0" and meta["t0_hits"] == 0 and meta["t3_hits"] > 0:
         raise kh_error("normative", errors.NORMATIVE)
-    hits = [_hit(r) for r in rows if r["id"] is not None]
     next_cursor = ""
     next_offset = offset + limit
     if next_offset < meta["total"] and next_offset <= settings.search_max_offset:
