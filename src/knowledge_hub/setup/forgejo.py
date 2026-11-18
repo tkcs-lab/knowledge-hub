@@ -125,6 +125,9 @@ class ForgejoStep:
         repos = {str(r.get("name")): r for r in await self._admin.repos()}
         for group, gc in cfg.groups.items():
             repo = cfg.repo_for_group(group)
+            if gc.archived:
+                await self._archive(out, repos, group, repo, write)
+                continue
             write_team = await self._team(out, teams, group, "write", gc.members, missing, write)
             approve_team = await self._team(
                 out, teams, f"{group}-approve", "read", gc.approvers, missing, write
@@ -161,6 +164,8 @@ class ForgejoStep:
         for login in [cfg.bot_login, cfg.indexer_login]:
             logins.setdefault(login.casefold(), login)
         for gc in cfg.groups.values():
+            if gc.archived:
+                continue
             for login in gc.members + gc.approvers:
                 logins.setdefault(login.casefold(), login)
         owner_set = {o.casefold() for o in owners}
@@ -245,11 +250,24 @@ class ForgejoStep:
             repos[repo] = await self._admin.edit_repo(repo, **fix) if fix else created
             return True
         drift = {k: v for k, v in REPO_SETTINGS.items() if have.get(k) != v}
+        if have.get("archived"):
+            drift["archived"] = False
         for field in drift:
             out.append(Change("~", f"repo {repo}: {field}"))
         if drift and write:
             repos[repo] = await self._admin.edit_repo(repo, **drift)
         return True
+
+    async def _archive(self, out: list[Change], repos: dict[str, dict[str, Any]], group: str,
+                       repo: str, write: bool) -> None:
+        """An archived group keeps its teams and members; only the repo is archived."""
+        have = repos.get(repo)
+        if have is None:
+            out.append(Change("i", f"group {group}: archived, repo {repo} not created"))
+        elif not have.get("archived"):
+            out.append(Change("~", f"repo {repo}: archived"))
+            if write:
+                repos[repo] = await self._admin.edit_repo(repo, archived=True)
 
     async def _team_repo(self, out: list[Change], name: str, tid: int | None, repo: str,
                          repo_exists: bool, write: bool) -> None:
