@@ -175,7 +175,7 @@ class KhConfig(BaseModel):
             if self.tech_org.casefold() == self.org.casefold():
                 raise ValueError("tech_org must differ from org")
         if self.tech_repos:
-            if self.tech_org is None:
+            if not self.tech_org:
                 raise ValueError("tech_repos needs tech_org")
             if TECH_AUDIENCE not in self.groups:
                 raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE}")

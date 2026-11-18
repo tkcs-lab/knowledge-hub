@@ -242,6 +242,13 @@ def test_tech_repos_need_tech_org():
     refused({"tech_org": "-bad"}, "tech_org '-bad' is not a valid login")
 
 
+def test_tech_repos_need_a_non_empty_tech_org():
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "", "tech_repos": {"ember-core": {}}},
+        "config: tech_repos needs tech_org",
+    )
+
+
 def test_tech_org_must_differ_from_org():
     refused({"org": "KH", "tech_org": "kh"}, "config: tech_org must differ from org")
 
