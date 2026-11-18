@@ -12,6 +12,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - worker: remove_group also deletes the group's kh.record_moves rows, as plan section 3.6 says and the brief does not
 - review: workers had no tld; the orchestrator ran roles required (none required) and scope check (no out-of-scope paths); integration tests could not run here (no database), the worker ran them against a local Postgres
+- final: the kh.record_moves delete sat in the shared _remove_group, so kh setup apply --prune also deleted those rows, which the plan says stays unchanged (fix-2)
 
 ## p3b-steps-forgejo
 
@@ -24,6 +25,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p4-apply
 
 - review: the closing restart line also carries the PrivacyFence refresh note, longer than the brief's text; workers had no tld, so the orchestrator ran roles required (none) and the scope check
+- final: a build_steps ValueError raised lazily inside after was treated as an after failure and the file was committed; plan 3.3 says it writes nothing (fix-1)
 
 ## p5-cli-labels-persons
 
@@ -39,7 +41,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: blocking: an exception inside check committed kh.yaml without the confirmation gate (p4-apply, fix-1)
+- final: blocking: lazy build_steps ValueError committed the file (p4-apply, fix-1)
+- final: blocking: after the main merge the changelog entries sat under 0.5.0 and Unreleased was empty (p7-retire, fix-3)
+- final: blocking: setup apply --prune also deleted record_moves rows (p3a-steps-db, fix-2)
 
 ## Finishing
 
