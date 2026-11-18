@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- `tech_org` and `tech_repos` in `kh.yaml` name the Forgejo org and repositories whose technical docs the hub will index (audience `all`); a tech repo may list `labels`.
+
 ## [0.4.0] - 2026-11-18
 
 ### Added
