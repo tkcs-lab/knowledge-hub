@@ -32,7 +32,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-retire-docs
 
-- pending
+- worker: design.md now says Eight tools instead of Seven: the usage tool already made seven, so mark_record_outdated makes eight; the plan acceptance grep for Seven tools no longer matches.
+- worker: Docs and changelog name the migration 0003_supersede.sql per the owner decision; a rollout subsection was added to docs/runbook.md as the brief asked.
 
 ## Final review
 
