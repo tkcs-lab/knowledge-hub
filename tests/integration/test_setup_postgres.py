@@ -223,3 +223,80 @@ async def test_labels_jobs_skip_archived_groups(empty, settings):
         assert conn.execute(
             "SELECT repo FROM kh.index_jobs WHERE kind='git_push'"
         ).fetchall() == [("kb-all",)]
+
+
+async def test_remove_label_deletes_unused_label_and_refuses_used(empty, settings):
+    await step(empty, settings).apply(False)
+    s = LabelsStep(cfg(labels={"gone": "x", "kept": "y", "rec": "z"}), mig(empty))
+    await s.apply(False)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        add_doc(conn, labels=["kept"])
+        add_record(conn, audience="all", labels=["rec"])
+    assert lines([await s.remove_label("gone", write=True)]) == ["- label gone"]
+    assert lines([await s.remove_label("kept", write=True)]) == ["! label kept: in use"]
+    assert lines([await s.remove_label("rec", write=True)]) == ["! label rec: in use"]
+    assert lines([await s.remove_label("gone", write=True)]) == ["i label gone: not in the database"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT name FROM kh.labels ORDER BY name").fetchall() == [("kept",), ("rec",)]
+
+
+async def test_remove_label_plan_only_writes_nothing(empty, settings):
+    await step(empty, settings).apply(False)
+    s = LabelsStep(cfg(labels={"gone": "x"}), mig(empty))
+    await s.apply(False)
+    assert lines([await s.remove_label("gone", write=False)]) == ["- label gone"]
+    assert lines([await s.remove_label("nope", write=False)]) == ["i label nope: not in the database"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT name FROM kh.labels").fetchall() == [("gone",)]
+
+
+async def test_sync_groups_adds_only_groups(empty, settings):
+    await step(empty, settings).apply(False)
+    s = step(empty, settings, cfg(("all", "extra")))
+    assert lines(await s.sync_groups(write=False)) == ["+ group extra"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (1,)
+    assert lines(await s.sync_groups(write=True)) == ["+ group extra"]
+    assert lines(await s.sync_groups(write=True)) == []
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT name FROM kh.groups ORDER BY name").fetchall() == [("all",), ("extra",)]
+
+
+async def test_remove_group_refuses_records(empty, settings):
+    await step(empty, settings, cfg(("all", "extra"))).apply(False)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        add_record(conn, audience="extra")
+    s = step(empty, settings)
+    assert lines([await s.remove_group("extra", write=True)]) == ["! group extra: still has 1 records"]
+    assert lines([await s.remove_group("extra", write=False)]) == ["! group extra: still has 1 records"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (2,)
+
+
+async def test_remove_group_deletes_documents_and_record_moves(empty, settings):
+    await step(empty, settings, cfg(("all", "extra"))).apply(False)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        add_doc(conn, repo="kb-extra", audience="extra")
+        conn.execute("INSERT INTO kh.record_moves (audience, source, source_ref) VALUES ('extra', 's', 'r')")
+    s = step(empty, settings)
+    assert lines([await s.remove_group("extra", write=False)]) == ["- group extra"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (2,)
+    assert lines([await s.remove_group("extra", write=True)]) == ["- group extra"]
+    assert lines([await s.remove_group("extra", write=True)]) == ["i group extra: not in the database"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.documents").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM kh.record_moves").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (1,)
+
+
+async def test_group_usage_counts(empty, settings):
+    await step(empty, settings, cfg(("all", "extra"))).apply(False)
+    s = step(empty, settings)
+    assert await s.group_usage("extra") == (0, 0)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        add_doc(conn, repo="kb-extra", audience="extra")
+        add_doc(conn, repo="kb-extra", audience="extra")
+        add_record(conn, audience="extra")
+        add_record(conn, audience="all")
+    assert await s.group_usage("extra") == (2, 1)

@@ -155,14 +155,43 @@ class PostgresStep:
             out += [Change("+", f"group {name}") for name in self._config.groups]
         return out
 
-    async def _remove_group(self, conn: psycopg.AsyncConnection, name: str, repo: str) -> Change:
+    async def sync_groups(self, *, write: bool) -> list[Change]:
+        """Add the configured groups only: no roles, database or migrations."""
+        return await self._groups(self._settings.dsn("migrator"), False if write else None)
+
+    async def remove_group(self, name: str, *, write: bool) -> Change:
+        """Remove one group; records still using it refuse, ``write`` False only reports."""
+        async with await self._connect(self._settings.dsn("migrator")) as conn:
+            cur = await conn.execute("SELECT repo FROM kh.groups WHERE name = %s", (name,))
+            row = await cur.fetchone()
+            if row is None:
+                return Change("i", f"group {name}: not in the database")
+            return await self._remove_group(conn, name, row[0], write=write)
+
+    async def group_usage(self, name: str) -> tuple[int, int]:
+        """Documents and records whose audience is the group."""
+        async with await self._connect(self._settings.dsn("migrator")) as conn:
+            cur = await conn.execute(
+                "SELECT (SELECT count(*) FROM kh.documents WHERE audience = %(n)s),"
+                " (SELECT count(*) FROM kh.records WHERE audience = %(n)s)",
+                {"n": name},
+            )
+            row = await cur.fetchone()
+            return (int(row[0]), int(row[1])) if row else (0, 0)
+
+    async def _remove_group(
+        self, conn: psycopg.AsyncConnection, name: str, repo: str, *, write: bool = True
+    ) -> Change:
         cur = await conn.execute("SELECT count(*) FROM kh.records WHERE audience = %s", (name,))
         row = await cur.fetchone()
         records = int(row[0]) if row else 0
         if records:
             return Change("!", f"group {name}: still has {records} records")
+        if not write:
+            return Change("-", f"group {name}")
         async with conn.transaction():
             await conn.execute("DELETE FROM kh.documents WHERE audience = %s", (name,))
+            await conn.execute("DELETE FROM kh.record_moves WHERE audience = %s", (name,))
             await conn.execute("DELETE FROM kh.repo_state WHERE repo = %s", (repo,))
             await conn.execute("DELETE FROM kh.groups WHERE name = %s", (name,))
         return Change("-", f"group {name}")

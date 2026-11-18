@@ -77,7 +77,14 @@ class LabelsStep:
                     out.append(Change("+", f"job git_push: {repo}"))
         return out
 
-    async def _remove(self, conn: psycopg.AsyncConnection, name: str) -> Change:
+    async def remove_label(self, name: str, *, write: bool) -> Change:
+        """Remove one label; a label in use is refused, ``write`` False only reports."""
+        async with await psycopg.AsyncConnection.connect(self._dsn, autocommit=True) as conn:
+            if name not in await self._existing(conn):
+                return Change("i", f"label {name}: not in the database")
+            return await self._remove(conn, name, write=write)
+
+    async def _remove(self, conn: psycopg.AsyncConnection, name: str, *, write: bool = True) -> Change:
         cur = await conn.execute(
             "SELECT (SELECT count(*) FROM kh.documents WHERE %(n)s = ANY (labels))"
             " + (SELECT count(*) FROM kh.records WHERE %(n)s = ANY (labels))",
@@ -87,6 +94,8 @@ class LabelsStep:
         used = int(row[0]) if row else 0
         if used:
             return Change("!", f"label {name}: in use")
+        if not write:
+            return Change("-", f"label {name}")
         try:
             await conn.execute("DELETE FROM kh.labels WHERE name = %s", (name,))
         except psycopg.Error as exc:
