@@ -383,3 +383,77 @@ async def test_run_forever_works_until_stopped(world, fake, make_worker):
     finally:
         worker.stop()
         await asyncio.wait_for(task, 5)
+
+
+# --- tech repos ------------------------------------------------------------------------------
+
+from tests.support.tech import TECH_CONFIG, TECH_REPO  # noqa: E402
+
+
+def tech_push(repo=TECH_REPO, ref="refs/heads/trunk", default="trunk", org="kh-tech"):
+    repository = {"full_name": f"{org}/{repo}"}
+    if default is not None:
+        repository["default_branch"] = default
+    return {"ref": ref, "repository": repository}
+
+
+@pytest.fixture
+async def tech_http(hook_settings, app_pool, indexer_pool):
+    tech = Deps(settings=hook_settings, config=TECH_CONFIG, app_pool=app_pool, indexer_pool=indexer_pool)
+    app = build_app(hook_settings, tech, verifier_for_tests())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as client:
+        yield client
+
+
+async def test_tech_push_to_the_default_branch_queues_a_job(world, tech_http):
+    r = await post(tech_http, tech_push())
+    assert r.status_code == 202
+    assert jobs(world) == [("git_push", TECH_REPO, "queued")]
+    assert 'kh_webhook_events_total{result="queued"} 1' in METRICS.render()
+
+
+async def test_tech_push_to_another_branch_is_ignored(world, tech_http):
+    assert (await post(tech_http, tech_push(ref="refs/heads/main"))).status_code == 202
+    assert (await post(tech_http, tech_push(), event="pull_request")).status_code == 202
+    assert jobs(world) == []
+
+
+async def test_tech_push_without_default_branch_in_payload_is_ignored(world, tech_http):
+    assert (await post(tech_http, tech_push(default=None))).status_code == 202
+    assert (await post(tech_http, tech_push(default=""))).status_code == 202
+    assert jobs(world) == []
+
+
+async def test_push_to_an_unconfigured_tech_repo_is_ignored(world, tech_http):
+    assert (await post(tech_http, tech_push(repo="other-repo"))).status_code == 202
+    assert (await post(tech_http, tech_push(org="elsewhere"))).status_code == 202
+    assert jobs(world) == []
+    # the group path still works and still wants main
+    assert (await post(tech_http, push())).status_code == 202
+    assert jobs(world) == [("git_push", "kb-all", "queued")]
+
+
+async def test_tech_push_with_a_bad_signature_is_refused(world, tech_http):
+    assert (await post(tech_http, tech_push(), secret="wrong")).status_code == 401
+    assert jobs(world) == []
+
+
+async def test_worker_syncs_a_tech_repo_with_the_tech_reader(world, indexer_pool, reader):
+    q(world, "INSERT INTO kh.labels (name) VALUES ('ember') RETURNING name")
+    tech_fake = FakeForgejo(org="kh-tech")
+    tech_fake.add_repo(TECH_REPO, branch="trunk")
+    tech_fake.commit(TECH_REPO, {"docs/a.md": "# Alpha\n\nText here.\n"})
+    tech_reader = ForgejoReader("https://forgejo.test", "tok", "kh-tech", transport=tech_fake.transport)
+    try:
+        # the group reader knows no tech repo: only tech_reader can serve this job
+        worker = Worker(
+            indexer_pool, reader, FakeEmbedder(1024), TECH_CONFIG, chunker_version=1, tech_reader=tech_reader
+        )
+        job_id = add_job(world, "git_push", TECH_REPO)
+        assert await worker.run_once() is True
+    finally:
+        await tech_reader.aclose()
+    assert job(world, job_id) == ("done", 1, None)
+    assert q(world, "SELECT repo, path, tier, audience FROM kh.documents") == [
+        (TECH_REPO, "docs/a.md", "T0a", "all")
+    ]
