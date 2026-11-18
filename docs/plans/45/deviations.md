@@ -26,6 +26,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - review: the closing restart line also carries the PrivacyFence refresh note, longer than the brief's text; workers had no tld, so the orchestrator ran roles required (none) and the scope check
 - final: a build_steps ValueError raised lazily inside after was treated as an after failure and the file was committed; plan 3.3 says it writes nothing (fix-1)
+- retry: fix-1 merged: check exceptions and lazy step build errors now write nothing (final review findings 1 and 2)
 
 ## p5-cli-labels-persons
 
