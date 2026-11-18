@@ -48,6 +48,10 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - final: blocking: list_stale query selected an unused tier column (p3-get-doc-usage), against plan 3.9; fix worker fix-1 reverts it
 - final: round 2: approve; the round 1 non-blocking findings were also fixed (fix-1)
+- scope: fix-1 changed docs/runbook.md outside its touches, at the owner's request (non-blocking review findings)
+- scope: fix-1 changed src/knowledge_hub/config.py outside its touches, at the owner's request (non-blocking review findings)
+- scope: fix-1 changed src/knowledge_hub/setup/forgejo.py outside its touches, at the owner's request (non-blocking review findings)
+- scope: fix-1 changed tests/unit/test_config.py outside its touches, at the owner's request (non-blocking review findings)
 
 ## Finishing
 
