@@ -31,6 +31,17 @@ def test_defaults():
     assert s.dev_identity is None and s.db_app_password_file is None
 
 
+def test_usage_settings(monkeypatch):
+    s = Settings()
+    assert s.usage_log is True and s.usage_retention_days == 180
+    monkeypatch.setenv("KH_USAGE_LOG", "false")
+    assert Settings().usage_log is False
+    for bad in ("0", "3651"):
+        monkeypatch.setenv("KH_USAGE_RETENTION_DAYS", bad)
+        with pytest.raises(ValidationError):
+            Settings()
+
+
 def test_prod_refuses_dev_identity(monkeypatch):
     monkeypatch.setenv("KH_DEV_IDENTITY", IDENT)
     with pytest.raises(ValidationError, match="KH_DEV_IDENTITY is set while KH_ENV=prod; refusing to start"):

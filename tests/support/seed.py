@@ -49,6 +49,16 @@ def add_record(conn: psycopg.Connection, **fields) -> str:
     return _insert(conn, "records", row)
 
 
+def add_usage(conn: psycopg.Connection, **fields) -> str:
+    """Insert a usage event (defaults make a search) and return its id."""
+    row = dict(
+        id=str(uuid.uuid4()), kind="search", who="a" * 32, audiences=["all"], query="q", min_tier="T3",
+        t0_fts_hits=0, t3_fts_hits=0, owner_keys=[],
+    )
+    row.update(fields)
+    return _insert(conn, "usage_events", row)
+
+
 def add_chunk(conn: psycopg.Connection, **fields) -> str:
     """Insert a chunk of ``document_id`` or ``record_id``; the owner row supplies the rest."""
     n = uuid.uuid4().hex

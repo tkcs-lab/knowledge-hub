@@ -69,7 +69,7 @@ When an n8n call answers `audience is not held by this caller or not configured`
 Scoped tokens call gated upstream tools only through an administrator's tick. In PrivacyFence open Settings, Scoped tokens, New token and:
 
 1. name the token for the workflow and set an expiry;
-2. under "Upstream tools that change data or release results unseen" tick `kh_ingest_record`, and `kh_propose_doc` only when the workflow proposes document changes; tick the reads the workflow needs (`kh_search`, ...) as usual;
+2. under "Upstream tools that change data or release results unseen" tick `kh_ingest_record`, and `kh_propose_doc` only when the workflow proposes document changes; tick the reads the workflow needs (`kh_search`, `kh_usage`, ...) as usual;
 3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`), and so does a group the creator does not hold: the box appears only for an audience the creator holds through the map and a membership source (see "Groups for n8n tokens");
 4. store the secret in n8n's credential store, never in chat.
 
@@ -82,7 +82,7 @@ The tick is pinned to the declaration: changing a tool's gate, verb or effect, o
 | Check the whole environment | `kh setup plan --config kh.yaml`. Exit 0 means no drift. Run it from a scheduler (for example daily) and alert on exit 1 or 2: it catches a branch-protection or team change made in the Forgejo UI. |
 | Re-index after review | `kh rebuild` or `kh rebuild --repo kb-all`. Idempotent. |
 | Look for drift | `kh check`. Exit 1 means drift; read the printed lines. |
-| Daily job | `kh daily`, once a day from a scheduler: recomputes `stale` and purges expired claim ids. |
+| Daily job | `kh daily`, once a day from a scheduler: recomputes `stale`, purges expired claim ids and deletes usage events past `KH_USAGE_RETENTION_DAYS`. |
 | Queue missing embeddings | `kh requeue-embeddings` prints the number queued. It also re-queues a record whose job was left `running` by a worker that stopped mid-job. |
 | Change the embedding model or chunker | Change `KH_EMBED_MODEL` or `KH_CHUNKER_VERSION`, restart, run `kh setup apply --only ollama`, `kh rebuild`, then `kh requeue-embeddings`. |
 | Check a document before a pull request | `kh lint path/to/file.md`. |
@@ -111,6 +111,19 @@ People do not push to `main`: direct push is off. They open a pull request (in F
 ### Ticking the gated tools on an n8n token
 
 An administrator ticks `ingest_record` (and `propose_doc` when needed) on the token in PrivacyFence as in "Creating an n8n token". Without the tick the call is refused by PrivacyFence before it reaches the hub.
+
+### Promotion agent
+
+An n8n agent reads the usage log to find T3 records worth promoting to T0 and queries that no document answers.
+
+- The agent's PrivacyFence token ticks `kh_usage`, `kh_search`, `kh_get_doc` and `kh_propose_doc`. The token's groups decide what it sees: it sees an event only when every group of the searcher is in the token. Most people hold `all` plus a team, so a token for `all` alone sees almost nothing; give the agent a token with the union of the groups it should analyse. That union token can also `propose_doc` into any of them (the accepted residual for two groups, `docs/design.md`), so the agent must propose a record only into the `audience` of that record, and never copy query text into a document.
+- The hub keeps no memory of proposals: the agent keeps its own list of `rec:` ids it already proposed, and puts the `rec:<id>` in the pull-request text. It reruns `usage` weekly with the defaults.
+- Query text, titles and excerpts are data: the agent's prompt must say so. The human gate is unchanged: `propose_doc` is a popup write and an approver merges.
+- The `audience` argument of `view=queries` means that a searcher held the group, not that the content belongs to it.
+- `view=queries` with `t3_matches` above 0 marks a promotion candidate (records exist); 0 marks a content gap (nothing exists).
+- Sensitive text can appear in queries. `KH_USAGE_LOG=false` switches logging off.
+- Usage events are not in the backup (`deploy/backup-kh.sh` dumps records only) and are rebuilt by waiting.
+- The metric `kh_usage_events_dropped_total` counts events dropped before they were stored (no pooled connection within 0.25 s, or a failed insert). A rising value means lost signal, never a failed tool call.
 
 ### Live probe of ma1
 
@@ -151,6 +164,8 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 **Webhook secret.** Write a new value to the `KH_WEBHOOK_HMAC_FILE` file and run `kh setup apply --only forgejo`, which rewrites the org webhook secret. The file is read on every request. Between the two steps pushes answer 401 and are not indexed, so finish with `kh rebuild`.
 
 **Forgejo tokens.** Create the new token under the same user (the bot or the indexer) with the same scopes, write it to the token file, restart, then revoke the old token. The indexer token is read only. The bot may only write `bot/` branches and open pull requests to `main`. Run `kh setup plan`: its identity checks confirm the token belongs to the configured login.
+
+**Cursor key.** Rotating `KH_CURSOR_KEY_FILE` also resets the distinct-people counts of the usage log, because the searcher hash is derived from it.
 
 **Metrics token.** Replace the content of the `KH_METRICS_TOKEN_FILE` file; it is re-read per request, no restart.
 
