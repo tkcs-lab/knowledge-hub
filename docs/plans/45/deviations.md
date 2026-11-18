@@ -19,7 +19,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-ops
 
-- pending
+- review: no deviation found in the diff review; workers had no tld, so the orchestrator ran roles required (none) and the scope check (clean)
 
 ## p4-apply
 
