@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-18
+
 ### Added
 
 - `archived: true` on a group and `archived_labels` in `kh.yaml` hide a group or label as if removed, without deleting any data; `kh setup` archives the group's Forgejo repo. Unarchiving needs a `kh serve` restart and `kh rebuild --repo <repo>`.
