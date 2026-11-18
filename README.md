@@ -25,6 +25,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group; the answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
+| `move_item` | Move a record at once, or a document with two pull requests, from one group you hold to another. |
 | `propose_doc` | Open a pull request that proposes a document change in a group's repo, optionally with `supersedes`; the answer lists `similar` items. |
 
 ## Quick start

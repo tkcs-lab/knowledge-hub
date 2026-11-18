@@ -73,6 +73,8 @@ Scoped tokens call gated upstream tools only through an administrator's tick. In
 3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`), and so does a group the creator does not hold: the box appears only for an audience the creator holds through the map and a membership source (see "Groups for n8n tokens");
 4. store the secret in n8n's credential store, never in chat.
 
+`kh_move_item` is for Claude clients only: a workflow that calls it is refused, so do not tick it on an n8n token.
+
 The tick is pinned to the declaration: changing a tool's gate, verb or effect, or the url, audience or claim mode, voids it and the token is created again. All n8n tokens from before this release are void and must be recreated.
 
 ## Routine tasks
@@ -192,6 +194,30 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `supersedes cycle: <keys>` | Documents replace each other; none of them is hidden. Remove one link. |
 
 A hidden (superseded) document is still readable with `get_doc` or `search` with `include_outdated=true`.
+
+### Moving an item between groups
+
+Ask Claude to call `kh_move_item` with `id` (`rec:...` or `doc:...`), `from_group` (where the item is now) and `to_group`; you must hold both groups. The PrivacyFence popup shows both groups. A record moves at once and keeps its id. A document moves with two pull requests by the bot:
+
+1. Merge the add pull request ("Move in: ...") in the target repo as an approver of the target group.
+2. Then merge the removal pull request ("Move out: ...") in the source repo as an approver of the source group. Until the removal is merged the document is in both groups; if it is merged first it is missing from both.
+
+The moved document gets a new `doc:` id once the target repo is indexed. A retry returns the open pull requests, or opens only the removal when the add is open or already merged (the answer's `note` says when the removal could not be opened). The answer lists `dropped_supersedes` (links the document had, which a move drops) and `revived` (documents of the source group that become current again once the removal is merged).
+
+Refusals and what to do:
+
+- `a record with this source and source_ref was moved out of this audience`: an `ingest_record` re-sent a record that was moved; do not re-send it, or move the record back (that clears the tombstone).
+- `another item names this one as its replacement or successor; clear that first`: clear the `replaced_by` of the record, or the `superseded_by` of the document, then call again.
+- `this document cannot be moved by the tool; move it by hand`: the text has something the tool cannot render back unchanged (for example HTML-like text in the body); copy the file between the repos with two pull requests yourself.
+- `the target group already has an item with this source and source_ref, path or id`: rename or remove the item in the target group first.
+
+A move is not a purge: the old repo's history, past usage queries and backups keep the old copy.
+
+### Rollout of move_item
+
+1. Deploy the new image and run `kh migrate` (prints `applied 0005_move_record.sql`).
+2. Restart `kh serve` and PrivacyFence (it reads the upstream declaration only at startup), and allow the new tool `kh_move_item` in PrivacyFence.
+3. Recreate the n8n tokens only if PrivacyFence asks for it; workflows never call this tool.
 
 ### Rollout of supersede and outdated
 
