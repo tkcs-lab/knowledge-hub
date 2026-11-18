@@ -51,6 +51,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - final: blocking: after the main merge the changelog entries sat under 0.5.0 and Unreleased was empty (p7-retire, fix-3)
 - final: blocking: setup apply --prune also deleted record_moves rows (p3a-steps-db, fix-2)
 - final: second review: approve; all 8 findings of the first review confirmed fixed (4 blocking, 4 non-blocking)
+- scope: src/knowledge_hub/admin/yamledit.py: fix-4 edited this p1 file for the temp-file finding; accepted
+- scope: tests/unit/test_admin_yamledit.py: fix-4 added the stale-temp-file test here; accepted
 
 ## Finishing
 
