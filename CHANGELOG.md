@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- `archived: true` on a group and `archived_labels` in `kh.yaml` hide a group or label as if removed, without deleting any data; `kh setup` archives the group's Forgejo repo. Unarchiving needs a `kh serve` restart and `kh rebuild --repo <repo>`.
 - The table `kh.usage_events` and migration `0002_usage_events.sql`: people's searches and opens, stored for 180 days, the searcher as a keyed hash.
 - The tool `usage` (`kh_usage`) with the views `records` and `queries`.
 - Settings `KH_USAGE_LOG` and `KH_USAGE_RETENTION_DAYS`.
