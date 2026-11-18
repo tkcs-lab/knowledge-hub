@@ -160,3 +160,19 @@ async def test_non_admin_token_is_refused(fake):
     with pytest.raises(ForgejoError, match="HTTP 403"):
         await a.repos()
     await a.aclose()
+
+
+async def test_repo_hooks(fake, admin):
+    await admin.create_repo("kb-g")
+    assert await admin.repo_hooks("kb-g") == []
+    body = {"type": "slack", "config": {"url": "https://hooks.slack.com/x", "content_type": "json",
+                                         "channel": "#kh-g"}, "events": ["pull_request"], "active": True}
+    hook = await admin.create_repo_hook("kb-g", body)
+    assert [h["id"] for h in await admin.repo_hooks("kb-g")] == [hook["id"]]
+    edited = await admin.edit_repo_hook("kb-g", hook["id"], {"active": False})
+    assert edited["active"] is False and edited["config"]["url"] == "https://hooks.slack.com/x"
+    await admin.delete_repo_hook("kb-g", hook["id"])
+    assert await admin.repo_hooks("kb-g") == []
+    nochannel = {**body, "config": {"url": "https://hooks.slack.com/x", "content_type": "json"}}
+    with pytest.raises(ForgejoError, match="HTTP 422"):
+        await admin.create_repo_hook("kb-g", nochannel)

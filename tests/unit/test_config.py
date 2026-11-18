@@ -223,3 +223,16 @@ def test_audiences_for_email_skips_archived_groups():
     c = cfg(groups={**GROUPS, "old": {"members": ["alice", "bob"], "approvers": ["alice"], "archived": True}})
     assert c.audiences_for_email("alice@example.com") == {"all", "mgmt"}
     assert c.audiences_for_email("bob@example.com") == {"all"}
+
+
+def test_slack_channel_optional_and_validated():
+    assert cfg().groups["all"].slack_channel is None
+    groups = {**GROUPS, "all": {**GROUPS["all"], "slack_channel": "#kh-all-approvers"}}
+    assert cfg(groups=groups).groups["all"].slack_channel == "#kh-all-approvers"
+    for value in ("kh-all", "#Kh", "#", "#" + "a" * 81):
+        groups = {**GROUPS, "all": {**GROUPS["all"], "slack_channel": value}}
+        with pytest.raises(ConfigError) as exc:
+            parse_config({"people": PEOPLE, "groups": groups})
+        assert str(exc.value) == (
+            f"config: slack_channel {value!r} is not a valid Slack channel (#name, lower case)"
+        )
