@@ -27,7 +27,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-cli-labels-persons
 
-- pending
+- review: no deviation found in the diff review; workers had no tld, so the orchestrator ran roles required (none) and the scope check (clean); the worker ran the full suite including integration tests (1229 passed)
 
 ## p6-cli-groups
 
