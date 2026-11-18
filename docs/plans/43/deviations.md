@@ -41,7 +41,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: blocking: list_stale query selected an unused tier column (p3-get-doc-usage), against plan 3.9; fix worker fix-1 reverts it
 
 ## Finishing
 
