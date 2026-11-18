@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-config
 
-- pending
+- review: none beyond a CHANGELOG entry under Unreleased (allowed by the changelog rule)
+- None.
 
 ## p2-tier-schema
 
