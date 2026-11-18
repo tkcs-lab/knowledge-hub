@@ -193,6 +193,19 @@ def test_group_remove_needs_yes_and_shows_counts(cfg, monkeypatch, capsys):
     assert steps2.calls == [("group_usage", "dev")]
 
 
+def test_group_remove_no_apply_needs_yes(cfg, monkeypatch, capsys):
+    steps = use(monkeypatch)
+    assert main("group", "remove", "dev", "--no-apply", "--config", str(cfg)) == 2
+    assert "--yes is required" in capsys.readouterr().out
+    assert cfg.read_text() == TEXT
+    assert steps.calls == []
+    assert main("group", "remove", "dev", "--no-apply", "--dry-run", "--config", str(cfg)) == 0
+    assert cfg.read_text() == TEXT
+    assert main("group", "remove", "dev", "--no-apply", "--yes", "--config", str(cfg)) == 0
+    assert "dev:" not in cfg.read_text()
+    assert steps.calls == []
+
+
 def test_group_remove_with_yes_removes_postgres_then_teams(cfg, monkeypatch, capsys):
     steps = use(monkeypatch)
     assert main("group", "remove", "dev", "--yes", "--config", str(cfg)) == 0

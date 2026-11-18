@@ -75,6 +75,10 @@ def _remove(args: argparse.Namespace) -> int:
     name = args.name
     repo: list[str] = []
     notes: list[str] = []
+    if args.no_apply and not args.yes and not args.dry_run:
+        # --no-apply skips the usage check, so the confirmation cannot show counts
+        print(f"admin: group {name}: removing it deletes its documents from the index; --yes is required")
+        return 2
 
     def edit(doc: Doc) -> bool:
         repo[:] = [_old_repo(doc, name) or f"kb-{name}"]
