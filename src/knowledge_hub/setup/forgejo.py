@@ -324,7 +324,7 @@ class ForgejoStep:
             out.append(Change("+", f"{label}: {perm}"))
             return
         listed = {str(u.get("login")).casefold() for u in await admin.collaborators(repo)}
-        effective = await self._effective(repo, login, admin)
+        effective = await self._effective(repo, login, admin=admin)
         if login.casefold() not in listed:
             change = Change("+", f"{label}: {perm}")
         elif effective != perm:
@@ -335,12 +335,12 @@ class ForgejoStep:
             out.append(change)
             return
         await admin.put_collaborator(repo, login, perm)
-        effective = await self._effective(repo, login, admin)
+        effective = await self._effective(repo, login, admin=admin)
         out.append(change)
         if effective != perm:
             out.append(Change("!", f"{label}: permission {effective} after apply, want {perm}"))
 
-    async def _effective(self, repo: str, login: str, admin: ForgejoAdmin | None = None) -> str:
+    async def _effective(self, repo: str, login: str, *, admin: ForgejoAdmin | None = None) -> str:
         data = await (admin or self._admin).user_repo_permission(repo, login)
         return str(data.get("permission", "none"))
 

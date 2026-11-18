@@ -101,7 +101,7 @@ A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (
 1. In `tech_org` (by hand; `kh setup` creates nothing there) create the pull mirror or fork of the upstream repo. Its default branch is the one indexed.
 2. Add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` if wanted. The group `all` must exist and be active.
 3. `kh migrate` (migration `0004_tech_tier.sql`, first time only), then `kh setup plan` and `kh setup apply`. It gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
-4. Restart `kh serve`, because the config is read at start; the poll queues the first sync within `KH_TECH_POLL_MINUTES`, or run `kh rebuild --repo <repo>`.
+4. Restart `kh serve`, because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
 5. `kh check`. Exit 0 means the head is indexed and every document has tier T0a.
 
 Anyone with push access to the repo puts unreviewed text in front of every caller; read the `i tech repo <repo>: collaborators` line.
