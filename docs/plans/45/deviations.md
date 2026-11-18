@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-yamledit
 
-- pending
+- gate: plan section 3.4 settings did not round-trip kh.example.yaml (null written as empty); the owner allowed a None-as-null representer in _yaml() via board ask a-06ecdb19b75b93c3
+- retry: first worker stopped on the brief stop condition; a follow-up worker added the representer on the same branch
 
 ## p3a-steps-db
 
