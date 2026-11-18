@@ -41,4 +41,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- final: Scope: no out-of-scope paths in any phase; p1 scope check was skipped (it ran after the merge). dod (ruff and the full suite, 899 tests) passed on the feature branch; no roles were required at the final point.
