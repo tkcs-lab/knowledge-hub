@@ -166,7 +166,7 @@ class PostgresStep:
             row = await cur.fetchone()
             if row is None:
                 return Change("i", f"group {name}: not in the database")
-            return await self._remove_group(conn, name, row[0], write=write)
+            return await self._remove_group(conn, name, row[0], write=write, moves=True)
 
     async def group_usage(self, name: str) -> tuple[int, int]:
         """Documents and records whose audience is the group."""
@@ -180,7 +180,7 @@ class PostgresStep:
             return (int(row[0]), int(row[1])) if row else (0, 0)
 
     async def _remove_group(
-        self, conn: psycopg.AsyncConnection, name: str, repo: str, *, write: bool = True
+        self, conn: psycopg.AsyncConnection, name: str, repo: str, *, write: bool = True, moves: bool = False
     ) -> Change:
         cur = await conn.execute("SELECT count(*) FROM kh.records WHERE audience = %s", (name,))
         row = await cur.fetchone()
@@ -191,7 +191,8 @@ class PostgresStep:
             return Change("-", f"group {name}")
         async with conn.transaction():
             await conn.execute("DELETE FROM kh.documents WHERE audience = %s", (name,))
-            await conn.execute("DELETE FROM kh.record_moves WHERE audience = %s", (name,))
+            if moves:  # only ``kh group remove``; ``setup apply --prune`` leaves them alone
+                await conn.execute("DELETE FROM kh.record_moves WHERE audience = %s", (name,))
             await conn.execute("DELETE FROM kh.repo_state WHERE repo = %s", (repo,))
             await conn.execute("DELETE FROM kh.groups WHERE name = %s", (name,))
         return Change("-", f"group {name}")
