@@ -23,7 +23,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-apply
 
-- pending
+- review: the closing restart line also carries the PrivacyFence refresh note, longer than the brief's text; workers had no tld, so the orchestrator ran roles required (none) and the scope check
 
 ## p5-cli-labels-persons
 
