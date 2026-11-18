@@ -20,7 +20,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-tech-docs
 
-- pending
+- worker: one extra test (test_changed_text_missing_raises); one label alert per configured label missing from kh.labels, in config order
 
 ## p5-tech-sync
 
