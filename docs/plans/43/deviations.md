@@ -47,7 +47,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Final review
 
 - final: blocking: list_stale query selected an unused tier column (p3-get-doc-usage), against plan 3.9; fix worker fix-1 reverts it
+- final: round 2: approve; the round 1 non-blocking findings were also fixed (fix-1)
 
 ## Finishing
 
-- pending
+- scope: scope drift: fix-1 edits to files of p1, p7 and p8 were accepted (they stay in the final diff); no other phase left its touches
+- review: dod on the feature branch: ruff clean, full pytest 1029 passed on local Postgres 16; no role was required
