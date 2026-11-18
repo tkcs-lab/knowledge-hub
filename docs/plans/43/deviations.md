@@ -20,6 +20,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - retry: first attempt stopped: the plan's usage SQL broke test_outranked_t0_needs_no_doc_before_the_record, whose fixture used a doc key with no document row; the orchestrator told the worker to repair the fixture with a real T0 document
 - worker: existing test test_outranked_t0_needs_no_doc_before_the_record now seeds a real T0 document (add_doc); assertion unchanged
 - final: fix-1 removed the unused tier column from list_stale (final review, blocking)
+- scope: fix-1 edits files of p1, p7 and p8 (config.py, test_config.py, setup/forgejo.py, runbook.md) at the owner's request to fix the non-blocking findings
 
 ## p4-tech-docs
 
