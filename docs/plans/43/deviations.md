@@ -29,7 +29,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6-worker-webhook
 
-- pending
+- worker: rebuild and check raise the KH_FORGEJO_URL-required error when a tech repo is selected or configured and the tech reader is missing (plan stated it only for check); one extra test for it
 
 ## p7-setup
 
