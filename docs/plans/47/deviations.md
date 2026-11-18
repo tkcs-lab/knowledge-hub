@@ -23,4 +23,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- final: Scope disposition: no out-of-scope paths in any phase; nothing reverted. Full dod run on the feature branch passed (ruff, 1103 tests).
