@@ -49,6 +49,10 @@ upstreams:
         gate: popup
         verb: add
         effect: Stores a raw record readable by the named group.
+      mark_record_outdated:
+        gate: popup
+        verb: update
+        effect: Marks a raw record of your group as outdated, or as current again.
       propose_doc:
         gate: popup
         verb: update
