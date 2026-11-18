@@ -32,6 +32,7 @@ class DocUpsert:
     commit_sha: str
     blob_sha: str
     supersedes: list[str] = field(default_factory=list)
+    tier: str = "T0"
 
 
 @dataclass
@@ -41,6 +42,7 @@ class SyncPlan:
     upserts: list[DocUpsert] = field(default_factory=list)
     deletes: list[str] = field(default_factory=list)  # stored paths to delete
     alerts: list[tuple[str, str]] = field(default_factory=list)  # (path, message)
+    relabel: list[str] | None = None
 
 
 def is_included(entry: Mapping[str, Any]) -> bool:
