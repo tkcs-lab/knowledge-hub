@@ -17,6 +17,8 @@ groups:
   mgmt:
     members: [alice]
     approvers: [alice]
+#     archived: true          # hides the group; nothing is deleted
 labels:
   product:ember: Ember product
   topic:onboarding: Onboarding material
+# archived_labels: [topic:onboarding]   # hides a label; each entry must be a key of labels

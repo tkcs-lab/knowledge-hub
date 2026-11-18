@@ -96,6 +96,14 @@ The tick is pinned to the declaration: changing a tool's gate, verb or effect, o
 
 A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (with `--prune`) and add a new one instead. Removing a group is refused while records exist.
 
+### Archiving and unarchiving
+
+1. Set `archived: true` on the group, or add the label to `archived_labels`, in `kh.yaml`.
+2. `kh setup plan`, then `kh setup apply`. For a group, `kh setup` also marks its Forgejo repo archived and leaves the teams and members as they are.
+3. Restart `kh serve`, because the config is read at start.
+
+Nothing is deleted. To unarchive, remove the flag or the `archived_labels` entry, run `kh setup apply`, restart `kh serve`, and for a group run `kh rebuild --repo <repo>` once, because pushes while archived were ignored. `kh setup apply --prune` never deletes an archived group or label. To delete one for good, remove it from `kh.yaml` and use `--prune` as before.
+
 ### Joiners and leavers
 
 One file decides both what a person can read and which Forgejo teams they are in. Edit `people` and the group `members` and `approvers` lists, run `kh setup apply`, restart `kh serve`. The restart is what changes what the hub lets them read. For a leaver, remove them from `people` and the lists in the same edit; a reassigned Workspace email gives its new holder the old person's groups until `people` is edited. Also disable the Forgejo account if they leave the company.
