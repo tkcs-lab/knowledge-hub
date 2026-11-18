@@ -122,6 +122,16 @@ async def test_add_group_and_prune(empty, settings):
         assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (1,)
 
 
+async def test_prune_leaves_record_moves(empty, settings):
+    await step(empty, settings, cfg(("all", "extra"))).apply(False)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        conn.execute("INSERT INTO kh.record_moves (audience, source, source_ref) VALUES ('extra', 's', 'r')")
+    assert lines(await step(empty, settings).apply(True)) == ["- group extra"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (1,)
+        assert conn.execute("SELECT count(*) FROM kh.record_moves").fetchone() == (1,)
+
+
 async def test_prune_refused_with_records(empty, settings):
     await step(empty, settings, cfg(("all", "extra"))).apply(False)
     with psycopg.connect(mig(empty), autocommit=True) as conn:
