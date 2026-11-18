@@ -1,4 +1,9 @@
-"""Round-trip editing of ``kh.yaml`` (plan 45, 3.4): comments survive, writes are atomic."""
+"""Round-trip editing of ``kh.yaml`` (plan 45, 3.4): comments survive, writes are atomic.
+
+ruamel writes ``None`` as an empty value by default; ``_yaml()`` registers a representer
+that writes ``null`` so ``deploy/kh.example.yaml`` round-trips byte-identically
+(owner-approved deviation from section 3.4).
+"""
 
 from __future__ import annotations
 
@@ -30,6 +35,10 @@ def _yaml() -> YAML:
     y.preserve_quotes = True
     y.width = 4096
     y.indent(mapping=2, sequence=4, offset=2)
+    # ruamel writes None as an empty value by default; keep the explicit ``null``.
+    y.representer.add_representer(
+        type(None), lambda r, d: r.represent_scalar("tag:yaml.org,2002:null", "null")
+    )
     return y
 
 
