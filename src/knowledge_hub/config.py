@@ -25,6 +25,8 @@ LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,38}")
 LABEL_RE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,62}")
 REPO_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
 
+TECH_AUDIENCE = "all"
+
 MAX_LABELS = 500
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
@@ -56,6 +58,11 @@ class GroupConfig(BaseModel):
         return value
 
 
+class TechRepoConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    labels: list[str] = []
+
+
 class KhConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     org: str = "kh"
@@ -67,6 +74,8 @@ class KhConfig(BaseModel):
     groups: dict[str, GroupConfig] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
     archived_labels: list[str] = Field(default_factory=list)
+    tech_org: str | None = None
+    tech_repos: dict[str, TechRepoConfig] = Field(default_factory=dict)
 
     @field_validator("forgejo_web_url")
     @classmethod
@@ -159,7 +168,42 @@ class KhConfig(BaseModel):
             if name in seen_archived:
                 raise ValueError(f"archived_labels lists {name!r} twice")
             seen_archived.add(name)
+
+        if self.tech_org:
+            if not LOGIN_RE.fullmatch(self.tech_org):
+                raise ValueError(f"tech_org {self.tech_org!r} is not a valid login")
+            if self.tech_org.casefold() == self.org.casefold():
+                raise ValueError("tech_org must differ from org")
+        if self.tech_repos:
+            if self.tech_org is None:
+                raise ValueError("tech_repos needs tech_org")
+            if TECH_AUDIENCE not in self.groups:
+                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE}")
+            if self.groups[TECH_AUDIENCE].archived:
+                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE} to be active")
+            for repo_name, tech in self.tech_repos.items():
+                if not REPO_RE.fullmatch(repo_name):
+                    raise ValueError(f"tech repo {repo_name!r} is not a valid repository name")
+                if repo_name in repos:
+                    raise ValueError(f"tech repo {repo_name} is also the repo of group {repos[repo_name]}")
+                seen_tech: set[str] = set()
+                for label in tech.labels:
+                    if label not in self.labels:
+                        raise ValueError(f"tech repo {repo_name} label {label!r} is not in labels")
+                    if label in seen_tech:
+                        raise ValueError(f"tech repo {repo_name} lists label {label!r} twice")
+                    seen_tech.add(label)
         return self
+
+    def is_tech_repo(self, repo: str) -> bool:
+        return repo in self.tech_repos
+
+    def tech_labels(self, repo: str) -> list[str]:
+        return list(self.tech_repos[repo].labels)
+
+    @property
+    def tech_repo_names(self) -> list[str]:
+        return sorted(self.tech_repos)
 
     @property
     def active_groups(self) -> list[str]:
