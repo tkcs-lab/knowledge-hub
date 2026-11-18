@@ -5,7 +5,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-move-record
 
-- pending
+- review: Migration renumbered from 0004 to 0005 (main gained 0004_tech_tier.sql); owner chose renumber on the board (ask a-c1e779f33b143337); plan text and test names updated.
 
 ## p2-move-document
 

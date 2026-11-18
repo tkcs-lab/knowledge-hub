@@ -6,7 +6,7 @@
 
 **Use it:** In Claude, a person who is a member of two groups calls `kh_move_item` with an item id, the group it is in now (`from_group`) and the group it should go to (`to_group`). PrivacyFence shows both groups in its popup. A T3 record (`rec:`) moves at once and keeps its id. A T0 document (`doc:`) opens two pull requests: one adds the file to the target group's repo, one removes it from the source group's repo; each group's approvers merge their own, and the add must be merged first. The answer lists the pull requests, and any supersede links the move dropped; the moved document gets a new id once the target repo is indexed.
 
-**Scope:** Adds the tool `move_item`, migration `0004_move_record.sql` (two definer functions, one tombstone table, row locks in `mark_record_outdated`), `ForgejoBot.delete_file`, a lock in the embed worker, a tombstone check in `ingest_record`, docs and the changelog. Does not purge anything: git history of the old repo, past usage queries and backups keep the old copy. Not available to n8n workflows. No approver check: holding both groups is the rule.
+**Scope:** Adds the tool `move_item`, migration `0005_move_record.sql` (two definer functions, one tombstone table, row locks in `mark_record_outdated`), `ForgejoBot.delete_file`, a lock in the embed worker, a tombstone check in `ingest_record`, docs and the changelog. Does not purge anything: git history of the old repo, past usage queries and backups keep the old copy. Not available to n8n workflows. No approver check: holding both groups is the rule.
 
 **Security:** A move changes who can read an item, so the call carries both groups and PrivacyFence hashes them into the popup (3.1). The database function checks both groups itself (3.2). The worker and the move share an advisory lock so no chunk keeps the old group (3.3). A tombstone stops a re-sent record from reappearing in the old group (3.4).
 
@@ -62,12 +62,12 @@ New fixed texts in `mcp/errors.py` (update the module docstring, which says late
 
 `MOVE_PARTIAL` is the value of `note`, not an error.
 
-### 3.2 Migration `0004_move_record.sql`
+### 3.2 Migration `0005_move_record.sql`
 
 Exactly this file (it is applied as `kh_migrator`):
 
 ```sql
--- 0004: move a record between groups in place; tombstones of moved records; row locks in mark_record_outdated.
+-- 0005: move a record between groups in place; tombstones of moved records; row locks in mark_record_outdated.
 
 CREATE TABLE kh.record_moves (
     audience   text NOT NULL,
@@ -225,7 +225,7 @@ None.
 
 **ma1-deploy-and-tick** (about 20 minutes; do it from a checkout of the feature branch before the feature pull request is merged)
 
-1. On a checkout of `feat/move-item`, back up the database as https://github.com/tkcs-lab/knowledge-hub/blob/feat/move-item/docs/runbook.md says, then run `kh migrate` against your database. You see `0004_move_record.sql` applied once; the migration only adds a table and functions.
+1. On a checkout of `feat/move-item`, back up the database as https://github.com/tkcs-lab/knowledge-hub/blob/feat/move-item/docs/runbook.md says, then run `kh migrate` against your database. You see `0005_move_record.sql` applied once; the migration only adds a table and functions.
 2. Start `kh serve` from that checkout and restart PrivacyFence with `deploy/privacyfence-upstream.example.yaml` from the branch (the header of that file says which setting points PrivacyFence at it). You see `kh_move_item` in the tool list of your Claude connection.
 3. In PrivacyFence's admin page for the `kh` upstream, allow `kh_move_item` for your Claude client and open the tool once: the popup shows `id`, `from_group` and `to_group`.
 4. Report back: pass or fail, one line, in the pull request.
@@ -272,14 +272,14 @@ phases:
     depends_on: []
     complexity: M
     touches:
-      - src/knowledge_hub/migrations/0004_move_record.sql
+      - src/knowledge_hub/migrations/0005_move_record.sql
       - src/knowledge_hub/tools/move.py
       - src/knowledge_hub/tools/records.py
       - src/knowledge_hub/indexer/worker.py
       - src/knowledge_hub/mcp/errors.py
       - src/knowledge_hub/mcp/server.py
       - deploy/privacyfence-upstream.example.yaml
-      - tests/integration/test_migration_0004.py
+      - tests/integration/test_migration_0005.py
       - tests/integration/test_move_item_record.py
       - tests/integration/test_move_embed_race.py
       - tests/integration/test_migrate_runner.py
@@ -292,21 +292,21 @@ phases:
     brief: |
       Read first: docs/design.md (Access model, Roles and RLS matrix, Tools), src/knowledge_hub/tools/outdated.py, src/knowledge_hub/tools/records.py, src/knowledge_hub/indexer/worker.py (lines 55-100), src/knowledge_hub/migrations/0003_supersede.sql, tests/integration/test_migration_0002.py, tests/integration/test_mark_record_outdated.py, tests/support/principals.py, tests/support/seed.py.
       Run `bash scripts/ensure_test_pg.sh` and set up `.venv` as README.md Quick start says before any integration test.
-      1. Create `src/knowledge_hub/migrations/0004_move_record.sql` with exactly the SQL of plan section 3.2 (copy it; change nothing).
+      1. Create `src/knowledge_hub/migrations/0005_move_record.sql` with exactly the SQL of plan section 3.2 (copy it; change nothing).
       2. `mcp/errors.py`: add the seven constants of the table in plan 3.1 with those exact texts, and change the module docstring so it no longer says later phases never add to the texts (say that each tool adds the texts it needs).
       3. Create `tools/move.py` with `move_item(call, id, from_group, to_group)` and `register(server, deps)` following `tools/outdated.py`: the four checks of plan 3.1 in that order, the description of 3.1 verbatim, `_move_record` per 3.2 (savepoint around `SELECT kh.move_record(%s, %s, %s)` with the key, `from_group`, `to_group`; the error mapping of 3.2; `NULL` is `NOT_FOUND`; the INFO log line of 3.1; the record result dict of 3.1). A `doc` id raises `kh_error("bad_arg", errors.BAD_ARG, name="id")` for now; phase p2 replaces that branch.
       4. `mcp/server.py`: import `move` in `register_tools` and call `move.register(server, deps)`.
       5. `tools/records.py`: after `found = await _existing(...)` is `None` (line 78) and before `deps.blobs.put`, run `SELECT kh.record_moved(%s, %s, %s)` on `call.conn` with `(audience, source, source_ref)`; a true value raises `kh_error("record_moved", errors.RECORD_MOVED)`.
       6. `indexer/worker.py` `_embed_record`: at the start of the final `async with self.pool.connection() as conn, conn.transaction():` block add the advisory lock and the audience re-check of plan 3.3 (exact exception text `record audience changed; the job is retried`).
       7. `deploy/privacyfence-upstream.example.yaml`: add the `move_item` entry of plan 3.7 after `propose_doc`, and one header comment line saying that a new tool needs PrivacyFence restarted and the tool allowed on each Claude connection. `tests/unit/test_privacyfence_declaration.py`: add `"move_item"` to `WRITE_TOOLS`.
-      8. Existing tests that list migrations or tables: `tests/integration/test_migrate_runner.py` (four migrations: define `MOVE = "0004_move_record.sql"`, add it to the three assertions at lines 25, 38, 54 and rename `test_three_migrations_are_shipped` to `test_four_migrations_are_shipped`), `tests/integration/test_migration_0002.py` (define `MOVE = "0004_move_record.sql"` next to `SUPERSEDE`; line 98 becomes `migrate(dsn) == [SUPERSEDE, MOVE]`), `tests/integration/test_setup_postgres.py` (the `+ migration` lines near line 80 gain `+ migration 0004_move_record.sql`), `tests/integration/test_rls_policies.py` (the `TABLES` tuple at line 15 and the list at line 218 gain `record_moves`; `DEFINERS` at line 31 gains `"move_record"` and `"record_moved"`; the new table has no grant for `kh_app` or `kh_indexer`), `tests/integration/test_schema_tables.py` (add `"record_moves": ["audience", "source", "source_ref", "moved_at"]`). Run each file and fix only what the new migration changes.
-      9. New `tests/integration/test_migration_0004.py` (pattern: `test_migration_0002.py`, same `role_conn` and `_record` helpers copied in): `test_move_function_moves_record_and_chunks` (audience of record and its chunks both change; `replaced_by` cleared, outdated mark kept), `test_move_function_answers_null_for_missing_hidden_or_anonymous`, `test_move_function_refuses_unheld_target` (SQLSTATE `P0K08`), `test_move_function_refuses_same_group_and_wrong_from` (`P0K09`), `test_move_function_refuses_linked_record` (`P0K0A`), `test_move_function_writes_tombstone_and_clears_it_on_move_back`, `test_move_function_queues_embed_job`, `test_record_moved_is_false_for_unheld_group`.
+      8. Existing tests that list migrations or tables: `tests/integration/test_migrate_runner.py` (five migrations: define `MOVE = "0005_move_record.sql"` after `TECH_TIER`, append `MOVE` to the three lists at lines 26, 39, 55 and rename `test_four_migrations_are_shipped` to `test_five_migrations_are_shipped`), `tests/integration/test_migration_0002.py` (define `MOVE = "0005_move_record.sql"` next to `TECH_TIER`; line 99 becomes `migrate(dsn) == [SUPERSEDE, TECH_TIER, MOVE]`), `tests/integration/test_setup_postgres.py` (the `+ migration` lines near line 80 gain `+ migration 0005_move_record.sql`), `tests/integration/test_rls_policies.py` (the `TABLES` tuple at line 15 and the list at line 218 gain `record_moves`; `DEFINERS` at line 31 gains `"move_record"` and `"record_moved"`; the new table has no grant for `kh_app` or `kh_indexer`), `tests/integration/test_schema_tables.py` (add `"record_moves": ["audience", "source", "source_ref", "moved_at"]`). Run each file and fix only what the new migration changes.
+      9. New `tests/integration/test_migration_0005.py` (pattern: `test_migration_0002.py`, same `role_conn` and `_record` helpers copied in): `test_move_function_moves_record_and_chunks` (audience of record and its chunks both change; `replaced_by` cleared, outdated mark kept), `test_move_function_answers_null_for_missing_hidden_or_anonymous`, `test_move_function_refuses_unheld_target` (SQLSTATE `P0K08`), `test_move_function_refuses_same_group_and_wrong_from` (`P0K09`), `test_move_function_refuses_linked_record` (`P0K0A`), `test_move_function_writes_tombstone_and_clears_it_on_move_back`, `test_move_function_queues_embed_job`, `test_record_moved_is_false_for_unheld_group`.
       10. New `tests/integration/test_move_item_record.py` (pattern: `tests/integration/test_mark_record_outdated.py`; callers `multi` (groups `all` and `mgmt`), `alice_all`, `carol_hr`, `wf_token`): `test_move_changes_group_and_keeps_id`, `test_search_finds_moved_record_only_in_new_group`, `test_move_needs_both_groups` (`alice_all` to `mgmt` is `audience is not held by this caller or not configured`), `test_wrong_from_group`, `test_same_group_is_bad_arg`, `test_hidden_record_is_not_found` (`multi` names a record of `hr`), `test_target_with_same_source_ref_is_conflict`, `test_linked_record_is_refused`, `test_workflow_principal_is_refused`, `test_doc_id_is_refused_until_p2` (marked with a comment that p2 removes it), `test_log_line` (caplog `move_item sub=multi`).
       11. In `tests/integration/test_ingest_record.py` add `test_ingest_refuses_a_moved_out_source_ref` (move a record out of `all`, then `ingest_record` with the same `source` and `source_ref` into `all` gives `a record with this source and source_ref was moved out of this audience`) and `test_move_back_clears_the_tombstone`.
       12. New `tests/integration/test_move_embed_race.py` (read `tests/integration/test_webhook_worker.py` for how an `embed_record` job is run with a `FakeEmbedder`): an embedder whose `embed` first commits an audience change of the record through an admin connection, then returns vectors; `await worker.run_once()` must fail the job (state `failed`, `last_error` contains `record audience changed`) and leave no chunk with the old audience.
       Stop with `status=blocked` if the SQL of 3.2 does not apply on PostgreSQL 16, or if a table or migration assertion outside the files named in step 8 fails.
     acceptance:
-      - ".venv/bin/python -m pytest tests/integration/test_migration_0004.py tests/integration/test_move_item_record.py tests/integration/test_move_embed_race.py tests/integration/test_ingest_record.py tests/integration/test_migrate_runner.py tests/integration/test_migration_0002.py -q passes"
+      - ".venv/bin/python -m pytest tests/integration/test_migration_0005.py tests/integration/test_move_item_record.py tests/integration/test_move_embed_race.py tests/integration/test_ingest_record.py tests/integration/test_migrate_runner.py tests/integration/test_migration_0002.py -q passes"
       - ".venv/bin/python -m pytest tests/unit/test_privacyfence_declaration.py tests/unit/test_tool_schemas.py -q passes"
       - ".venv/bin/python -m pytest tests/integration/test_rls_policies.py tests/integration/test_schema_tables.py tests/integration/test_setup_postgres.py -q passes"
       - "grep -n 'move_item' deploy/privacyfence-upstream.example.yaml matches"
@@ -353,7 +353,7 @@ phases:
       3. `docs/design.md`: add the section "Moving an item" (the tombstone and `ingest_record` refusing a moved-out `source_ref`, the worker lock and the re-embed policy of plan 3.3 including the two effects, "a move is not a purge") and add to Accepted residuals: "A move is not a purge: the old repo's history, past usage queries and backups keep the old copy. The two pull requests of a document move are not ordered; merge the add first.". Leave the Trust section unchanged. Put "Moving an item" after the Tools section and before "Deviation from the PrivacyFence contract", and say that a moved document gets a new `doc:` id while a record keeps its `rec:` id.
       4. `docs/runbook.md`: a section "Moving an item between groups" (how to call `kh_move_item`; the popup shows both groups; for a document merge the add pull request as an approver of the target group, then the removal as an approver of the source group; a retry returns the open pull requests; refusals and what to do: moved-out `source_ref`, linked item, text the tool cannot move), and in the n8n token section one sentence that `kh_move_item` is for Claude clients only and workflows are refused. A rollout paragraph: `kh migrate`, restart `kh serve` and PrivacyFence, allow the new tool; recreate the n8n tokens only if PrivacyFence asks for it.
       5. `README.md`: add the `move_item` row to the Tools table: `| \`move_item\` | Move a record at once, or a document with two pull requests, from one group you hold to another. |`.
-      6. `CHANGELOG.md` under `## [Unreleased]`, a `### Added` list: the tool `move_item` (`kh_move_item`, gate `popup`, Claude clients only); migration `0004_move_record.sql` (run `kh migrate`; restart PrivacyFence and allow the tool); `ForgejoBot.delete_file`; `ingest_record` refuses a `source_ref` that was moved out of the group (`a record with this source and source_ref was moved out of this audience`). A `### Changed` list: the embed worker re-checks a record's group under a lock; `mark_record_outdated` takes row locks. No version heading.
+      6. `CHANGELOG.md` under `## [Unreleased]`, a `### Added` list: the tool `move_item` (`kh_move_item`, gate `popup`, Claude clients only); migration `0005_move_record.sql` (run `kh migrate`; restart PrivacyFence and allow the tool); `ForgejoBot.delete_file`; `ingest_record` refuses a `source_ref` that was moved out of the group (`a record with this source and source_ref was moved out of this audience`). A `### Changed` list: the embed worker re-checks a record's group under a lock; `mark_record_outdated` takes row locks. No version heading.
       7. Run `.venv/bin/python -m pytest tests/unit/test_docs_links.py -q` and fix any link it reports.
     acceptance:
       - ".venv/bin/python -m pytest tests/unit/test_docs_links.py -q passes"
