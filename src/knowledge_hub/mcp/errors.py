@@ -1,7 +1,7 @@
 """The fixed-text catalogue (plan 3.8) and ``tool_guard`` (plan 3.2).
 
-Every text a caller can see from a failed tool is one of the constants below. Later phases import
-them and never add to them.
+Every text a caller can see from a failed tool is one of the constants below. The catalogue grows
+with each tool: a tool adds the texts it needs here and imports the rest.
 """
 
 from __future__ import annotations
@@ -47,6 +47,13 @@ ID_IN_USE = "id is used by another file in this repo"
 TOO_MANY_OPEN = "too many open proposals in this repo"
 NOT_CONFIGURED = "writes are not configured"
 PROPOSE_FAILED = "could not open the pull request"
+NOT_FOR_WORKFLOWS = "this tool is not available to workflows"
+MOVE_WRONG_GROUP = "the item is not in from_group"
+MOVE_CONFLICT = "the target group already has an item with this source and source_ref, path or id"
+MOVE_LINKED = "another item names this one as its replacement or successor; clear that first"
+RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
+MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
+MOVE_PARTIAL = "the removal pull request could not be opened; call move_item again to open it"
 
 
 class KhError(Exception):

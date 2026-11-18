@@ -104,6 +104,13 @@ class Worker:
             vectors = list(await self.embedder.embed(texts))
         model = self.embedder.model if embeddable else None
         async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"rec:{record_id}",))
+            cur = await conn.execute("SELECT audience FROM kh.records WHERE id = %s", (record_id,))
+            again = await cur.fetchone()
+            if again is None:
+                return
+            if again[0] != audience:
+                raise RuntimeError("record audience changed; the job is retried")
             await conn.execute("DELETE FROM kh.chunks WHERE record_id = %s", (record_id,))
             for c, vec in zip(chunks, vectors, strict=True):
                 literal = None if vec is None else "[" + ",".join(repr(float(x)) for x in vec) + "]"
