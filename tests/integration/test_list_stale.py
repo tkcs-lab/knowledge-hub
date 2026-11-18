@@ -93,3 +93,13 @@ async def test_a_cursor_is_bound_to_the_caller_and_the_filter(mcp_client, stale_
     assert narrowed.is_error and narrowed.text.endswith(CURSOR_FOREIGN)
     junk = await mcp_client.call(multi, "list_stale", {"cursor": "abc.def"})
     assert junk.is_error and junk.text.endswith(CURSOR_FOREIGN)
+
+
+async def test_a_superseded_stale_document_is_not_listed(mcp_client, stale_docs, fresh_db):
+    hidden, keep = stale_docs["all"][0], stale_docs["all"][1]
+    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
+        conn.execute("UPDATE kh.documents SET superseded_by = %s WHERE id = %s", (keep, hidden))
+    res = await mcp_client.call(alice_all, "list_stale")
+    assert not res.is_error, res.text
+    assert f"doc:{hidden}" not in _ids(res)
+    assert len(_ids(res)) == 4
