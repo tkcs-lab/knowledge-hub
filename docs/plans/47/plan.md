@@ -4,7 +4,7 @@
 
 ## Summary
 
-**Use it:** In Claude, a person who is a member of two groups calls `kh_move_item` with an item id, the group it is in now (`from_group`) and the group it should go to (`to_group`). PrivacyFence shows both groups in its popup. A T3 record (`rec:`) moves at once and keeps its id. A T0 document (`doc:`) opens two pull requests: one adds the file to the target group's repo, one removes it from the source group's repo; each group's approvers merge their own, and the add must be merged first. The answer lists the pull requests, and any supersede links the move dropped.
+**Use it:** In Claude, a person who is a member of two groups calls `kh_move_item` with an item id, the group it is in now (`from_group`) and the group it should go to (`to_group`). PrivacyFence shows both groups in its popup. A T3 record (`rec:`) moves at once and keeps its id. A T0 document (`doc:`) opens two pull requests: one adds the file to the target group's repo, one removes it from the source group's repo; each group's approvers merge their own, and the add must be merged first. The answer lists the pull requests, and any supersede links the move dropped; the moved document gets a new id once the target repo is indexed.
 
 **Scope:** Adds the tool `move_item`, migration `0004_move_record.sql` (two definer functions, one tombstone table, row locks in `mark_record_outdated`), `ForgejoBot.delete_file`, a lock in the embed worker, a tombstone check in `ingest_record`, docs and the changelog. Does not purge anything: git history of the old repo, past usage queries and backups keep the old copy. Not available to n8n workflows. No approver check: holding both groups is the rule.
 
