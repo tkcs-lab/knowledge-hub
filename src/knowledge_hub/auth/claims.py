@@ -111,7 +111,7 @@ def resolve_audiences(
     if principal_type == "claude_client":
         return config.audiences_for_email(email)
     if principal_type == "n8n_workflow":
-        return frozenset(a for a in claim_audiences if a in config.groups)
+        return frozenset(a for a in claim_audiences if config.is_active(a))
     return frozenset()
 
 
