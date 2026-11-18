@@ -57,3 +57,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - scope: scope drift: fix-1 edits to files of p1, p7 and p8 were accepted (they stay in the final diff); no other phase left its touches
 - review: dod on the feature branch: ruff clean, full pytest 1029 passed on local Postgres 16; no role was required
+- conflict: origin/main moved (Slack repo hooks, PR 48) and conflicted in CHANGELOG, docs/configuration.md, setup/cli.py, setup/forgejo.py and three unit test files; resolved by keeping both sides, no behaviour of either removed; full suite 1047 passed
