@@ -7,6 +7,7 @@ from typing import Any, Literal
 from mcp.server.mcpserver import MCPServer
 from psycopg.rows import dict_row
 
+from knowledge_hub.config import KhConfig
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
@@ -31,7 +32,7 @@ def _cursor_scope(query: str, min_tier: str, labels: list[str], audience: str) -
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
 
-def _hit(row: dict[str, Any]) -> dict[str, Any]:
+def _hit(row: dict[str, Any], config: KhConfig) -> dict[str, Any]:
     is_doc = row["tier"] == "T0"
     pre = "doc_" if is_doc else "rec_"
     when = None if is_doc else row["rec_occurred_at"]
@@ -40,7 +41,7 @@ def _hit(row: dict[str, Any]) -> dict[str, Any]:
         "tier": row["tier"],
         "title": row[pre + "title"],
         "audience": row[pre + "audience"],
-        "labels": list(row[pre + "labels"] or []),
+        "labels": config.visible_labels(row[pre + "labels"] or []),
         "repo": row["doc_repo"] if is_doc else "",
         "path": row["doc_path"] if is_doc else "",
         "source_url": "" if is_doc else (row["rec_source_url"] or ""),
@@ -63,6 +64,8 @@ async def search(
 ) -> dict[str, Any]:
     deps, settings = call.deps, call.deps.settings
     limit = max(1, min(MAX_LIMIT, limit))
+    if set(labels) & deps.config.archived_label_set:
+        return {"hits": [], "next_cursor": ""}
     scope = _cursor_scope(query, min_tier, labels, audience)
     offset = 0
     if cursor:
@@ -94,7 +97,7 @@ async def search(
         await cur.execute(sql, params)
         rows = await cur.fetchall()
     meta = rows[0]  # the statement always returns at least the aggregate row
-    hits = [_hit(r) for r in rows if r["id"] is not None]
+    hits = [_hit(r, deps.config) for r in rows if r["id"] is not None]
     if offset == 0:
         call.events.append(
             UsageEvent.searched(
