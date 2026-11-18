@@ -4,6 +4,31 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- The tool `list_audiences`: PrivacyFence's audiences source (PrivacyFence ADR 0325). It answers only PrivacyFence's service claim with the members' emails of each active group. The declaration example sets `audiences_tool: list_audiences`: upgrade PrivacyFence first, then restart `kh serve` and PrivacyFence. The `upstream_mcp.kh.groups` map and any membership file kept for the hub can go; existing n8n tokens stay valid.
+- The tool `move_item` (`kh_move_item`, gate `popup`, Claude clients only).
+- Migration `0005_move_record.sql`: run `kh migrate`, then restart `kh serve` and PrivacyFence and allow the tool.
+- `ForgejoBot.delete_file`.
+- `ingest_record` refuses a `source_ref` that was moved out of the group (`a record with this source and source_ref was moved out of this audience`).
+- `move_item` moves a document (`doc:`) between two groups you hold with two pull requests: one adds the file to the target group's repo, one removes it from the source group's repo (merge the add first). Calling it again returns the open pulls or opens the missing removal; the moved document gets a new id once the target repo is indexed. `ForgejoBot.delete_file` backs the removal.
+- Tech repos are kept current: a push to a tech repo's default branch queues an index job, the worker re-syncs every tech repo hourly (`KH_TECH_POLL_MINUTES`, default 60, 0 switches it off), and `kh rebuild` and `kh check` cover tech repos and check each document's tier.
+- `get_doc` returns the document's real `tier` and links a T0a document under `tech_org`; its description warns that T0a text is unreviewed data. `usage` counts only T0 documents for `outranked_t0` and `related_docs`.
+- `tech_org` and `tech_repos` in `kh.yaml` name the Forgejo org and repositories whose technical docs the hub will index (audience `all`); a tech repo may list `labels`.
+- Tier T0a (technical documents indexed without review): migration `0004_tech_tier.sql`, the `search` tool's `min_tier` accepts `T0a`, and `KH_TIER_WEIGHTS` takes an optional `T0a` weight (default `T0:1.0,T0a:0.7,T3:0.4`; a missing T0a is the midpoint of T0 and T3). Run `kh migrate`, and restart PrivacyFence if it caches the `search` schema.
+- `kh setup` checks the tech org (missing, unmanaged and collaborator lines for each tech repo, an indexer read grant, a `tech webhook`), queues a `git_push` job for each tech repo after a new label, and has a `tech` step that reports T0a documents of a repo no longer in `tech_repos`; `kh setup apply --prune` deletes the documents of a withdrawn tech repo.
+- `sync_repo` indexes a tech repo from its default branch (`CLAUDE.md` and `docs/**/*.md`, tier T0a, audience `all`, labels from `kh.yaml`) without a rewrite alert; `ForgejoReader.default_branch` reads the branch.
+- `groups.<g>.slack_channel` in `kh.yaml` and the setup file `KH_SETUP_SLACK_WEBHOOKS_FILE`: `kh setup` keeps one Forgejo Slack hook per group repo that posts pull request events to the group's approver channel.
+
+### Changed
+
+- `kh.yaml` is refused with more than 200 active groups, more than 20000 group members in all, or an audience table over 1000000 characters.
+- The embed worker re-checks a record's group under a lock.
+- `mark_record_outdated` takes row locks.
+- `search` takes `min_tier` `T0a` (T0 and T0a only); `min_tier=T0` fails with `only T0a documents or T3 records match` when only T0a items match.
+- `KH_TIER_WEIGHTS` accepts a T0a weight and must satisfy `T0 >= T0a >= T3`.
+- `similar` in `ingest_record` and `propose_doc` may list T0a items of group `all`.
+
 ## [0.4.0] - 2026-11-18
 
 ### Added

@@ -5,12 +5,14 @@ Every error text starts with ``config:``.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import pydantic_core
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -24,10 +26,26 @@ GROUP_RE = AUDIENCE_RE
 LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,38}")
 LABEL_RE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,62}")
 REPO_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+SLACK_CHANNEL_RE = re.compile(r"#[a-z0-9][a-z0-9_-]{0,79}")
+
+TECH_AUDIENCE = "all"
 
 MAX_LABELS = 500
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
+MAX_AUDIENCES = 200
+MAX_AUDIENCE_ADDRESSES = 20000
+MAX_AUDIENCE_ANSWER_CHARS = 1_000_000
+
+
+def _audience_table(people: dict[str, str], groups: dict[str, Any]) -> dict[str, list[str]]:
+    """Active group name -> sorted, de-duplicated member emails (the PrivacyFence audiences answer)."""
+    by_login = {login.casefold(): email.lower() for login, email in people.items()}
+    return {
+        name: sorted({by_login[m.casefold()] for m in group.members if m.casefold() in by_login})
+        for name, group in sorted(groups.items())
+        if not group.archived
+    }
 
 
 def _check_logins(logins: list[str], where: str) -> None:
@@ -47,6 +65,7 @@ class GroupConfig(BaseModel):
     members: list[str] = []
     approvers: list[str]
     archived: bool = False
+    slack_channel: str | None = None
 
     @field_validator("repo")
     @classmethod
@@ -54,6 +73,18 @@ class GroupConfig(BaseModel):
         if value is not None and not REPO_RE.fullmatch(value):
             raise ValueError(f"repo {value!r} is not a valid repository name")
         return value
+
+    @field_validator("slack_channel")
+    @classmethod
+    def _slack_channel(cls, value: str | None) -> str | None:
+        if value is not None and not SLACK_CHANNEL_RE.fullmatch(value):
+            raise ValueError(f"slack_channel {value!r} is not a valid Slack channel (#name, lower case)")
+        return value
+
+
+class TechRepoConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    labels: list[str] = []
 
 
 class KhConfig(BaseModel):
@@ -67,6 +98,8 @@ class KhConfig(BaseModel):
     groups: dict[str, GroupConfig] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
     archived_labels: list[str] = Field(default_factory=list)
+    tech_org: str | None = None
+    tech_repos: dict[str, TechRepoConfig] = Field(default_factory=dict)
 
     @field_validator("forgejo_web_url")
     @classmethod
@@ -145,6 +178,26 @@ class KhConfig(BaseModel):
                 if login.casefold() not in members:
                     raise ValueError(f"group {name} approver {login} is not a member")
 
+        table = _audience_table(self.people, self.groups)
+        if len(table) > MAX_AUDIENCES:
+            raise ValueError(
+                "active groups are more than 200; "
+                "PrivacyFence accepts at most 200 audiences"
+            )
+        if sum(len(v) for v in table.values()) > MAX_AUDIENCE_ADDRESSES:
+            raise ValueError(
+                f"active groups list more than {MAX_AUDIENCE_ADDRESSES} members in all; "
+                f"PrivacyFence accepts at most {MAX_AUDIENCE_ADDRESSES} addresses"
+            )
+        answer = {"version": 1, "audiences": table}
+        # PrivacyFence caps the text and the structured content separately, and the text is indented.
+        size = max(len(json.dumps(answer)), len(pydantic_core.to_json(answer, indent=2).decode()))
+        if size > MAX_AUDIENCE_ANSWER_CHARS:
+            raise ValueError(
+                f"the audience table is larger than {MAX_AUDIENCE_ANSWER_CHARS} characters; "
+                "PrivacyFence refuses it"
+            )
+
         if len(self.labels) > MAX_LABELS:
             raise ValueError(f"labels has more than {MAX_LABELS} entries")
         for label, description in self.labels.items():
@@ -159,7 +212,42 @@ class KhConfig(BaseModel):
             if name in seen_archived:
                 raise ValueError(f"archived_labels lists {name!r} twice")
             seen_archived.add(name)
+
+        if self.tech_org:
+            if not LOGIN_RE.fullmatch(self.tech_org):
+                raise ValueError(f"tech_org {self.tech_org!r} is not a valid login")
+            if self.tech_org.casefold() == self.org.casefold():
+                raise ValueError("tech_org must differ from org")
+        if self.tech_repos:
+            if not self.tech_org:
+                raise ValueError("tech_repos needs tech_org")
+            if TECH_AUDIENCE not in self.groups:
+                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE}")
+            if self.groups[TECH_AUDIENCE].archived:
+                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE} to be active")
+            for repo_name, tech in self.tech_repos.items():
+                if not REPO_RE.fullmatch(repo_name):
+                    raise ValueError(f"tech repo {repo_name!r} is not a valid repository name")
+                if repo_name in repos:
+                    raise ValueError(f"tech repo {repo_name} is also the repo of group {repos[repo_name]}")
+                seen_tech: set[str] = set()
+                for label in tech.labels:
+                    if label not in self.labels:
+                        raise ValueError(f"tech repo {repo_name} label {label!r} is not in labels")
+                    if label in seen_tech:
+                        raise ValueError(f"tech repo {repo_name} lists label {label!r} twice")
+                    seen_tech.add(label)
         return self
+
+    def is_tech_repo(self, repo: str) -> bool:
+        return repo in self.tech_repos
+
+    def tech_labels(self, repo: str) -> list[str]:
+        return list(self.tech_repos[repo].labels)
+
+    @property
+    def tech_repo_names(self) -> list[str]:
+        return sorted(self.tech_repos)
 
     @property
     def active_groups(self) -> list[str]:
@@ -203,6 +291,9 @@ class KhConfig(BaseModel):
             for name, group in self.groups.items()
             if not group.archived and logins & {m.casefold() for m in group.members}
         )
+
+    def audience_members(self) -> dict[str, list[str]]:
+        return _audience_table(self.people, self.groups)
 
 
 def _wrap(exc: ValidationError) -> ConfigError:

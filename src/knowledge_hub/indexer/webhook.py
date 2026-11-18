@@ -77,15 +77,26 @@ def make_webhook_endpoint(deps: Deps):
             return _empty(400, "bad_request")
         if not isinstance(payload, dict):
             return _empty(400, "bad_request")
-        repo = _repo_name(payload, deps.config.org)
-        if repo is None:
-            return _empty(202, "ignored")
-        group = deps.config.group_for_repo(repo)
-        if group is None or not deps.config.is_active(group):
-            return _empty(202, "ignored")
         event = request.headers.get("x-forgejo-event") or request.headers.get("x-gitea-event") or ""
-        if event != "push" or payload.get("ref") != "refs/heads/main":
-            return _empty(202, "ignored")
+        repo = _repo_name(payload, deps.config.org)
+        group = deps.config.group_for_repo(repo) if repo is not None else None
+        if repo is not None and group is not None:
+            if not deps.config.is_active(group):
+                return _empty(202, "ignored")
+            if event != "push" or payload.get("ref") != "refs/heads/main":
+                return _empty(202, "ignored")
+        else:
+            repo = _repo_name(payload, deps.config.tech_org) if deps.config.tech_org else None
+            if repo is None or not deps.config.is_tech_repo(repo):
+                return _empty(202, "ignored")
+            default_branch = payload["repository"].get("default_branch")
+            if (
+                event != "push"
+                or not isinstance(default_branch, str)
+                or not default_branch
+                or payload.get("ref") != f"refs/heads/{default_branch}"
+            ):
+                return _empty(202, "ignored")
         async with deps.indexer_pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES ('git_push', %s, %s)",

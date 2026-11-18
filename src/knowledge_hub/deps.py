@@ -41,6 +41,16 @@ def make_reader(settings: Settings, config: KhConfig) -> ForgejoReader | None:
     return ForgejoReader(settings.forgejo_url, token, config.org)
 
 
+def make_tech_reader(settings: Settings, config: KhConfig) -> ForgejoReader | None:
+    """The read-only client for the tech org; None unless ``KH_FORGEJO_URL`` and ``tech_repos`` are set."""
+    if not settings.forgejo_url or not config.tech_repos or config.tech_org is None:
+        return None
+    if settings.forgejo_indexer_token_file is None:
+        raise ValueError("KH_FORGEJO_INDEXER_TOKEN_FILE is required when KH_FORGEJO_URL is set")
+    token = settings.forgejo_indexer_token_file.read_text().strip()
+    return ForgejoReader(settings.forgejo_url, token, config.tech_org)
+
+
 def make_bot(settings: Settings, config: KhConfig) -> ForgejoBot | None:
     """The write client of the bot account; None unless ``KH_FORGEJO_URL`` and its token file are set."""
     if not settings.forgejo_url or settings.forgejo_bot_token_file is None:
@@ -73,6 +83,7 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
     blobs = make_blob_store(settings)
     reader = make_reader(settings, config)
     bot = make_bot(settings, config)
+    tech_reader = make_tech_reader(settings, config)
     app_pool = make_app_pool(settings)
     indexer_pool = make_indexer_pool(settings)
     try:
@@ -85,11 +96,20 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
             await reader.aclose()
         if bot is not None:
             await bot.aclose()
+        if tech_reader is not None:
+            await tech_reader.aclose()
         raise
     worker = None
     if reader is not None:
         worker = Worker(
-            indexer_pool, reader, embedder, config, blobs, chunker_version=settings.chunker_version
+            indexer_pool,
+            reader,
+            embedder,
+            config,
+            blobs,
+            chunker_version=settings.chunker_version,
+            tech_reader=tech_reader,
+            tech_poll_seconds=settings.tech_poll_minutes * 60,
         )
     return Deps(
         settings=settings,
@@ -103,6 +123,7 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
         reader=reader,
         worker=worker,
         forgejo_bot=bot,
+        tech_reader=tech_reader,
     )
 
 
@@ -113,6 +134,8 @@ async def close_deps(deps: Deps) -> None:
         await deps.reader.aclose()
     if deps.forgejo_bot is not None:
         await deps.forgejo_bot.aclose()
+    if deps.tech_reader is not None:
+        await deps.tech_reader.aclose()
     if deps.indexer_pool is not None:
         await deps.indexer_pool.close()
     await deps.app_pool.close()

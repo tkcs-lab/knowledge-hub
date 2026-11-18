@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document
+from knowledge_hub.indexer.frontmatter import ParsedDoc, Rejected, parse_document, strip_frontmatter
 
 
 def doc(fm: str, body: str = "# Hi\nbody\n") -> str:
@@ -106,3 +106,16 @@ def test_supersedes_accepts_a_single_string():
 )
 def test_supersedes_rejects_bad_values(value):
     assert parse_document(doc(GOOD + f"supersedes: {value}\n"), "p.md") == Rejected("invalid supersedes")
+
+
+def test_strip_frontmatter_removes_a_closed_block():
+    assert strip_frontmatter("---\nid: [broken\n---\nbody\n") == "body\n"
+
+
+def test_strip_frontmatter_keeps_an_unclosed_block():
+    text = "---\nid: a\nbody\n"
+    assert strip_frontmatter(text) == text
+
+
+def test_strip_frontmatter_without_a_block_is_identity():
+    assert strip_frontmatter("# Title\ntext\n") == "# Title\ntext\n"

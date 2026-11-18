@@ -14,6 +14,8 @@ from knowledge_hub.db.migrate import migrate
 BASELINE = "0001_baseline.sql"
 USAGE = "0002_usage_events.sql"
 SUPERSEDE = "0003_supersede.sql"
+TECH_TIER = "0004_tech_tier.sql"
+MOVE = "0005_move_record.sql"
 DB = "kh_fresh"
 SUB = "n8n-token:a"
 NOW = datetime.now(UTC)
@@ -95,7 +97,7 @@ def test_upgrade_from_baseline_adds_columns_and_resets_blob_sha(migrated_db):
         conn.execute("INSERT INTO kh.groups (name, repo) VALUES ('all', 'kb-all')")
         did = _document(conn, blob_sha="b1")
         rid = _record(conn)
-    assert migrate(dsn) == [SUPERSEDE]
+    assert migrate(dsn) == [SUPERSEDE, TECH_TIER, MOVE]
     with psycopg.connect(migrated_db.admin_dsn("kh_upgrade")) as conn:
         assert conn.execute("SELECT supersedes, superseded_by, blob_sha FROM kh.documents WHERE id = %s",
                             (did,)).fetchone() == ([], None, "")

@@ -1,4 +1,4 @@
-"""Forgejo admin client for ``kh setup``: teams, repositories, collaborators, protection and hooks.
+"""Forgejo admin client for ``kh setup``: teams, repos, collaborators, protection, org and repo hooks.
 
 Same error handling as the reader: a fixed text with method, path and status, never the token or a body.
 Every method returns plain dicts and lists. ``kh serve`` never builds this client.
@@ -134,6 +134,20 @@ class ForgejoAdmin(_Http):
 
     async def edit_org_hook(self, hook_id: int, body: dict[str, Any]) -> dict[str, Any]:
         return await self._obj_required("PATCH", f"/orgs/{q(self.org)}/hooks/{hook_id}", body=body)
+
+    # -- repo hooks ------------------------------------------------------------------------------
+
+    async def repo_hooks(self, repo: str) -> list[dict[str, Any]]:
+        return await self._list(f"{self._repo(repo)}/hooks")
+
+    async def create_repo_hook(self, repo: str, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._obj_required("POST", f"{self._repo(repo)}/hooks", body=body, ok=(201,))
+
+    async def edit_repo_hook(self, repo: str, hook_id: int, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._obj_required("PATCH", f"{self._repo(repo)}/hooks/{hook_id}", body=body)
+
+    async def delete_repo_hook(self, repo: str, hook_id: int) -> None:
+        await self._request("DELETE", f"{self._repo(repo)}/hooks/{hook_id}", ok=(204,))
 
     # -- identity --------------------------------------------------------------------------------
 

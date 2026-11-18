@@ -66,6 +66,21 @@ class ForgejoBot(_Http):
             raise ForgejoError("commit response has no sha")
         return {"sha": sha, "parents": [p["sha"] for p in commit.get("parents") or []]}
 
+    async def delete_file(self, repo: str, branch: str, path: str, message: str, sha: str) -> dict[str, Any]:
+        """Delete ``path`` (whose blob is ``sha``) on ``branch``; returns the commit sha."""
+        _guard_branch(branch)
+        resp = await self._json(
+            "DELETE",
+            f"{self._repo(repo)}/contents/{quote(path, safe='/')}",
+            body={"branch": branch, "message": message, "sha": sha},
+            ok=(200,),
+        )
+        commit = resp.get("commit") if isinstance(resp, dict) else None
+        csha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(csha, str) or not csha:
+            raise ForgejoError("commit response has no sha")
+        return {"sha": csha}
+
     async def open_pull(self, repo: str, head: str, base: str, title: str, body: str) -> dict[str, Any]:
         _guard_branch(head)
         if base != "main":

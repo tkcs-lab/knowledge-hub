@@ -19,6 +19,14 @@ CONFIG = {
     },
 }
 URL = "http://hub:8080/webhooks/forgejo"
+SLACK_URL = "https://hooks.slack.com/services/T000/B000/XXXX"
+SLACK_CONFIG = {
+    **CONFIG,
+    "groups": {
+        "all": {**CONFIG["groups"]["all"], "slack_channel": "#kh-all-approvers"},
+        "mgmt": CONFIG["groups"]["mgmt"],
+    },
+}
 
 
 class Fake(FakeForgejoAdmin):
@@ -61,9 +69,9 @@ async def admin(fake):
     await a.aclose()
 
 
-def step(admin, config=None, *, secret="hmac", bot="bot-tok", indexer="idx-tok"):
+def step(admin, config=None, *, secret="hmac", bot="bot-tok", indexer="idx-tok", slack=None):
     return ForgejoStep(parse_config(config or CONFIG), admin, webhook_secret=secret,
-                       bot_token=bot, indexer_token=indexer)
+                       bot_token=bot, indexer_token=indexer, slack_urls=slack)
 
 
 def lines(changes):
@@ -395,3 +403,241 @@ async def test_archived_group_members_are_not_account_checked(fake, admin):
     config = {**config, "people": {**config["people"], "ghost": "ghost@example.com"}}
     changes = await step(admin, config).plan()
     assert not any(c.prefix == "!" for c in changes), lines(changes)
+
+
+# -- tech org (plan 3.8) --------------------------------------------------------------------------
+
+TECH_CONFIG = {
+    **CONFIG,
+    "labels": {"ember": "Ember product"},
+    "tech_org": "kh-tech",
+    "tech_repos": {"docs-a": {"labels": ["ember"]}, "docs-b": {}},
+}
+TECH_URL = "http://hub:8080/webhooks/forgejo"
+
+
+@pytest.fixture
+def tech_fake():
+    f = Fake(org="kh-tech", token="admin-tok")
+    f.add_user("kh-indexer", token="idx-tok")
+    return f
+
+
+@pytest.fixture
+async def tech_admin(tech_fake):
+    a = ForgejoAdmin("https://forgejo.test", "admin-tok", "kh-tech", transport=tech_fake.transport)
+    yield a
+    await a.aclose()
+
+
+def tech_step(admin, tech_admin, config=None, **kw):
+    return ForgejoStep(parse_config(config or TECH_CONFIG), admin, webhook_secret="hmac",
+                       bot_token="bot-tok", indexer_token="idx-tok", tech_admin=tech_admin, **kw)
+
+
+async def test_tech_repo_missing_is_a_refusal_line(fake, admin, tech_fake, tech_admin):
+    tech_fake.add_repo("docs-b")
+    changes = await tech_step(admin, tech_admin).plan()
+    assert "! tech repo docs-a: not in org kh-tech; create the clone or fork there" in lines(changes)
+    assert not has(changes, "!", r"^tech repo docs-b")
+    assert not any(m != "GET" for m, _ in tech_fake.requests)
+
+
+async def test_tech_repo_present_gets_indexer_read_collaborator(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    assert "+ collaborator docs-a/kh-indexer: read" in lines(await s.plan())
+    assert tech_fake.collabs["docs-a"] == {}
+    await s.apply(prune=False)
+    assert tech_fake.collabs["docs-a"] == {"kh-indexer": "read"}
+    assert tech_fake.collabs["docs-b"] == {"kh-indexer": "read"}
+    assert not any("kh-bot" in c for c in tech_fake.collabs.values())
+    assert not has(await s.plan(), "+", r"^collaborator docs-")
+
+
+async def test_tech_repo_line_lists_collaborators(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    tech_fake.add_user("zed")
+    tech_fake.add_user("amy")
+    tech_fake.collabs["docs-a"] = {"zed": "write", "amy": "read", "kh-indexer": "read"}
+    out = lines(await tech_step(admin, tech_admin).plan())
+    assert "i tech repo docs-a: collaborators amy, zed" in out
+    assert "i tech repo docs-b: collaborators none" in out
+
+
+async def test_unmanaged_tech_repo_is_reported(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b", "stray"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    assert "? unmanaged tech repo stray" in lines(await s.plan())
+    assert "? unmanaged tech repo stray" in lines(await s.apply(prune=True))
+    assert "stray" in tech_fake.repos
+
+
+async def test_tech_webhook_lines_have_the_tech_prefix(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    planned = lines(await s.plan())
+    assert f"+ tech webhook {TECH_URL}" in planned
+    assert "i tech webhook secret not verifiable" in planned
+    await s.apply(prune=False)
+    assert [h["config"]["url"] for h in tech_fake.hooks.values()] == [TECH_URL]
+    assert drift(await s.plan()) == drift(await step(admin).plan())
+    no_hub = {**TECH_CONFIG}
+    no_hub.pop("hub_url")
+    assert "! tech hub_url: not set" in lines(await tech_step(admin, tech_admin, no_hub).plan())
+
+
+async def test_no_tech_repos_changes_no_output(fake, admin, tech_fake, tech_admin):
+    plain = lines(await step(admin).plan())
+    s = ForgejoStep(parse_config(CONFIG), admin, webhook_secret="hmac", bot_token="bot-tok",
+                    indexer_token="idx-tok", tech_admin=None)
+    assert lines(await s.plan()) == plain
+    assert tech_fake.requests == []
+
+
+async def test_tech_repos_never_get_teams_or_protection(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    await tech_step(admin, tech_admin).apply(prune=True)
+    assert [t["name"] for t in tech_fake.teams.values()] == ["Owners"]
+    assert tech_fake.protections == {"docs-a": {}, "docs-b": {}}
+    assert tech_fake.repos["docs-a"] == tech_fake._new_repo("docs-a")
+    bad = [(m, p) for m, p in tech_fake.requests
+           if m != "GET" and "/collaborators/" not in p and "/hooks" not in p]
+    assert bad == []
+
+
+# -- Slack repo hooks ----------------------------------------------------------------------------------
+
+@pytest.fixture
+async def slack_applied(fake, admin):
+    s = step(admin, SLACK_CONFIG, slack={"all": SLACK_URL})
+    await s.apply(prune=False)
+    assert drift(await s.plan()) == []
+    return s
+
+
+def hook_requests(fake):
+    return [(m, p) for m, p in fake.requests if "/hooks" in p and "/orgs/" not in p]
+
+
+async def test_slack_hook_created_on_first_apply(fake, slack_applied):
+    [hook] = fake.repo_hooks["kb-all"].values()
+    assert hook["type"] == "slack" and hook["events"] == ["pull_request"] and hook["active"] is True
+    assert hook["config"] == {"url": SLACK_URL, "content_type": "json", "channel": "#kh-all-approvers"}
+    assert fake.repo_hooks["kb-management"] == {}
+    plan = await slack_applied.plan()
+    assert drift(plan) == []
+    assert "i slack hook kb-all: url not verifiable" in lines(plan)
+
+
+async def test_slack_plan_before_apply_is_a_creation(fake, admin):
+    changes = await step(admin, SLACK_CONFIG).plan()
+    assert "+ slack hook kb-all: #kh-all-approvers" in lines(changes)
+    assert not any(m != "GET" for m, _ in fake.requests)
+    assert fake.repo_hooks == {}
+
+
+@pytest.mark.parametrize("field, key, value", [
+    ("events", "events", ["push"]),
+    ("content_type", "config.content_type", "form"),
+    ("channel", "config.channel", "#other"),
+    ("active", "active", False),
+])
+async def test_slack_hook_field_changed(fake, slack_applied, field, key, value):
+    [hook] = fake.repo_hooks["kb-all"].values()
+    if key.startswith("config."):
+        hook["config"][key.split(".")[1]] = value
+    else:
+        hook[key] = value
+    expected = f"~ slack hook kb-all: {field}"
+    assert expected in lines(await slack_applied.plan())
+    assert expected in lines(await slack_applied.apply(prune=False))
+    assert drift(await slack_applied.plan()) == []
+
+
+async def test_slack_hook_with_extra_events_is_not_drift(fake, slack_applied):
+    [hook] = fake.repo_hooks["kb-all"].values()
+    hook["events"] = ["pull_request", "pull_request_comment", "pull_request_sync"]
+    assert drift(await slack_applied.plan()) == []
+
+
+async def test_slack_hook_url_is_rewritten_on_apply(fake, admin, slack_applied):
+    new = "https://hooks.slack.com/services/T111/B111/YYYY"
+    s = step(admin, SLACK_CONFIG, slack={"all": new})
+    fake.requests.clear()
+    changes = await s.apply(prune=False)
+    [(hid, hook)] = fake.repo_hooks["kb-all"].items()
+    assert hook["config"]["url"] == new
+    assert [(m, p) for m, p in hook_requests(fake) if m != "GET"] == [
+        ("PATCH", f"/api/v1/repos/kh/kb-all/hooks/{hid}")
+    ]
+    assert "i slack hook kb-all: url rewritten" in lines(changes)
+
+
+@pytest.mark.parametrize("slack", [None, {}])
+async def test_slack_url_missing_is_refused(fake, admin, slack):
+    s = step(admin, SLACK_CONFIG, slack=slack)
+    plan = await s.plan()
+    assert "+ slack hook kb-all: #kh-all-approvers" in lines(plan)
+    assert not any(c.prefix == "!" for c in plan), lines(plan)
+    done = await s.apply(prune=False)
+    assert "! slack hook kb-all: no URL for group all in KH_SETUP_SLACK_WEBHOOKS_FILE" in lines(done)
+    assert fake.repo_hooks["kb-all"] == {}
+
+
+async def test_two_slack_hooks_are_refused(fake, slack_applied):
+    fake._next_id += 1
+    fake.repo_hooks["kb-all"][fake._next_id] = {
+        "id": fake._next_id, "type": "slack", "config": {}, "events": [], "active": True
+    }
+    fake.requests.clear()
+    msg = "! slack hook kb-all: 2 Slack hooks; delete the extra ones in Forgejo"
+    assert msg in lines(await slack_applied.plan())
+    assert msg in lines(await slack_applied.apply(prune=False))
+    assert len(fake.repo_hooks["kb-all"]) == 2
+    assert all(m == "GET" for m, _ in hook_requests(fake))
+
+
+async def test_unmanaged_slack_hook_and_prune(fake, slack_applied):
+    fake._next_id += 1
+    hid = fake._next_id
+    fake.repo_hooks["kb-management"][hid] = {
+        "id": hid, "type": "slack", "config": {}, "events": [], "active": True
+    }
+    assert "? unmanaged slack hook kb-management" in lines(await slack_applied.plan())
+    assert "? unmanaged slack hook kb-management" in lines(await slack_applied.apply(prune=False))
+    assert hid in fake.repo_hooks["kb-management"]
+    assert "- slack hook kb-management" in lines(await slack_applied.apply(prune=True))
+    assert fake.repo_hooks["kb-management"] == {}
+
+
+async def test_slack_url_never_printed(fake, admin):
+    new = "https://hooks.slack.com/services/T111/B111/YYYY"
+    s = step(admin, SLACK_CONFIG, slack={"all": SLACK_URL})
+    rendered = lines(await s.plan()) + lines(await s.apply(prune=False))
+    s2 = step(admin, SLACK_CONFIG, slack={"all": new})
+    rendered += lines(await s2.apply(prune=False))
+    assert rendered
+    assert not any(SLACK_URL in x or new in x or "hooks.slack.com" in x for x in rendered)
+
+
+async def test_archived_group_slack_hook_untouched(fake, admin, slack_applied):
+    [hook] = fake.repo_hooks["kb-all"].values()
+    hook["active"] = False
+    archived = {
+        **SLACK_CONFIG,
+        "groups": {
+            "all": {**SLACK_CONFIG["groups"]["all"], "archived": True},
+            "mgmt": CONFIG["groups"]["mgmt"],
+        },
+    }
+    s = step(admin, archived, slack={"all": SLACK_URL})
+    assert not any("slack hook" in x for x in lines(await s.plan()))
+    assert not any("slack hook" in x for x in lines(await s.apply(prune=False)))
+    [hook] = fake.repo_hooks["kb-all"].values()
+    assert hook["active"] is False

@@ -6,11 +6,13 @@ import httpx
 import pytest
 
 from knowledge_hub.auth.claims import (
+    Call,
     Caller,
     ClaimMiddleware,
     InMemoryReplayCache,
     KhAuthError,
     _build_caller,
+    _Refuse,
     caller_from_scope,
     resolve_audiences,
 )
@@ -159,6 +161,43 @@ async def test_service_on_tools_call_refused_but_not_on_listing():
     await refused(client, call_body("search", ARGS), call_token(sub="privacyfence", principal_type="service"))
     r = await post(client, rpc_body("tools/list"), mint_claim("privacyfence", "service"))
     assert r.status_code == 200
+
+
+async def test_service_claim_may_call_the_audiences_tool():
+    client, inner = make_client()
+    token = call_token(
+        sub="privacyfence", principal_type="service", audiences=[], tool="list_audiences", arguments={}
+    )
+    assert (await post(client, call_body("list_audiences", {}), token)).status_code == 200
+    caller = inner.calls[0]["state"]["kh_caller"]
+    assert caller.principal_type == "service" and caller.audiences == frozenset()
+
+
+async def test_service_claim_with_another_sub_is_refused_on_the_audiences_tool():
+    client, inner = make_client()
+    token = call_token(
+        sub="someone", principal_type="service", audiences=[], tool="list_audiences", arguments={}
+    )
+    await refused(client, call_body("list_audiences", {}), token)
+    assert not inner.calls
+
+
+def test_build_caller_refuses_a_service_on_another_tool():
+    with pytest.raises(_Refuse) as exc:
+        _build_caller("privacyfence", "service", None, [], None, Call("search", {}), config=KH_CONFIG)
+    assert exc.value.code == "service_tool_call"
+
+
+def test_build_caller_lets_privacyfence_call_the_audiences_tool():
+    call = Call("list_audiences", {})
+    caller = _build_caller("privacyfence", "service", None, [], None, call, config=KH_CONFIG)
+    assert caller == Caller("privacyfence", "service", None, frozenset(), None)
+
+
+def test_build_caller_refuses_another_service_on_the_audiences_tool():
+    with pytest.raises(_Refuse) as exc:
+        _build_caller("other", "service", None, [], None, Call("list_audiences", {}), config=KH_CONFIG)
+    assert exc.value.code == "service_tool_call"
 
 
 async def test_replayed_jti():

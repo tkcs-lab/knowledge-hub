@@ -23,18 +23,23 @@ from knowledge_hub.metrics import METRICS
 from knowledge_hub.settings import Settings
 
 __all__ = [
+    "AUDIENCES_TOOL",
     "AUDIENCE_RE",
     "Call",
     "Caller",
     "ClaimMiddleware",
     "InMemoryReplayCache",
     "KhAuthError",
+    "PF_SERVICE_SUB",
     "ReplayCache",
     "caller_from_scope",
     "resolve_audiences",
 ]
 
 log = logging.getLogger("knowledge_hub.auth")
+
+AUDIENCES_TOOL = "list_audiences"
+PF_SERVICE_SUB = "privacyfence"
 
 AUDIENCE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 MCP_PATHS = frozenset({"/mcp", "/mcp/"})
@@ -127,7 +132,11 @@ def _build_caller(
 ) -> Caller:
     if principal_type == "human":
         raise _Refuse(401, "human_refused")
-    if principal_type == "service" and call is not None:
+    if (
+        principal_type == "service"
+        and call is not None
+        and not (call.name == AUDIENCES_TOOL and sub == PF_SERVICE_SUB)
+    ):
         raise _Refuse(401, "service_tool_call")
     if any(not isinstance(a, str) or not AUDIENCE_RE.fullmatch(a) for a in audiences):
         raise _Refuse(401, "bad_audience_name")

@@ -1,7 +1,7 @@
 """The fixed-text catalogue (plan 3.8) and ``tool_guard`` (plan 3.2).
 
-Every text a caller can see from a failed tool is one of the constants below. Later phases import
-them and never add to them.
+Every text a caller can see from a failed tool is one of the constants below. The catalogue grows with
+each tool: a tool adds the texts it needs here.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ INTERNAL = "internal error (ref {ref})"
 RATE_LIMIT = "rate limit exceeded; retry in {n} seconds"
 CURSOR_FOREIGN = "cursor does not belong to this query"
 NORMATIVE = "only T3 records match; repeat with min_tier T3 to see them"
+NORMATIVE_T0A = "only T0a documents or T3 records match; repeat with min_tier T0a or T3 to see them"
 BAD_ID = "id must be doc:<uuid> or rec:<uuid>"
 BAD_LABEL = "unknown label"
 BAD_ARG = "argument {name} is invalid"
@@ -46,6 +47,14 @@ ID_IN_USE = "id is used by another file in this repo"
 TOO_MANY_OPEN = "too many open proposals in this repo"
 NOT_CONFIGURED = "writes are not configured"
 PROPOSE_FAILED = "could not open the pull request"
+NOT_FOR_WORKFLOWS = "this tool is not available to workflows"
+AUDIENCES_SERVICE_ONLY = "this tool answers only PrivacyFence"
+MOVE_WRONG_GROUP = "the item is not in from_group"
+MOVE_CONFLICT = "the target group already has an item with this source and source_ref, path or id"
+MOVE_LINKED = "another item names this one as its replacement or successor; clear that first"
+RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
+MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
+MOVE_PARTIAL = "the removal pull request could not be opened; call move_item again to open it"
 
 
 class KhError(Exception):

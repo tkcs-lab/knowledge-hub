@@ -4,6 +4,7 @@ Behaviours that follow the plan (3.7, research r-20261117-1 and -2):
 - branch protection is stored by ``rule_name``;
 - a team in ``merge_whitelist_teams`` that has no read access to the repo is silently dropped on write
   (Forgejo does this in ``protected_branch.go``), a team name that does not exist answers 422;
+- a Slack repo hook needs config.channel (422 otherwise);
 - a team's repo access is its ``permission`` once the repo is added to it (or ``includes_all_repositories``).
 """
 
@@ -41,6 +42,7 @@ class FakeForgejoAdmin:
         self.collabs: dict[str, dict[str, str]] = {}  # repo -> login -> permission
         self.protections: dict[str, dict[str, dict[str, Any]]] = {}  # repo -> rule_name -> rule
         self.hooks: dict[int, dict[str, Any]] = {}
+        self.repo_hooks: dict[str, dict[int, dict[str, Any]]] = {}  # repo -> id -> hook
         self.requests: list[tuple[str, str]] = []
         self.bodies: list[dict[str, Any]] = []
         self._next_id = 0
@@ -77,6 +79,7 @@ class FakeForgejoAdmin:
         self.repos[name] = self._new_repo(name)
         self.collabs.setdefault(name, {})
         self.protections.setdefault(name, {})
+        self.repo_hooks.setdefault(name, {})
 
     def fail_next(self, path_part: str, status: int) -> None:
         self._failures.append((path_part, status))
@@ -166,6 +169,10 @@ class FakeForgejoAdmin:
             (("GET", rf"/orgs/{o}/hooks"), self._hooks_list),
             (("POST", rf"/orgs/{o}/hooks"), self._hook_create),
             (("PATCH", rf"/orgs/{o}/hooks/(\d+)"), self._hook_edit),
+            (("GET", r + r"/hooks"), self._rhooks_list),
+            (("POST", r + r"/hooks"), self._rhook_create),
+            (("PATCH", r + r"/hooks/(\d+)"), self._rhook_edit),
+            (("DELETE", r + r"/hooks/(\d+)"), self._rhook_delete),
         ]
 
     # teams
@@ -354,3 +361,43 @@ class FakeForgejoAdmin:
             if k in body:
                 hook[k] = body[k]
         return httpx.Response(200, json=dict(hook))
+
+    # repo hooks
+
+    def _rhooks_list(self, m, body, params):
+        if m[1] not in self.repos:
+            return httpx.Response(404, json={"message": "no repo"})
+        return httpx.Response(200, json=_page([dict(h) for h in self.repo_hooks[m[1]].values()], params))
+
+    def _rhook_create(self, m, body, params):
+        if m[1] not in self.repos:
+            return httpx.Response(404, json={"message": "no repo"})
+        if not body.get("type") or not isinstance(body.get("config"), dict):
+            return httpx.Response(422, json={"message": "type and config required"})
+        if body["type"] == "slack" and not body["config"].get("channel"):
+            return httpx.Response(422, json={"message": "Custom channel is invalid"})
+        self._next_id += 1
+        hook = {"id": self._next_id, "type": body["type"], "config": dict(body["config"]),
+                "events": list(body.get("events") or []), "active": bool(body.get("active", False))}
+        self.repo_hooks[m[1]][hook["id"]] = hook
+        return httpx.Response(201, json=dict(hook))
+
+    def _rhook_edit(self, m, body, params):
+        if m[1] not in self.repos:
+            return httpx.Response(404, json={"message": "no repo"})
+        hook = self.repo_hooks[m[1]].get(int(m[2]))
+        if hook is None:
+            return httpx.Response(404, json={"message": "no hook"})
+        if "config" in body:
+            hook["config"] = {**hook["config"], **body["config"]}
+        for k in ("events", "active"):
+            if k in body:
+                hook[k] = body[k]
+        return httpx.Response(200, json=dict(hook))
+
+    def _rhook_delete(self, m, body, params):
+        if m[1] not in self.repos:
+            return httpx.Response(404, json={"message": "no repo"})
+        if self.repo_hooks[m[1]].pop(int(m[2]), None) is None:
+            return httpx.Response(404, json={"message": "no hook"})
+        return httpx.Response(204)

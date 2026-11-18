@@ -102,3 +102,15 @@ async def test_wrong_token_is_401_without_leak():
 async def test_sends_token_header(fake, reader):
     await reader.head_sha("kb-all", "main")
     assert fake.requests[-1] == ("GET", "/api/v1/repos/kh/kb-all/branches/main")
+
+
+async def test_default_branch_reads_the_repo(fake, reader):
+    fake.add_repo("trunk", branch="trunk")
+    assert await reader.default_branch("kb-all") == "main"
+    assert await reader.default_branch("trunk") == "trunk"
+
+
+async def test_default_branch_missing_raises(fake, reader):
+    fake.repos["kb-all"].default_branch = ""
+    with pytest.raises(ForgejoError, match="no default_branch"):
+        await reader.default_branch("kb-all")

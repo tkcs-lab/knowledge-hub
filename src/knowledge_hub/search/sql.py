@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-TIERS = ("T0", "T3")
+TIERS = ("T0", "T0a", "T3")
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class SearchFilters:
     offset: int = 0
     pool: int = 50
     rrf_k: int = 60
-    tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T3": 0.4})
+    tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T0a": 0.7, "T3": 0.4})
     stale_weight: float = 0.5
     include_outdated: bool = False
 
@@ -38,14 +38,31 @@ class SearchFilters:
 
 
 def parse_tier_weights(text: str) -> dict[str, float]:
-    """``"T0:1.0,T3:0.4"`` to a dict; exactly T0 and T3 must be present and positive."""
+    """``"T0:1.0,T0a:0.7,T3:0.4"`` to a dict with all three tiers.
+
+    T0 and T3 are required, T0a is optional (a missing one gets the midpoint), every weight is
+    positive, no other tier is allowed, and ``T0 >= T0a >= T3``.
+    """
+    message = (
+        "KH_TIER_WEIGHTS must give a positive weight for T0 and T3, and optionally T0a, "
+        "with T0 >= T0a >= T3"
+    )
     out: dict[str, float] = {}
-    for part in text.split(","):
-        tier, _, value = part.strip().partition(":")
-        out[tier.strip()] = float(value)
-    if set(out) != set(TIERS) or any(not v > 0 for v in out.values()):
-        raise ValueError("KH_TIER_WEIGHTS must give a positive weight for each of T0 and T3")
-    return out
+    try:
+        for part in text.split(","):
+            tier, sep, value = part.strip().partition(":")
+            tier = tier.strip()
+            if not sep or tier not in TIERS or tier in out:
+                raise ValueError(message)
+            out[tier] = float(value)
+    except ValueError:
+        raise ValueError(message) from None
+    if "T0" not in out or "T3" not in out:
+        raise ValueError(message)
+    out.setdefault("T0a", (out["T0"] + out["T3"]) / 2)
+    if any(not v > 0 for v in out.values()) or not out["T0"] >= out["T0a"] >= out["T3"]:
+        raise ValueError(message)
+    return {tier: out[tier] for tier in TIERS}
 
 
 _FILTER = """
@@ -112,6 +129,8 @@ low_owners AS (
 meta AS (
   SELECT (SELECT count(*) FROM best) AS total,
          (SELECT count(*) FROM best WHERE tier = 'T0') AS t0_hits,
+         (SELECT count(*) FROM best WHERE tier = 'T0a')
+           + (SELECT count(*) FROM low_owners WHERE tier = 'T0a') AS t0a_hits,
          (SELECT count(*) FROM best WHERE tier = 'T3')
            + (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS t3_hits,
          (SELECT count(DISTINCT c.owner_key) FROM kh.chunks c, websearch_to_tsquery('english', %(query)s) q
@@ -125,7 +144,7 @@ SELECT p.id, p.owner_key, p.tier, p.stale, p.outdated, p.text, p.score,
        d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
        r.title AS rec_title, r.audience AS rec_audience, r.labels AS rec_labels,
        r.source_url AS rec_source_url, r.occurred_at AS rec_occurred_at,
-       meta.total, meta.t0_hits, meta.t3_hits, meta.t0_fts_hits, meta.t3_fts_hits
+       meta.total, meta.t0_hits, meta.t0a_hits, meta.t3_hits, meta.t0_fts_hits, meta.t3_fts_hits
   FROM meta
   LEFT JOIN page p ON true
   LEFT JOIN kh.documents d ON d.id = p.document_id

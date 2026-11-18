@@ -64,11 +64,28 @@ async def test_one_person_is_hidden_and_min_people_is_clamped(mcp_client, db):
 
 async def test_outranked_t0_needs_no_doc_before_the_record(mcp_client, db):
     a = add_record(db, title="A")
-    add_usage(db, who=who(1), owner_keys=[f"rec:{a}", "doc:D"])
-    add_usage(db, who=who(2), owner_keys=["doc:D", f"rec:{a}"])
+    d = f"doc:{add_doc(db)}"
+    add_usage(db, who=who(1), owner_keys=[f"rec:{a}", d])
+    add_usage(db, who=who(2), owner_keys=[d, f"rec:{a}"])
     data = await records(mcp_client)
     assert data["items"][0]["outranked_t0"] == 1
     assert data["items"][0]["searches"] == 2
+
+
+async def test_t0a_document_ranked_first_does_not_stop_outranked_t0(mcp_client, db):
+    a = add_record(db, title="A")
+    t0a = f"doc:{add_doc(db, tier='T0a')}"
+    for n in (1, 2):
+        add_usage(db, who=who(n), owner_keys=[t0a, f"rec:{a}"])
+    assert (await records(mcp_client))["items"][0]["outranked_t0"] == 2
+
+
+async def test_related_docs_lists_only_t0_documents(mcp_client, db):
+    rec = add_record(db)
+    t0, t0a = add_doc(db), add_doc(db, tier="T0a")
+    for n in (1, 2):
+        add_usage(db, who=who(n), owner_keys=[f"rec:{rec}", f"doc:{t0}", f"doc:{t0a}"])
+    assert (await records(mcp_client))["items"][0]["related_docs"] == [f"doc:{t0}"]
 
 
 async def test_related_docs_and_sample_queries_are_capped_and_sorted(mcp_client, db):

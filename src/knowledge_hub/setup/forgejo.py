@@ -1,4 +1,4 @@
-"""The forgejo step: teams, repos, collaborators, branch protection and the org webhook (plan 3.7 step 3).
+"""The forgejo step: teams, repos, protection, the org webhook, per-group Slack hooks (plan 3.7 step 3).
 
 ``plan`` only reads. ``apply`` repairs what it can and reports what it did with the same lines; whatever it
 cannot repair stays a ``!`` line. Branch protection is read back after every write, because Forgejo silently
@@ -23,6 +23,8 @@ REPO_SETTINGS: dict[str, Any] = {
 }
 HOOK_PATH = "/webhooks/forgejo"
 HOOK_EVENTS = ["push"]
+SLACK_EVENTS = ["pull_request"]
+SLACK_URL_NAME = "KH_SETUP_SLACK_WEBHOOKS_FILE"
 PUSH = frozenset({"write", "admin", "owner"})
 ADMIN = frozenset({"admin", "owner"})
 
@@ -92,10 +94,14 @@ class ForgejoStep:
         webhook_secret: str | None,
         bot_token: str | None,
         indexer_token: str | None,
+        tech_admin: ForgejoAdmin | None = None,
+        slack_urls: dict[str, str] | None = None,
     ) -> None:
         self._config = config
         self._admin = admin
+        self._tech_admin = tech_admin
         self._secret = webhook_secret
+        self._slack_urls = slack_urls
         self._tokens = {config.bot_login: bot_token, config.indexer_login: indexer_token}
 
     async def plan(self) -> list[Change]:
@@ -138,8 +144,12 @@ class ForgejoStep:
             for login, perm in ((cfg.bot_login, "write"), (cfg.indexer_login, "read")):
                 await self._collaborator(out, repo, repo_exists, login, perm, login in missing, write)
             await self._protection(out, group, repo, repo_exists, write)
+            await self._slack(out, group, repo, repo_exists, write, prune)
 
+        await self._tech(out, write, missing)
         await self._webhook(out, write)
+        if self._tech_admin is not None:
+            await self._webhook(out, write, admin=self._tech_admin, label_prefix="tech ")
         managed = {name for g in cfg.groups for name in (g, f"{g}-approve")} | {OWNERS_TEAM}
         for name, team in teams.items():
             if name in managed:
@@ -156,6 +166,31 @@ class ForgejoStep:
         if owners:
             out.append(Change("i", f"owners: {', '.join(owners)} can bypass protection"))
         return out
+
+    async def _tech(self, out: list[Change], write: bool, missing: set[str]) -> None:
+        """Tech repos are made by hand in the tech org: report them, give the indexer read, nothing else."""
+        admin = self._tech_admin
+        if admin is None:
+            return
+        cfg = self._config
+        have = {str(r.get("name")) for r in await admin.repos()}
+        for repo in cfg.tech_repo_names:
+            if repo not in have:
+                out.append(Change(
+                    "!", f"tech repo {repo}: not in org {cfg.tech_org}; create the clone or fork there"
+                ))
+                continue
+            await self._collaborator(
+                out, repo, True, cfg.indexer_login, "read", cfg.indexer_login in missing, write,
+                admin=admin,
+            )
+            logins = sorted(
+                str(u.get("login")) for u in await admin.collaborators(repo)
+                if str(u.get("login")).casefold() != cfg.indexer_login.casefold()
+            )
+            out.append(Change("i", f"tech repo {repo}: collaborators {', '.join(logins) or 'none'}"))
+        for name in sorted(have - set(cfg.tech_repo_names)):
+            out.append(Change("?", f"unmanaged tech repo {name}"))
 
     async def _accounts(self, out: list[Change], owners: list[str]) -> set[str]:
         """Every login the config names must exist; the bots must be neither org owner nor site admin."""
@@ -284,15 +319,17 @@ class ForgejoStep:
                 out.append(Change("!", f"team repo {name}: {other} is not the group repo; remove it"))
 
     async def _collaborator(self, out: list[Change], repo: str, repo_exists: bool, login: str,
-                            perm: str, account_missing: bool, write: bool) -> None:
+                            perm: str, account_missing: bool, write: bool,
+                            *, admin: ForgejoAdmin | None = None) -> None:
+        admin = admin or self._admin
         label = f"collaborator {repo}/{login}"
         if account_missing:
             return
         if not repo_exists:
             out.append(Change("+", f"{label}: {perm}"))
             return
-        listed = {str(u.get("login")).casefold() for u in await self._admin.collaborators(repo)}
-        effective = await self._effective(repo, login)
+        listed = {str(u.get("login")).casefold() for u in await admin.collaborators(repo)}
+        effective = await self._effective(repo, login, admin=admin)
         if login.casefold() not in listed:
             change = Change("+", f"{label}: {perm}")
         elif effective != perm:
@@ -302,14 +339,14 @@ class ForgejoStep:
         if not write:
             out.append(change)
             return
-        await self._admin.put_collaborator(repo, login, perm)
-        effective = await self._effective(repo, login)
+        await admin.put_collaborator(repo, login, perm)
+        effective = await self._effective(repo, login, admin=admin)
         out.append(change)
         if effective != perm:
             out.append(Change("!", f"{label}: permission {effective} after apply, want {perm}"))
 
-    async def _effective(self, repo: str, login: str) -> str:
-        data = await self._admin.user_repo_permission(repo, login)
+    async def _effective(self, repo: str, login: str, *, admin: ForgejoAdmin | None = None) -> str:
+        data = await (admin or self._admin).user_repo_permission(repo, login)
         return str(data.get("permission", "none"))
 
     async def _protection(self, out: list[Change], group: str, repo: str, repo_exists: bool,
@@ -335,15 +372,74 @@ class ForgejoStep:
         for field in protection_drift(want, back):
             out.append(Change("!", f"{label}: {field} not kept after write"))
 
-    async def _webhook(self, out: list[Change], write: bool) -> None:
+    async def _slack(
+        self, out: list[Change], group: str, repo: str, repo_exists: bool, write: bool, prune: bool
+    ) -> None:
+        label = f"slack hook {repo}"
+        channel = self._config.groups[group].slack_channel
+        hooks = (
+            [h for h in await self._admin.repo_hooks(repo) if h.get("type") == "slack"]
+            if repo_exists
+            else []
+        )
+        if channel is None:
+            for hook in hooks:
+                if write and prune:
+                    await self._admin.delete_repo_hook(repo, int(hook["id"]))
+                    out.append(Change("-", label))
+                else:
+                    out.append(Change("?", f"unmanaged {label}"))
+            return
+        if len(hooks) > 1:
+            out.append(Change("!", f"{label}: {len(hooks)} Slack hooks; delete the extra ones in Forgejo"))
+            return
+        url = (self._slack_urls or {}).get(group)
+        if write and url is None:
+            out.append(Change("!", f"{label}: no URL for group {group} in {SLACK_URL_NAME}"))
+            return
+        hook = hooks[0] if hooks else None
+        drift: list[str] = []
+        if hook is not None:
+            config = hook.get("config") or {}
+            if "pull_request" not in (hook.get("events") or []):
+                drift.append("events")
+            if config.get("content_type") != "json":
+                drift.append("content_type")
+            if "channel" in config and config["channel"] != channel:
+                drift.append("channel")
+            if hook.get("active") is not True:
+                drift.append("active")
+        if not write:
+            if hook is None:
+                out.append(Change("+", f"{label}: {channel}"))
+                return
+            out.extend(Change("~", f"{label}: {field}") for field in drift)
+            out.append(Change("i", f"{label}: url not verifiable"))
+            return
+        body = {
+            "config": {"url": url, "content_type": "json", "channel": channel},
+            "events": SLACK_EVENTS,
+            "active": True,
+        }
+        if hook is None:
+            await self._admin.create_repo_hook(repo, {"type": "slack", **body})
+            out.append(Change("+", f"{label}: {channel}"))
+            return
+        await self._admin.edit_repo_hook(repo, int(hook["id"]), body)
+        out.extend(Change("~", f"{label}: {field}") for field in drift)
+        out.append(Change("i", f"{label}: url rewritten"))
+
+    async def _webhook(self, out: list[Change], write: bool, *, admin: ForgejoAdmin | None = None,
+                       label_prefix: str = "") -> None:
+        admin = admin or self._admin
         hub = self._config.hub_url
         if hub is None:
-            out.append(Change("!", "hub_url: not set"))
+            out.append(Change("!", f"{label_prefix}hub_url: not set"))
             return
         url = hub.rstrip("/") + HOOK_PATH
-        label = f"webhook {url}"
+        label = f"{label_prefix}webhook {url}"
         hook = next(
-            (h for h in await self._admin.org_hooks()
+            (h for h in await admin.org_hooks()
              if isinstance(h.get("config"), dict) and h["config"].get("url") == url),
             None,
         )
@@ -363,7 +459,7 @@ class ForgejoStep:
                 out.append(Change("+", label))
             for field in drift:
                 out.append(Change("~", f"{label}: {field}"))
-            out.append(Change("i", "webhook secret not verifiable"))
+            out.append(Change("i", f"{label_prefix}webhook secret not verifiable"))
             return
         if not self._secret:
             out.append(Change("!", f"{label}: no secret (KH_WEBHOOK_HMAC_FILE not set)"))
@@ -374,14 +470,14 @@ class ForgejoStep:
             "active": True,
         }
         if hook is None:
-            await self._admin.create_org_hook({"type": "forgejo", **body})
+            await admin.create_org_hook({"type": "forgejo", **body})
             out.append(Change("+", label))
             return
         if "type" in drift:
             # Forgejo cannot change the type of a hook; refuse rather than leave a second hook.
             out.append(Change("!", f"{label}: type is {hook.get('type')}; delete the hook in Forgejo"))
             return
-        await self._admin.edit_org_hook(int(hook["id"]), body)
+        await admin.edit_org_hook(int(hook["id"]), body)
         for field in drift:
             out.append(Change("~", f"{label}: {field}"))
         out.append(Change("i", f"{label}: secret rewritten"))

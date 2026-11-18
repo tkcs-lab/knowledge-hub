@@ -36,6 +36,7 @@ class _Repo:
     commits: dict[str, _Commit] = field(default_factory=dict)
     branches: dict[str, str] = field(default_factory=dict)
     pulls: list[dict] = field(default_factory=list)
+    default_branch: str = "main"
 
 
 class FakeForgejo:
@@ -54,15 +55,17 @@ class FakeForgejo:
 
     # -- test setup ------------------------------------------------------------------------------
 
-    def add_repo(self, name: str) -> None:
-        repo = _Repo(name)
+    def add_repo(self, name: str, branch: str = "main") -> None:
+        repo = _Repo(name, default_branch=branch)
         self.repos[name] = repo
         sha = self._new_commit(repo, [], {})
-        repo.branches["main"] = sha
+        repo.branches[branch] = sha
 
-    def commit(self, repo: str, changes: dict[str, str | None], branch: str = "main") -> str:
-        """Commit ``changes`` (a text, or None to delete) onto ``branch``; returns the new head sha."""
+    def commit(self, repo: str, changes: dict[str, str | None], branch: str | None = None) -> str:
+        """Commit ``changes`` (a text, or None to delete) onto ``branch`` (default: the repo's default
+        branch); returns the new head sha."""
         r = self.repos[repo]
+        branch = branch or r.default_branch
         parent = r.branches[branch]
         files = dict(r.commits[parent].files)
         for path, text in changes.items():
@@ -133,16 +136,19 @@ class FakeForgejo:
                 return httpx.Response(status, json={"message": "injected"})
         if request.headers.get("Authorization") != f"token {self.token}":
             return httpx.Response(401, json={"message": "unauthorized"})
-        m = re.fullmatch(r"/api/v1/repos/([^/]+)/([^/]+)/(.*)", path)
+        m = re.fullmatch(r"/api/v1/repos/([^/]+)/([^/]+)(?:/(.*))?", path)
         if not m or m[1] != self.org or m[2] not in self.repos:
             return httpx.Response(404, json={"message": "not found"})
-        repo, rest = self.repos[m[2]], m[3]
+        repo, rest = self.repos[m[2]], m[3] or ""
         params = request.url.params
         return self._route(method, repo, rest, params, body)
 
     def _route(self, method: str, repo: _Repo, rest: str, params, body: dict) -> httpx.Response:  # noqa: C901
         def js(status: int, data) -> httpx.Response:
             return httpx.Response(status, json=data)
+
+        if method == "GET" and rest == "":
+            return js(200, {"name": repo.name, "default_branch": repo.default_branch})
 
         if method == "GET" and (m := re.fullmatch(r"branches/(.+)", rest)):
             sha = repo.branches.get(m[1])
@@ -230,13 +236,21 @@ class FakeForgejo:
                 return js(404, {})
             return js(200, {"path": path, "type": "file", "sha": blob_sha(files[path])})
 
-        if method not in ("POST", "PUT"):
+        if method not in ("POST", "PUT", "DELETE"):
             return js(405, {})
         branch = body.get("branch")
         head = repo.branches.get(branch)
         if head is None:
             return js(404, {})
         files = repo.commits[head].files
+        if method == "DELETE":
+            if path not in files:
+                return js(404, {})
+            if body.get("sha") != blob_sha(files[path]):
+                return js(409, {"message": "sha does not match"})
+            sha = self.commit(repo.name, {path: None}, branch=branch)
+            parents = [{"sha": p} for p in repo.commits[sha].parents]
+            return js(200, {"content": None, "commit": {"sha": sha, "parents": parents}})
         if method == "POST" and path in files:
             return js(422, {"message": "repository file already exists"})
         if method == "PUT" and (path not in files or body.get("sha") != blob_sha(files[path])):

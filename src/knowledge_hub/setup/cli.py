@@ -8,13 +8,14 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import yaml
 from pydantic import ValidationError
 
 from knowledge_hub.config import KhConfig, load_config
 from knowledge_hub.settings import Settings, load_settings
 from knowledge_hub.setup.steps import Step, run
 
-STEP_NAMES = ("postgres", "labels", "forgejo", "ollama", "s3")
+STEP_NAMES = ("postgres", "labels", "tech", "forgejo", "ollama", "s3")
 
 
 class _NotSet(Exception):
@@ -34,6 +35,24 @@ def _read(path: Path | None, name: str, *, required: bool) -> str | None:
         raise _NotSet(name) from exc
 
 
+def _slack_urls(path: Path | None) -> dict[str, str] | None:
+    if path is None:
+        return None
+    text = _read(path, "KH_SETUP_SLACK_WEBHOOKS_FILE", required=False)
+    bad = ValueError("KH_SETUP_SLACK_WEBHOOKS_FILE is not a mapping of group name to https URL")
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        raise bad from None
+    if data is None:
+        return {}
+    if not isinstance(data, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v.startswith("https://") for k, v in data.items()
+    ):
+        raise bad from None
+    return data
+
+
 def _builders(
     settings: Settings, config: KhConfig, create_bucket: bool
 ) -> dict[str, Callable[[], Step]]:
@@ -48,6 +67,11 @@ def _builders(
 
         return LabelsStep(config, settings.dsn("migrator"))
 
+    def tech() -> Step:
+        from knowledge_hub.setup.tech import TechStep
+
+        return TechStep(config, settings.dsn("migrator"))
+
     def forgejo() -> Step:
         from knowledge_hub.forgejo.admin import ForgejoAdmin
         from knowledge_hub.setup.forgejo import ForgejoStep
@@ -59,6 +83,11 @@ def _builders(
         )
         assert token is not None
         admin = ForgejoAdmin(settings.forgejo_url, token, config.org)
+        tech_admin = (
+            ForgejoAdmin(settings.forgejo_url, token, config.tech_org)
+            if config.tech_repos and config.tech_org
+            else None
+        )
         return ForgejoStep(
             config,
             admin,
@@ -67,6 +96,8 @@ def _builders(
             indexer_token=_read(
                 settings.forgejo_indexer_token_file, "KH_FORGEJO_INDEXER_TOKEN_FILE", required=False
             ),
+            tech_admin=tech_admin,
+            slack_urls=_slack_urls(settings.setup_slack_webhooks_file),
         )
 
     def ollama() -> Step:
@@ -81,7 +112,9 @@ def _builders(
 
         return S3Step(settings, create_bucket=create_bucket)
 
-    return {"postgres": postgres, "labels": labels, "forgejo": forgejo, "ollama": ollama, "s3": s3}
+    return {
+        "postgres": postgres, "labels": labels, "tech": tech, "forgejo": forgejo, "ollama": ollama, "s3": s3,
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
