@@ -175,7 +175,7 @@ def decode_keyset(
 
 
 _STALE_SQL = """
-SELECT id, repo, path, tier, audience, labels, title, review_by, stale
+SELECT id, repo, path, audience, labels, title, review_by, stale
   FROM kh.documents
  WHERE stale
    AND superseded_by IS NULL
