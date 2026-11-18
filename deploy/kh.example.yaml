@@ -1,4 +1,4 @@
-# Example kh.yaml (mounted at the path in KH_CONFIG_FILE and read by `kh setup`).
+# Example kh.yaml (mounted from a directory at the path in KH_CONFIG_FILE and read by `kh setup`).
 # Values for org, bot_login and indexer_login are the defaults.
 org: kh                       # Forgejo organisation
 bot_login: kh-bot             # opens every T0 pull request and is stamped on every T3 record

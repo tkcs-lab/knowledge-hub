@@ -18,7 +18,7 @@ from knowledge_hub.setup.steps import Step, run
 STEP_NAMES = ("postgres", "labels", "tech", "forgejo", "ollama", "s3")
 
 
-class _NotSet(Exception):
+class NotSet(Exception):
     def __init__(self, name: str) -> None:
         super().__init__(name)
         self.name = name
@@ -27,12 +27,12 @@ class _NotSet(Exception):
 def _read(path: Path | None, name: str, *, required: bool) -> str | None:
     if path is None:
         if required:
-            raise _NotSet(name)
+            raise NotSet(name)
         return None
     try:
         return path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
-        raise _NotSet(name) from exc
+        raise NotSet(name) from exc
 
 
 def _slack_urls(path: Path | None) -> dict[str, str] | None:
@@ -53,7 +53,7 @@ def _slack_urls(path: Path | None) -> dict[str, str] | None:
     return data
 
 
-def _builders(
+def build_steps(
     settings: Settings, config: KhConfig, create_bucket: bool
 ) -> dict[str, Callable[[], Step]]:
     def postgres() -> Step:
@@ -77,7 +77,7 @@ def _builders(
         from knowledge_hub.setup.forgejo import ForgejoStep
 
         if not settings.forgejo_url:
-            raise _NotSet("KH_FORGEJO_URL")
+            raise NotSet("KH_FORGEJO_URL")
         token = _read(
             settings.setup_forgejo_admin_token_file, "KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE", required=True
         )
@@ -104,7 +104,7 @@ def _builders(
         from knowledge_hub.setup.ollama import OllamaStep
 
         if not settings.ollama_url:
-            raise _NotSet("KH_OLLAMA_URL")
+            raise NotSet("KH_OLLAMA_URL")
         return OllamaStep(settings)
 
     def s3() -> Step:
@@ -135,11 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     except (ValidationError, ValueError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 2
-    builders = _builders(settings, config, args.create_bucket)
+    builders = build_steps(settings, config, args.create_bucket)
     names = [args.only] if args.only else list(STEP_NAMES)
     try:
         steps = [builders[name]() for name in names]
-    except _NotSet as exc:
+    except NotSet as exc:
         print(f"setup: {exc.name} is not set")
         return 2
     except ValueError as exc:

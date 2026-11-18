@@ -7,6 +7,15 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 ### Added
 
 - `search` takes a similarity floor, `KH_SEARCH_MIN_SIMILARITY` (0 to 1, default 0 = off): vector candidates less similar to the query are dropped, so a query with no real match returns no hits and `min_tier=T0` answers the normative text instead of an unrelated document. Every hit carries `similarity` (cosine similarity of its chunk to the query) to calibrate it; see the runbook.
+- `kh label add|rename|archive|unarchive|remove|list`: edit the labels of `kh.yaml` (comments kept) and apply the change.
+- `kh group add|remove|archive|unarchive|member|approver|list`: edit the groups of `kh.yaml` and apply the change to the database and Forgejo. A group cannot be renamed.
+- `kh person add|remove|list`: edit `people`; `remove --from-groups` also removes the login from every group.
+
+### Changed
+
+- `deploy/compose.example.yaml` mounts `./config:/etc/kh:ro` instead of the file `./kh.yaml`: move `kh.yaml` into `./config/` and recreate the stack.
+- `kh setup` removes members that `kh.yaml` no longer lists from the teams of an archived group (it adds none).
+- `kh group remove` also deletes the group's record moves.
 
 ## [0.5.0] - 2026-11-18
 

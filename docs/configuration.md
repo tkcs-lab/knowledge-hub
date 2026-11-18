@@ -119,6 +119,9 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | `kh serve [--port 8080]` | Run the HTTP app and the job worker. |
 | `kh migrate` | Apply the pending migrations as `kh_migrator`. Refuses a database that predates the baseline. |
 | `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
+| `kh label add\|rename\|archive\|unarchive\|remove\|list` | Edit the labels of `kh.yaml` and apply the change; see `kh admin commands`. |
+| `kh group add\|remove\|archive\|unarchive\|member\|approver\|list` | Edit the groups of `kh.yaml` and apply the change. |
+| `kh person add\|remove\|list` | Edit `people` (and with `--from-groups` the group lists) and apply the change. |
 | `kh rebuild [--repo R]` | Forget the indexed head and sync again. Idempotent. |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>`). |
 | `kh daily` | Recompute `stale` flags, purge expired claim ids and delete usage events past `KH_USAGE_RETENTION_DAYS`. |
@@ -196,7 +199,7 @@ Steps run in this order: `postgres`, `labels`, `tech`, `forgejo`, `ollama`, `s3`
 |---|---|
 | `+` | create |
 | `~` | update |
-| `-` | remove (only with `--prune`) |
+| `-` | remove (with `--prune`, or by `kh label remove` and `kh group remove`) |
 | `!` | refused: a change the script will not make, for example `! group all: changed repo; remove the group and add a new one` |
 | `?` | unmanaged object (`? unmanaged`) |
 | `i` | information (`i webhook secret not verifiable`, `i owners: <logins> can bypass protection`, `i slack hook <repo>: url not verifiable`) |
@@ -212,8 +215,39 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 1. `postgres`. With an admin DSN: create the roles `kh_migrator`, `kh_app` and `kh_indexer` (passwords from the `KH_DB_*_PASSWORD_FILE` files, re-set on every apply because they cannot be read back), the database owned by `kh_migrator`, `CREATE EXTENSION vector`, then run pending migrations. Without an admin DSN it only checks, and pending migrations count as drift. It then syncs `kh.groups`: groups are added; a removed group goes only with `--prune`, is refused when records exist, and its documents are deleted.
 2. `labels`. Inserts new labels and updates descriptions. A removed label is deleted only with `--prune` and only when unused (`! label <x>: in use`). After a label is added, apply queues one `git_push` job per repo so files rejected for an unknown label are retried.
 3. `tech`. Reports `? tech documents of <repo>: repo is not in tech_repos` for each repo that has T0a documents but is no longer in `tech_repos`; `apply --prune` deletes those documents and the repo's indexed head (`- tech documents of <repo>`). A configured repo is never touched.
-4. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams and unmanaged Slack repo hooks, and repos are never deleted. For each group with `slack_channel`: one Slack repo hook (`pull_request` events) to the group's URL from `KH_SETUP_SLACK_WEBHOOKS_FILE`, with its URL rewritten on every apply; `apply` for a group without a URL prints `! slack hook <repo>: no URL for group <g> in KH_SETUP_SLACK_WEBHOOKS_FILE` (`plan` does not need the file). A Slack hook on the repo of a group without `slack_channel` prints `? unmanaged slack hook <repo>` and is removed with `--prune`.
+4. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams and unmanaged Slack repo hooks, and repos are never deleted. For each group with `slack_channel`: one Slack repo hook (`pull_request` events) to the group's URL from `KH_SETUP_SLACK_WEBHOOKS_FILE`, with its URL rewritten on every apply; `apply` for a group without a URL prints `! slack hook <repo>: no URL for group <g> in KH_SETUP_SLACK_WEBHOOKS_FILE` (`plan` does not need the file). A Slack hook on the repo of a group without `slack_channel` prints `? unmanaged slack hook <repo>` and is removed with `--prune`. An archived group keeps its teams; members the config no longer lists are removed from them, none are added.
 5. `ollama`. `plan` checks that the model is listed and that one embedding has length `KH_EMBED_DIM`; `apply` pulls it.
 6. `s3`. Checks that the bucket exists and takes a put, get and delete of `kh-setup-probe/<uuid>`. `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
 
 **The tech org.** With `tech_repos` set, `forgejo` also reads `tech_org` and never creates anything there; clones and forks are made by hand. Per tech repo it prints `! tech repo <r>: not in org <tech_org>; create the clone or fork there` when it is missing, gives the indexer read access, and prints `i tech repo <r>: collaborators <logins>` (push access is the trust boundary of T0a). Repos of the org that are not configured print `? unmanaged tech repo <name>`. It adds the org webhook of the tech org (`tech webhook <url>`, `tech hub_url: not set`). It sets no teams, branch protection or repo settings, and `--prune` never touches the tech org. After a new label, `labels` also queues a `git_push` job for each tech repo.
+
+## kh admin commands
+
+`kh label`, `kh group` and `kh person` edit `kh.yaml` (comments are kept) and then apply the change to the database and Forgejo. A group cannot be renamed: its name is the audience of every document and record.
+
+| Command | Edit of `kh.yaml` | Effect applied |
+|---|---|---|
+| `kh label add NAME [-d TEXT]` | `labels[NAME] = TEXT` (default empty); error if it exists | runs the labels step |
+| `kh label rename NAME TEXT` | new description; the key never changes | runs the labels step |
+| `kh label archive NAME` / `unarchive NAME` | add to / remove from `archived_labels` | none (restart `kh serve`) |
+| `kh label remove NAME` | delete from `labels` and `archived_labels`; refused while a tech repo lists the label | runs the labels step, then removes the label |
+| `kh label list [--json]` | none | none |
+| `kh group add NAME --members A,B --approvers A [--repo R] [--slack-channel #C]` | new group | runs the postgres and forgejo steps for that group |
+| `kh group remove NAME --yes` | delete the group | runs the postgres and forgejo steps for that group (refused while records exist; the Forgejo repo is kept). Without `--yes` the command prints the document count and the kept repo, then exits 2; `--yes` is required also with `--no-apply` |
+| `kh group archive NAME` / `unarchive NAME` | set / delete `archived` | runs the forgejo step for that group |
+| `kh group member add\|remove GROUP LOGIN [--with-approver]` | edit `members` | runs the forgejo step for that group |
+| `kh group approver add\|remove GROUP LOGIN` | edit `approvers` | runs the forgejo step for that group |
+| `kh group list [--json]` | none | none |
+| `kh person add LOGIN EMAIL` | `people[LOGIN] = EMAIL` (lower case) | none |
+| `kh person remove LOGIN [--from-groups]` | delete from `people`; with the flag also from every group's `members` and `approvers` | runs the forgejo step for each group the login was in |
+| `kh person list [--json]` | none | none |
+
+The commands do not edit `tech_org`, `tech_repos` or a group's `slack_channel` after creation: edit the file by hand, then run `kh setup apply`. There is no `group rename` and no email change for a person.
+
+**Common flags.** `--config FILE` (default: the environment variable `KH_CONFIG_FILE`; with neither the command exits 2), `--dry-run` (print the diff and the planned lines, write nothing) and `--no-apply` (edit the file only; then run `kh setup apply`) on every mutating command. `list` commands take `--config` and `--json` and read only the file. A command whose edit changes nothing prints `nothing to change` and exits 0.
+
+**Exit codes.** 0 done, 2 error, refusal or a remaining `!` line.
+
+**Stage, apply, commit.** A command stages the new text, validates it as `kh.yaml` and prints the diff. It then applies the change to the database and Forgejo while the old file is still in place, so a refusal at apply time (for example a group that still has records) leaves `kh.yaml` unchanged. Only then is the file replaced; if a later step fails, the file is already changed and `kh setup apply` repairs the rest.
+
+The commands run where `kh setup` runs, with the `KH_SETUP_*` credential files set, and `kh.yaml` must sit in a writable directory (the file is replaced atomically, so the directory must be writable, not only the file). Restart `kh serve` afterwards: the hub reads `kh.yaml` at start.
