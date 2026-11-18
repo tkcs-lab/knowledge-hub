@@ -176,6 +176,48 @@ def test_after_exception_commits_and_says_incomplete(tmp_path, capsys):
     assert "b: second" in path.read_text()
 
 
+def test_check_exception_writes_nothing(tmp_path, capsys):
+    path = _file(tmp_path)
+    called = []
+
+    async def check(steps, config):
+        raise RuntimeError("db down password=hunter2")
+
+    async def after(steps, write):
+        called.append(write)
+        return []
+
+    assert run(path, add_label(), check=check, after=after) == 2
+    out = capsys.readouterr().out
+    assert "setup: db down password=***" in out and "hunter2" not in out
+    assert path.read_text() == TEXT
+    assert called == []
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_step_build_error_in_after_writes_nothing(tmp_path, capsys, dry_run):
+    path = _file(tmp_path)
+
+    async def after(steps, write):
+        raise apply.StepBuildError("bad slack webhooks file")
+
+    assert run(path, add_label(), after=after, dry_run=dry_run) == 2
+    assert "admin: bad slack webhooks file" in capsys.readouterr().out
+    assert path.read_text() == TEXT
+
+
+def test_steps_get_wraps_builder_value_error():
+    steps = apply.Steps.__new__(apply.Steps)
+    steps._cache = {}
+
+    def boom():
+        raise ValueError("malformed")
+
+    steps._builders = {"forgejo": boom}
+    with pytest.raises(apply.StepBuildError, match="malformed"):
+        steps.forgejo()
+
+
 def test_not_set_writes_nothing(tmp_path, capsys):
     path = _file(tmp_path)
 
