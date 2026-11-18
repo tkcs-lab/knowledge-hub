@@ -12,6 +12,7 @@ from typing import Any
 from psycopg.rows import dict_row
 
 from knowledge_hub.config import KhConfig
+from knowledge_hub.forgejo.reader import ForgejoError
 from knowledge_hub.indexer.supersede import DocLink, resolve
 from knowledge_hub.indexer.sync_chunks import (
     ChunkDoc,
@@ -20,6 +21,7 @@ from knowledge_hub.indexer.sync_chunks import (
     plan_chunks,
 )
 from knowledge_hub.indexer.sync_plan import SyncPlan, build_sync_plan, changed_paths
+from knowledge_hub.indexer.tech_docs import build_tech_plan, changed_tech_paths
 
 
 async def _load(pool: Any, repo: str) -> tuple[str | None, list[tuple[str, str, str]], set[str], dict]:
@@ -51,22 +53,28 @@ async def _write(conn: Any, plan: SyncPlan, chunk_plan: Any, rewritten: bool) ->
             "UPDATE kh.documents SET path = 'moving:' || id::text WHERE repo = %s AND doc_key = ANY(%s)",
             (repo, keys),
         )
+    if plan.relabel is not None:
+        await conn.execute(
+            "UPDATE kh.documents SET labels = %s, updated_at = now()"
+            " WHERE repo = %s AND tier = 'T0a' AND labels IS DISTINCT FROM %s",
+            (plan.relabel, repo, plan.relabel),
+        )
     for u in plan.upserts:
         await conn.execute(
             """
             INSERT INTO kh.documents (repo, path, doc_key, audience, title, body, labels, review_by,
-                stale, commit_sha, blob_sha, supersedes)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                stale, commit_sha, blob_sha, supersedes, tier)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (repo, doc_key) DO UPDATE SET
                 path = EXCLUDED.path, audience = EXCLUDED.audience, title = EXCLUDED.title,
                 body = EXCLUDED.body, labels = EXCLUDED.labels, review_by = EXCLUDED.review_by,
                 stale = EXCLUDED.stale, commit_sha = EXCLUDED.commit_sha, blob_sha = EXCLUDED.blob_sha,
-                supersedes = EXCLUDED.supersedes,
+                supersedes = EXCLUDED.supersedes, tier = EXCLUDED.tier,
                 indexed_at = now(), updated_at = now()
             """,
             (
                 u.repo, u.path, u.doc_key, u.audience, u.title, u.body, u.labels, u.review_by,
-                u.review_by < date.today(), u.commit_sha, u.blob_sha, u.supersedes,
+                u.review_by < date.today(), u.commit_sha, u.blob_sha, u.supersedes, u.tier,
             ),
         )  # fmt: skip
     await apply_chunks(conn, chunk_plan)
@@ -115,6 +123,28 @@ async def _alert(conn: Any, repo: str, path: str, message: str) -> None:
     )
 
 
+async def _sync_tech(
+    indexer_pool: Any, reader: Any, config: KhConfig, repo: str, embedder: Any, chunker_version: int
+) -> SyncPlan:
+    _, stored, labels, stored_chunks = await _load(indexer_pool, repo)
+    head = await reader.head_sha(repo, await reader.default_branch(repo))
+    tree = await reader.list_tree(repo, head)
+    texts: dict[str, str | None] = {}
+    for path in changed_tech_paths(tree, stored):
+        try:
+            texts[path] = await reader.get_raw(repo, path, head)
+        except ForgejoError as exc:
+            if "not UTF-8" not in str(exc):
+                raise
+            texts[path] = None
+    plan = build_tech_plan(config, repo, head, tree, stored, texts, labels, date.today())
+    docs = [ChunkDoc(u.doc_key, u.audience, u.body, stored_chunks.get(u.doc_key, [])) for u in plan.upserts]
+    chunk_plan = await plan_chunks(embedder, repo, docs, chunker_version=chunker_version)
+    async with indexer_pool.connection() as conn, conn.transaction():
+        await _write(conn, plan, chunk_plan, False)
+    return plan
+
+
 async def sync_repo(
     indexer_pool: Any,
     reader: Any,
@@ -123,7 +153,12 @@ async def sync_repo(
     embedder: Any,
     *,
     chunker_version: int,
+    tech_reader: Any = None,
 ) -> SyncPlan:
+    if config.is_tech_repo(repo):
+        if tech_reader is None:
+            raise ValueError("KH_FORGEJO_URL is required to read the repositories")
+        return await _sync_tech(indexer_pool, tech_reader, config, repo, embedder, chunker_version)
     audience = config.group_for_repo(repo)
     if audience is None:
         raise ValueError(f"repo {repo} is in no group")

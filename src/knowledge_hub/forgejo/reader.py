@@ -102,6 +102,13 @@ class _Http:
 
 
 class ForgejoReader(_Http):
+    async def default_branch(self, repo: str) -> str:
+        data = await self._json("GET", self._repo(repo))
+        branch = data.get("default_branch") if isinstance(data, dict) else None
+        if not isinstance(branch, str) or not branch:
+            raise ForgejoError("repository response has no default_branch")
+        return branch
+
     async def list_tree(self, repo: str, sha: str) -> list[dict[str, Any]]:
         """All entries of the recursive tree at ``sha`` (``path``, ``sha``, ``type``, ``size``)."""
         entries: list[dict[str, Any]] = []
