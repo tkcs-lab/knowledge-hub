@@ -2,6 +2,7 @@
 # Set PRIVACYFENCE_UPSTREAM_MCP_FILE on the PrivacyFence container to this file and restart it: the
 # declaration is read once at startup, and so is the hub's tool list. The tool names are the ones
 # `register_tools` registers (tests/unit/test_privacyfence_declaration.py checks that).
+# A new tool needs PrivacyFence restarted and the tool allowed on each Claude connection.
 # Reads are `auto`, writes are `popup`. `audience` must equal KH_PF_AUDIENCE. PrivacyFence reaches the hub over the
 # private `pf-kh` network. Changing a tool's gate, verb or effect, or the url, audience or claim mode,
 # voids the approvals of existing n8n tokens (PrivacyFence ADR 0300): create those tokens again.
@@ -57,3 +58,7 @@ upstreams:
         gate: popup
         verb: update
         effect: Opens a pull request that proposes a document change.
+      move_item:
+        gate: popup
+        verb: move
+        effect: Moves a record at once, or opens two pull requests that move a document, between two groups you hold; not a purge.

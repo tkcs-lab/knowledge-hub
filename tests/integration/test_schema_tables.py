@@ -6,6 +6,7 @@ import pytest
 from tests.support.seed import add_chunk, add_doc, add_record
 
 EXPECTED = {
+    "record_moves": ["audience", "source", "source_ref", "moved_at"],
     "usage_events": ["id", "at", "kind", "who", "audiences", "query", "query_norm", "min_tier",
                      "t0_fts_hits", "t3_fts_hits", "owner_keys"],
     "schema_migrations": ["name", "sha256", "applied_at"],

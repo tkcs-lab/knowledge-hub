@@ -78,6 +78,11 @@ async def ingest_record(
     found = await _existing(call, audience, source, source_ref)
     if found is not None:
         return {"id": found, "existed": True}
+    async with call.conn.cursor() as cur:
+        await cur.execute("SELECT kh.record_moved(%s, %s, %s)", (audience, source, source_ref))
+        moved = await cur.fetchone()
+    if moved is not None and moved[0]:
+        raise kh_error("record_moved", errors.RECORD_MOVED)
 
     key = uuid.uuid4()
     blob_key = f"records/{key}"
