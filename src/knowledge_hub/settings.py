@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     forgejo_url: str | None = None
     forgejo_bot_token_file: Path | None = None
     forgejo_indexer_token_file: Path | None = None
+    tech_poll_minutes: int = Field(60, ge=0, le=10080)
     webhook_hmac_file: Path | None = None
 
     embed_provider: Literal["ollama", "http", "fake"] = "ollama"

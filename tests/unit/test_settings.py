@@ -143,3 +143,13 @@ def test_tier_weights_reject_t0a_above_t0():
 def test_tier_weights_reject_t0a_below_t3():
     with pytest.raises(ValidationError, match="T0 >= T0a >= T3"):
         Settings(tier_weights="T0:1.0,T0a:0.3,T3:0.4")
+
+
+def test_tech_poll_minutes_defaults_to_60(monkeypatch):
+    assert Settings().tech_poll_minutes == 60
+    monkeypatch.setenv("KH_TECH_POLL_MINUTES", "0")
+    assert Settings().tech_poll_minutes == 0
+    for bad in ("-1", "10081"):
+        monkeypatch.setenv("KH_TECH_POLL_MINUTES", bad)
+        with pytest.raises(ValidationError):
+            Settings()

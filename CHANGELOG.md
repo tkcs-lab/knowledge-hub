@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- Tech repos are kept current: a push to a tech repo's default branch queues an index job, the worker re-syncs every tech repo hourly (`KH_TECH_POLL_MINUTES`, default 60, 0 switches it off), and `kh rebuild` and `kh check` cover tech repos and check each document's tier.
 - `get_doc` returns the document's real `tier` and links a T0a document under `tech_org`; its description warns that T0a text is unreviewed data. `usage` counts only T0 documents for `outranked_t0` and `related_docs`.
 - `tech_org` and `tech_repos` in `kh.yaml` name the Forgejo org and repositories whose technical docs the hub will index (audience `all`); a tech repo may list `labels`.
 - Tier T0a (technical documents indexed without review): migration `0004_tech_tier.sql`, the `search` tool's `min_tier` accepts `T0a`, and `KH_TIER_WEIGHTS` takes an optional `T0a` weight (default `T0:1.0,T0a:0.7,T3:0.4`; a missing T0a is the midpoint of T0 and T3).
