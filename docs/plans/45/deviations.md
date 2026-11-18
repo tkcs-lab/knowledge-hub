@@ -50,7 +50,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - final: blocking: lazy build_steps ValueError committed the file (p4-apply, fix-1)
 - final: blocking: after the main merge the changelog entries sat under 0.5.0 and Unreleased was empty (p7-retire, fix-3)
 - final: blocking: setup apply --prune also deleted record_moves rows (p3a-steps-db, fix-2)
+- final: second review: approve; all 8 findings of the first review confirmed fixed (4 blocking, 4 non-blocking)
 
 ## Finishing
 
-- pending
+- final: scope disposition: the only drift is fix-4 editing yamledit.py and its test (p1 files), accepted; dod gate (ruff, full pytest 1255 passed against a local Postgres) green
