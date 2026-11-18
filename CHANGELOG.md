@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- `search` takes a similarity floor, `KH_SEARCH_MIN_SIMILARITY` (0 to 1, default 0 = off): vector candidates less similar to the query are dropped, so a query with no real match returns no hits and `min_tier=T0` answers the normative text instead of an unrelated document. Every hit carries `similarity` (cosine similarity of its chunk to the query) to calibrate it; see the runbook.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added

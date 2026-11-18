@@ -119,6 +119,16 @@ def test_similar_settings(monkeypatch):
         monkeypatch.undo()
 
 
+def test_search_min_similarity_setting(monkeypatch):
+    assert Settings().search_min_similarity == 0.0
+    monkeypatch.setenv("KH_SEARCH_MIN_SIMILARITY", "0.35")
+    assert Settings().search_min_similarity == 0.35
+    for bad in ("-0.1", "1.5"):
+        monkeypatch.setenv("KH_SEARCH_MIN_SIMILARITY", bad)
+        with pytest.raises(ValidationError):
+            Settings()
+
+
 def test_tier_weights_without_t0a_gets_the_midpoint():
     from knowledge_hub.search.sql import parse_tier_weights
 

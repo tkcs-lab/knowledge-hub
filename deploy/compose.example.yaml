@@ -46,6 +46,7 @@ services:
       KH_METRICS_TOKEN_FILE: /run/secrets/kh_metrics_token
       KH_PROPOSE_MAX_BYTES: "131072"
       KH_PROPOSE_MAX_OPEN: "20"
+      KH_SEARCH_MIN_SIMILARITY: "0"   # off; calibrate per docs/runbook.md "Calibrating the search similarity floor"
     secrets:
       - pg_kh_migrator
       - pg_kh_app

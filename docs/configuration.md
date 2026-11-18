@@ -89,6 +89,7 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_CHUNKER_VERSION` | `1` | Part of the chunk hash; raising it re-chunks every document on the next sync. |
 | `KH_RRF_K` | `60` | Reciprocal-rank-fusion constant. |
 | `KH_SEARCH_POOL` | `50` | Candidates per list (vector and full text) before fusion. |
+| `KH_SEARCH_MIN_SIMILARITY` | `0` | Smallest cosine similarity (0 to 1) between the query and a chunk for the chunk to enter `search`'s vector list; `0` switches the floor off. A full-text match is kept whatever its similarity. Calibrate it as the runbook says ("Calibrating the search similarity floor"). |
 | `KH_TIER_WEIGHTS` | `T0:1.0,T0a:0.7,T3:0.4` | Score multiplier per tier. `T0` and `T3` are required, `T0a` is optional (missing, it is the midpoint of T0 and T3, so `T0:1.0,T3:0.4` still starts); no other name; every weight positive and `T0 >= T0a >= T3`. |
 | `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit or an included outdated hit. |
 | `KH_SIMILAR_LIMIT` | `3` | Most `similar` items `ingest_record` and `propose_doc` return, 0 to 10; 0 switches the lookup off. |
