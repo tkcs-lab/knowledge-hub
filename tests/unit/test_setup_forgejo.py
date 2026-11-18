@@ -641,3 +641,101 @@ async def test_archived_group_slack_hook_untouched(fake, admin, slack_applied):
     assert not any("slack hook" in x for x in lines(await s.apply(prune=False)))
     [hook] = fake.repo_hooks["kb-all"].values()
     assert hook["active"] is False
+
+
+# -- single-group methods (plan 3.6) -----------------------------------------------------------------
+
+async def test_sync_group_touches_only_that_group(fake, admin, applied):
+    fake.requests.clear()
+    fake.team_members[fake.team_id("all")].remove("bob")
+    changes = await applied.sync_group("all", write=True)
+    assert "~ team all: members +bob" in lines(changes)
+    assert not any("mgmt" in c.text or "kb-management" in c.text for c in changes)
+    assert not any("kb-management" in p or "mgmt" in p for _, p in fake.requests if "/users/" not in p)
+    assert sorted(fake.team_members[fake.team_id("all")]) == ["alice", "bob"]
+
+
+async def test_sync_group_has_no_webhook_or_unmanaged_lines(fake, admin, applied):
+    fake.add_team("stray")
+    fake.add_repo("stray-repo")
+    changes = await applied.sync_group("all", write=False)
+    text = "\n".join(lines(changes))
+    assert "webhook" not in text and "unmanaged" not in text and "owners:" not in text
+    assert drift(changes) == []
+
+
+async def test_sync_group_keeps_the_slack_hook(fake, admin):
+    s = step(admin, SLACK_CONFIG, slack={"all": SLACK_URL})
+    changes = await s.sync_group("all", write=True)
+    assert "+ slack hook kb-all: #kh-all-approvers" in lines(changes)
+    [hook] = fake.repo_hooks["kb-all"].values()
+    assert hook["config"]["url"] == SLACK_URL
+    assert "kb-management" not in fake.repos
+
+
+async def test_sync_all_output_is_unchanged(fake, admin):
+    s = step(admin)
+    plan = lines(await s.plan())
+    assert plan[0] == "+ team all: members alice, bob"
+    assert plan[-1] == "i webhook secret not verifiable" or plan[-1].startswith("i owners")
+    order = [i for i, x in enumerate(plan) if x.startswith(("+ team all:", "+ team mgmt:", "+ webhook"))]
+    assert order == sorted(order)
+    applied_lines = lines(await s.apply(prune=False))
+    assert "+ repo kb-all" in applied_lines and "+ repo kb-management" in applied_lines
+    assert applied_lines.index("+ protection kb-all/main") < applied_lines.index("+ team mgmt: members alice")
+    assert applied_lines.index("+ team mgmt: members alice") < applied_lines.index(f"+ webhook {URL}")
+    assert drift(await s.plan()) == []
+
+
+async def test_archived_group_removes_members_the_config_dropped(fake, admin, applied):
+    fake.team_members[fake.team_id("mgmt")].append("bob")
+    fake.team_members[fake.team_id("mgmt-approve")].append("bob")
+    plan = await step(admin, archived_config()).plan()
+    assert "~ team mgmt: members -bob" in lines(plan)
+    assert "~ team mgmt-approve: members -bob" in lines(plan)
+    assert fake.team_members[fake.team_id("mgmt")] == ["alice", "bob"]
+    await step(admin, archived_config()).apply(prune=False)
+    assert fake.team_members[fake.team_id("mgmt")] == ["alice"]
+    assert fake.team_members[fake.team_id("mgmt-approve")] == ["alice"]
+
+
+async def test_archived_group_never_adds_members_or_creates_teams(fake, admin, applied):
+    fake.team_members[fake.team_id("mgmt")].clear()
+    config = archived_config(members=["alice", "bob"])
+    changes = await step(admin, config).apply(prune=False)
+    assert fake.team_members[fake.team_id("mgmt")] == []
+    assert not any("members +" in x for x in lines(changes) if "mgmt" in x)
+    fresh = Fake(org="kh", token="admin-tok")
+    for login in ("alice", "bob"):
+        fresh.add_user(login)
+    fresh.add_user("kh-bot", token="bot-tok")
+    fresh.add_user("kh-indexer", token="idx-tok")
+    a = ForgejoAdmin("https://forgejo.test", "admin-tok", "kh", transport=fresh.transport)
+    try:
+        await step(a, archived_config()).apply(prune=False)
+    finally:
+        await a.aclose()
+    assert not any(t["name"].startswith("mgmt") for t in fresh.teams.values())
+
+
+async def test_remove_group_deletes_both_teams_and_keeps_repo(fake, admin, applied):
+    changes = await applied.remove_group("mgmt", repo="kb-management", write=True)
+    assert lines(changes) == ["- team mgmt", "- team mgmt-approve", "i repo kb-management: kept"]
+    names = {t["name"] for t in fake.teams.values()}
+    assert "mgmt" not in names and "mgmt-approve" not in names and "all" in names
+    assert "kb-management" in fake.repos
+
+
+async def test_remove_group_plan_deletes_nothing(fake, admin, applied):
+    fake.requests.clear()
+    changes = await applied.remove_group("mgmt", repo="kb-management", write=False)
+    assert lines(changes) == ["- team mgmt", "- team mgmt-approve", "i repo kb-management: kept"]
+    assert not any(m != "GET" for m, _ in fake.requests)
+    assert "mgmt" in {t["name"] for t in fake.teams.values()}
+    assert lines(await applied.remove_group("ghost", repo="kb-ghost", write=True)) == []
+
+
+async def test_missing_accounts_method(fake, admin):
+    s = step(admin)
+    assert await s.missing_accounts(["bob", "ghost", "alice", "nobody"]) == ["ghost", "nobody"]
+    assert await s.missing_accounts([]) == []

@@ -129,22 +129,8 @@ class ForgejoStep:
 
         teams = {str(t.get("name")): t for t in await self._admin.org_teams()}
         repos = {str(r.get("name")): r for r in await self._admin.repos()}
-        for group, gc in cfg.groups.items():
-            repo = cfg.repo_for_group(group)
-            if gc.archived:
-                await self._archive(out, repos, group, repo, write)
-                continue
-            write_team = await self._team(out, teams, group, "write", gc.members, missing, write)
-            approve_team = await self._team(
-                out, teams, f"{group}-approve", "read", gc.approvers, missing, write
-            )
-            repo_exists = await self._repo(out, repos, repo, write)
-            for name, tid in ((group, write_team), (f"{group}-approve", approve_team)):
-                await self._team_repo(out, name, tid, repo, repo_exists, write)
-            for login, perm in ((cfg.bot_login, "write"), (cfg.indexer_login, "read")):
-                await self._collaborator(out, repo, repo_exists, login, perm, login in missing, write)
-            await self._protection(out, group, repo, repo_exists, write)
-            await self._slack(out, group, repo, repo_exists, write, prune)
+        for group in cfg.groups:
+            await self._group(out, group, teams, repos, missing, write, prune)
 
         await self._tech(out, write, missing)
         await self._webhook(out, write)
@@ -166,6 +152,83 @@ class ForgejoStep:
         if owners:
             out.append(Change("i", f"owners: {', '.join(owners)} can bypass protection"))
         return out
+
+    async def sync_group(self, name: str, *, write: bool) -> list[Change]:
+        """One group: its accounts, teams, repo, protection and Slack hook; no webhook or unmanaged lines."""
+        out: list[Change] = []
+        cfg = self._config
+        gc = cfg.groups[name]
+        owners = sorted(str(u.get("login")) for u in await self._admin.org_owners())
+        logins = [cfg.bot_login, cfg.indexer_login]
+        if not gc.archived:
+            logins += gc.members + gc.approvers
+        missing = await self._check_accounts(out, logins, owners)
+        teams = {str(t.get("name")): t for t in await self._admin.org_teams()}
+        repos = {str(r.get("name")): r for r in await self._admin.repos()}
+        await self._group(out, name, teams, repos, missing, write, False)
+        return out
+
+    async def remove_group(self, name: str, *, repo: str, write: bool) -> list[Change]:
+        """Delete the group's teams; the repo and its Slack hook are kept."""
+        out: list[Change] = []
+        teams = {str(t.get("name")): t for t in await self._admin.org_teams()}
+        for team_name in (name, f"{name}-approve"):
+            team = teams.get(team_name)
+            if team is None:
+                continue
+            out.append(Change("-", f"team {team_name}"))
+            if write:
+                await self._delete_team(int(team["id"]))
+        if any(str(r.get("name")) == repo for r in await self._admin.repos()):
+            out.append(Change("i", f"repo {repo}: kept"))
+        return out
+
+    async def missing_accounts(self, logins: list[str]) -> list[str]:
+        return [login for login in logins if await self._account(login) is None]
+
+    async def _group(
+        self,
+        out: list[Change],
+        name: str,
+        teams: dict[str, dict[str, Any]],
+        repos: dict[str, dict[str, Any]],
+        missing: set[str],
+        write: bool,
+        prune: bool,
+    ) -> None:
+        cfg = self._config
+        gc = cfg.groups[name]
+        repo = cfg.repo_for_group(name)
+        if gc.archived:
+            await self._archive(out, repos, name, repo, write)
+            for team_name, keep in ((name, gc.members), (f"{name}-approve", gc.approvers)):
+                await self._trim(out, teams.get(team_name), team_name, keep, write)
+            return
+        write_team = await self._team(out, teams, name, "write", gc.members, missing, write)
+        approve_team = await self._team(
+            out, teams, f"{name}-approve", "read", gc.approvers, missing, write
+        )
+        repo_exists = await self._repo(out, repos, repo, write)
+        for team_name, tid in ((name, write_team), (f"{name}-approve", approve_team)):
+            await self._team_repo(out, team_name, tid, repo, repo_exists, write)
+        for login, perm in ((cfg.bot_login, "write"), (cfg.indexer_login, "read")):
+            await self._collaborator(out, repo, repo_exists, login, perm, login in missing, write)
+        await self._protection(out, name, repo, repo_exists, write)
+        await self._slack(out, name, repo, repo_exists, write, prune)
+
+    async def _trim(self, out: list[Change], team: dict[str, Any] | None, name: str,
+                    keep: list[str], write: bool) -> None:
+        """Remove members the config dropped from an existing team; never add, never create."""
+        if team is None:
+            return
+        tid = int(team["id"])
+        wanted = _fold(keep)
+        for login in [str(u.get("login")) for u in await self._admin.team_members(tid)]:
+            if login.casefold() in wanted:
+                continue
+            out.append(Change("~", f"team {name}: members -{login}"))
+            if write:
+                await self._admin.remove_team_member(tid, login)
 
     async def _tech(self, out: list[Change], write: bool, missing: set[str]) -> None:
         """Tech repos are made by hand in the tech org: report them, give the indexer read, nothing else."""
@@ -195,17 +258,20 @@ class ForgejoStep:
     async def _accounts(self, out: list[Change], owners: list[str]) -> set[str]:
         """Every login the config names must exist; the bots must be neither org owner nor site admin."""
         cfg = self._config
-        logins: dict[str, str] = {}
-        for login in [cfg.bot_login, cfg.indexer_login]:
-            logins.setdefault(login.casefold(), login)
+        logins = [cfg.bot_login, cfg.indexer_login]
         for gc in cfg.groups.values():
-            if gc.archived:
-                continue
-            for login in gc.members + gc.approvers:
-                logins.setdefault(login.casefold(), login)
+            if not gc.archived:
+                logins += gc.members + gc.approvers
+        return await self._check_accounts(out, logins, owners)
+
+    async def _check_accounts(self, out: list[Change], logins: list[str], owners: list[str]) -> set[str]:
+        cfg = self._config
+        unique: dict[str, str] = {}
+        for login in logins:
+            unique.setdefault(login.casefold(), login)
         owner_set = {o.casefold() for o in owners}
         missing: set[str] = set()
-        for folded, login in logins.items():
+        for folded, login in unique.items():
             account = await self._account(login)
             if account is None:
                 missing.add(login)
@@ -295,7 +361,8 @@ class ForgejoStep:
 
     async def _archive(self, out: list[Change], repos: dict[str, dict[str, Any]], group: str,
                        repo: str, write: bool) -> None:
-        """An archived group keeps its teams and members; only the repo is archived."""
+        """An archived group keeps its teams; only the repo is archived and members the config dropped
+        are trimmed."""
         have = repos.get(repo)
         if have is None:
             out.append(Change("i", f"group {group}: archived, repo {repo} not created"))
