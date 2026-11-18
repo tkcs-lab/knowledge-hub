@@ -27,6 +27,10 @@ RESTART_NOTE = (
 )
 
 
+class StepBuildError(Exception):
+    """A step builder rejected its configuration (a ``ValueError``): nothing may be written."""
+
+
 class Steps:
     """The real setup steps for one config, built lazily and once each."""
 
@@ -38,7 +42,10 @@ class Steps:
 
     def _get(self, name: str) -> Any:
         if name not in self._cache:
-            self._cache[name] = self._builders[name]()
+            try:
+                self._cache[name] = self._builders[name]()
+            except ValueError as exc:
+                raise StepBuildError(_message(exc)) from exc
         return self._cache[name]
 
     def labels(self) -> LabelsStep:
@@ -131,6 +138,9 @@ async def _run(
                     print(change.render())
         except NotSet as exc:
             return _not_set(exc.name, True)
+        except StepBuildError as exc:
+            print(f"admin: {exc}")
+            return 2
         except Exception as exc:
             print(f"setup: {_message(exc)}")
             return 2
@@ -145,10 +155,22 @@ async def _run(
                 if refusal:
                     print(f"admin: {refusal}")
                     return 2
+        except NotSet as exc:
+            return _not_set(exc.name, False)
+        except StepBuildError as exc:
+            print(f"admin: {exc}")
+            return 2
+        except Exception as exc:
+            print(f"setup: {_message(exc)}")
+            return 2
+        try:
             if after is not None:
                 changes = await after(steps, True)
         except NotSet as exc:
             return _not_set(exc.name, False)
+        except StepBuildError as exc:
+            print(f"admin: {exc}")
+            return 2
         except Exception as exc:
             failed = True
             print(f"setup: {_message(exc)}")
