@@ -10,7 +10,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-tier-schema
 
-- pending
+- worker: two existing tests outside touches changed: test_migration_0002 now expects the 0004 migration, and test_search_ranking uses equal tier weights because T0 >= T0a >= T3 forbids flipping them
+- conflict: CHANGELOG.md conflicted with p1 (both added entries); resolved by keeping both
+- review: orchestrator ran the full suite including integration on a local Postgres 16: 950 passed
 
 ## p3-get-doc-usage
 
