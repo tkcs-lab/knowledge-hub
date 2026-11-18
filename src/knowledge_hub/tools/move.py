@@ -156,6 +156,7 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
         add_open = _marked(to_pulls, marker)
         remove_open = _marked(from_pulls, marker)
         add_merged = False
+        logged = False
         if add_open is not None:
             result["add_pr_url"], result["add_pr_number"] = add_open["html_url"], add_open["number"]
             if remove_open is not None:
@@ -163,7 +164,6 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
                     remove_open["html_url"],
                     remove_open["number"],
                 )
-                _log(caller.sub, doc_id, from_group, to_group)
                 return result
         elif remove_open is not None:
             raise kh_error("move_conflict", errors.MOVE_CONFLICT)
@@ -196,11 +196,12 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
                 f"Moved from group `{from_group}`.\n\n{trailer}",
             )
             result["add_pr_url"], result["add_pr_number"] = pull["html_url"], pull["number"]
+            _log(caller.sub, doc_id, from_group, to_group)
+            logged = True
     except (ForgejoError, KeyError, TypeError) as exc:
         log.warning("move_item failed: %s", exc)
         raise kh_error("propose_failed", errors.PROPOSE_FAILED) from None
 
-    _log(caller.sub, doc_id, from_group, to_group)
     lead = (
         "The add pull request is already merged."
         if add_merged
@@ -217,6 +218,8 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
             from_repo, branch, "main", f"Move out: {title}"[:TITLE_MAX], f"{lead}\n\n{trailer}"
         )
         result["remove_pr_url"], result["remove_pr_number"] = pull["html_url"], pull["number"]
+        if not logged:
+            _log(caller.sub, doc_id, from_group, to_group)
     except (ForgejoError, KeyError, TypeError) as exc:
         log.warning("move_item removal failed: %s", exc)
         result["note"] = errors.MOVE_PARTIAL

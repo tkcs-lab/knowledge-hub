@@ -334,6 +334,33 @@ async def test_log_line(mcp_client, db, forgejo, caplog):
     assert f"move_item sub=multi id=doc:{doc} from=all to=mgmt" in caplog.text
 
 
+async def test_retry_returning_open_pulls_logs_nothing(mcp_client, db, forgejo, caplog):
+    doc, _ = make_doc(db, forgejo)
+    assert not (await move(mcp_client, f"doc:{doc}")).is_error
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="knowledge_hub.tools"):
+        res = await move(mcp_client, f"doc:{doc}")
+    assert not res.is_error, res.text
+    assert "move_item sub=" not in caplog.text
+
+
+async def test_add_merged_with_failing_removal_logs_nothing(
+    mcp_client, db, forgejo, deps, monkeypatch, caplog
+):
+    doc, text = make_doc(db, forgejo)
+    forgejo.commit("kb-mgmt", {"guides/g.md": text})
+
+    async def boom(*a, **k):
+        raise ForgejoError("down")
+
+    monkeypatch.setattr(deps.forgejo_bot, "delete_file", boom)
+    with caplog.at_level(logging.INFO, logger="knowledge_hub.tools"):
+        res = await move(mcp_client, f"doc:{doc}")
+    assert not res.is_error, res.text
+    assert res.data["note"] == errors.MOVE_PARTIAL
+    assert "move_item sub=" not in caplog.text
+
+
 async def test_unknown_document_is_not_found(mcp_client, db, forgejo):
     res = await move(mcp_client, "doc:00000000-0000-4000-8000-000000000000")
     assert res.is_error and res.text.endswith(errors.NOT_FOUND)
