@@ -19,6 +19,7 @@ dependencies = [
     "pyyaml",
     "pydantic-settings",
     "boto3",
+    "ruamel.yaml>=0.18,<0.19",
 ]
 
 [project.optional-dependencies]
