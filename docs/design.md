@@ -1,6 +1,6 @@
 # Knowledge hub design
 
-The hub gives agents one MCP interface over two tiers: canonical documents in git (T0) and raw records in Postgres (T3).
+The hub gives agents one MCP interface over three tiers: canonical documents in git (T0), technical documents indexed without review (T0a) and raw records in Postgres (T3).
 Every result carries its tier and is filtered by the caller's groups inside Postgres, by row-level security, not in Python.
 This document records the decisions as built, the alternatives that were rejected and one deviation from the PrivacyFence contract.
 
@@ -9,13 +9,14 @@ This document records the decisions as built, the alternatives that were rejecte
 | Tier | Source | Written by | Trust |
 |---|---|---|---|
 | T0 | `kh.documents`, from `*.md` files on `main` of a group's repo | a pull request merged by one of the group's approvers | normative |
+| T0a | `kh.documents` (tier T0a), from `docs/**/*.md` and the root `CLAUDE.md` on the default branch of a tech repo | the hourly poll and the push webhook, no approval | indexed without review |
 | T3 | `kh.records`, body in S3 | `ingest_record` | raw material |
 
 - A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name an n8n token carries and the access group of one T0 repo. Every group has exactly one repo.
 - A **label** matches `^[a-z0-9][a-z0-9_.:-]{0,62}$` (`product:ember` is legal), is defined in `kh.yaml` and stored in `kh.labels`. Label names are visible to every caller; do not put secrets in them.
 - An **archived group** (`archived: true` on the group in `kh.yaml`) acts as removed without deleting data: nobody holds it, so its documents and records are hidden, `ingest_record` and `propose_doc` refuse it and nothing is indexed for it. The database is unchanged; the state lives in `kh.yaml` and the hub reads it at start.
 - An **archived label** (a name listed under `archived_labels` in `kh.yaml`) vanishes from `list_labels`, from result labels (`search`, `get_doc`, `list_stale`, `usage`) and from search filters, and writes using it fail with `unknown label`. The database is unchanged: the label stays in `kh.labels`, so documents that name it are still indexed, and the state lives in `kh.yaml`.
-- Tools return the ids `doc:<uuid>` and `rec:<uuid>`. `search` defaults to `min_tier=T3`, which searches T0 and T3; `min_tier=T0` searches documents only; tier weights are `T0:1.0,T3:0.4`.
+- Tools return the ids `doc:<uuid>` and `rec:<uuid>`. `search` defaults to `min_tier=T3`, which searches T0, T0a and T3; `min_tier=T0a` searches T0 and T0a; `min_tier=T0` searches approved documents only; tier weights are `T0:1.0,T0a:0.7,T3:0.4`.
 
 ## Trust: Forgejo is the control
 
@@ -39,6 +40,16 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 
 `plan` exits 1 on drift, so running it on a schedule catches a protection change made in the Forgejo UI.
 
+## Technical documents (T0a)
+
+- **Trust.** Nothing approves a T0a document. The indexer reads the default branch of a tech repo as Forgejo reports it, so whoever can push there puts text in front of every caller: every row has audience `all`, decided by the owner. Its text is data, not instructions; `search` and `get_doc` say so.
+- **Source.** `tech_org` and `tech_repos` in `kh.yaml`. The operator creates the mirror or fork in `tech_org`; `kh setup` creates nothing there. The files are the root `CLAUDE.md` and `docs/**/*.md` (no dot-prefixed segment, at most 1 MiB). The webhook queues a job for a push to the default branch, and the worker polls every tech repo every `KH_TECH_POLL_MINUTES`.
+- **Synthesised header.** A tech file is not parsed for frontmatter: a leading `---` block is dropped, so no file is rejected. The title is `<repo>: CLAUDE.md` for the root file, else the first `# ` heading outside a fenced block, else the file name; the key is the path (shortened with a hash past 100 characters); `review_by` is 100 years ahead, so a T0a document is never stale; `supersedes` is empty; labels come only from `labels` of the repo in `kh.yaml`. A label change moves no blob, so the plan relabels the stored documents.
+- **No rewrite alert.** Clones and forks are force-pushed upstream all the time, so a tech sync never raises `main ... was rewritten` and the next sync simply follows the head.
+- **Prune.** A repo removed from `tech_repos` keeps its T0a documents until `kh setup apply --prune` deletes them and the repo's `repo_state` row; `plan` and `apply` only report them.
+- **Usage signals.** `outranked_t0`, `related_docs` and `t0_fts_hits` count T0 only, so a technical document never hides a gap from the promotion agent. `get_doc` returns the real tier and links under `tech_org`.
+- **`similar`.** `similar` filters by audience only, so `ingest_record` and `propose_doc` into `all` may list T0a items; their `tier` says T0a.
+
 ## Access model
 
 - **Resolution.** `ClaimMiddleware` resolves the caller's groups from the verified claim. A `claude_client` holds the groups of `kh.yaml` in which a member's `people` email equals the claim's verified email, compared in lower case; a claim without an email gives no group, and the claim's `audiences` are ignored. An `n8n_workflow` holds the claim's `audiences` that are configured, non-archived groups, because a workflow has no `people` entry. A `service` calls no tool. The config is read when `kh serve` starts, so a change to `people` or to a group needs a restart.
@@ -53,6 +64,10 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 - With required approvals 0 the approver must review the final diff before merging.
 - The verified email is the identity: a Workspace email that is reassigned gives its new holder the old person's groups until `people` is edited. Remove a leaver from `people` first.
 - Exact vector scans take time in proportion to the number of hidden rows; this timing is the accepted residual of the no-existence-leak rule.
+- Push access to a tech repo puts text in front of every caller (audience `all`); `kh setup` reports its collaborators and cannot restrict them.
+- The `http` embedder receives T0a text: `KH_EMBED_HTTP_ALLOWED_AUDIENCES` lists audiences, and T0a rows have audience `all`.
+- Two replicas can duplicate chunks of one tech repo; this is the same race as for group repos.
+- A T3 record may be marked `replaced_by` a T0a document: it is a pointer, not a promotion.
 - Stored query text can hold sensitive words. Readers are limited by the subset rule, retention is `KH_USAGE_RETENTION_DAYS`, and `KH_USAGE_LOG=false` switches logging off.
 
 ## Roles and RLS matrix
@@ -99,11 +114,12 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 - Included files: `*.md`, no dot-prefixed path segment, not the root `README.md`, at most 1 MiB. Changed blobs are parsed, chunked and embedded outside the transaction; then one transaction deletes vanished rows, upserts documents (`audience` is the repo's group, always) and chunks, and records alerts.
 - Frontmatter: required `id`, `title`, `review_by` (`YYYY-MM-DD`); optional `labels`, each of which must exist in `kh.labels` (otherwise the file is rejected `unknown label <x>`); optional `supersedes`, a list of document ids (a single string counts as a list of one; at most 20, no duplicates, not the document's own id; otherwise the file is rejected `invalid supersedes`); other keys are ignored. A supersede link stays inside one repo, so inside one group. A duplicate `id` in one repo rejects every file that holds it. `stale` is `review_by < today`, recomputed by `kh daily`.
 - Supersede resolver (`indexer/supersede.py`, run in every sync of a repo over all its stored documents; it sets `kh.documents.superseded_by`, which the upsert never writes). Rules: (1) a key that names no document alerts `supersedes unknown id <key>`; a document naming itself is skipped; (2) a document named by several others takes the successor with the smallest `doc_key` and alerts `superseded by <n> documents; using <doc_key>`; (3) a document on a cycle gets no successor and each member alerts `supersedes cycle: <keys>`; (4) every other target maps to its direct successor, so in a chain A to B to C both A and B are superseded; (5) every document gets a value, none when nothing replaces it. Removing the line or deleting the successor makes the old document current again on the next sync.
+- Tech repos (tier T0a) take another path through `sync_repo`; see "Technical documents (T0a)". The group rules above do not apply to them.
 - Embedding providers are `ollama`, `http` and `fake`; the `http` provider embeds only audiences in `KH_EMBED_HTTP_ALLOWED_AUDIENCES`. T3 bodies are read from S3 by `embed_record` jobs. Failed jobs retry five times with a growing delay. An `embed_record` job removes NUL characters from a stored body before chunking and logs a warning with the record id; the blob in S3 is not changed.
 
 ## Search
 
-One statement inside `caller_tx`: an exact vector order (no ANN index) fused by RRF with a full-text list, each limited to `KH_SEARCH_POOL`, weighted by tier and by the stale flag, one best chunk per owner. A `hidden` CTE lists superseded documents and outdated records (under the caller's row-level security); the filter drops their chunks before the pool is cut, so recall is kept. `include_outdated=true` keeps them, marks each hit `outdated` with `replaced_by`, and weights them by `KH_STALE_WEIGHT` like a stale hit. With `min_tier=T0`, a query whose only T0 matches are hidden answers the `only T3 records match` text when T3 hits exist. By default (`min_tier=T3`) T0 and T3 are searched together, records weighted lower. With `min_tier=T0` only T0 is searched; when no T0 hit exists but T3 hits do, the call fails with `only T3 records match; repeat with min_tier T3 to see them`. Cursors are HMAC-bound to the caller, the query and the filters, with a bounded offset.
+One statement inside `caller_tx`: an exact vector order (no ANN index) fused by RRF with a full-text list, each limited to `KH_SEARCH_POOL`, weighted by tier and by the stale flag, one best chunk per owner. A `hidden` CTE lists superseded documents and outdated records (under the caller's row-level security); the filter drops their chunks before the pool is cut, so recall is kept. `include_outdated=true` keeps them, marks each hit `outdated` with `replaced_by`, and weights them by `KH_STALE_WEIGHT` like a stale hit. With `min_tier=T0`, a query whose only T0 matches are hidden answers the `only T3 records match` text when T3 hits exist. By default (`min_tier=T3`) T0, T0a and T3 are searched together, T0a weighted below T0 and records below T0a. `min_tier=T0a` searches T0 and T0a and fails with `only T3 records match; repeat with min_tier T3 to see them` when only records match. With `min_tier=T0` only T0 is searched; when no T0 hit exists but T3 hits do, the call fails with that text, and when T0a hits exist it fails with `only T0a documents or T3 records match; repeat with min_tier T0a or T3 to see them` (`NORMATIVE_T0A`). Cursors are HMAC-bound to the caller, the query and the filters, with a bounded offset.
 
 ## Usage log
 
@@ -163,3 +179,7 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | `outcome`, `page_offset`, `labels`, `audience_filter` and a stored `query_norm` column in the usage log | Derivable or unused by either view (`query_norm` is a generated column). |
 | A separate usage key file | One more secret; the sub-key derived from the cursor key is enough. |
 | Logging n8n workflows | They are not people, and the agent's own searches would feed back into its signal. |
+| Parsing frontmatter in technical files | Rejects files nobody reviewed and needs one rule per file kind; a synthesised header covers every file. |
+| A tier named `T1` | The owner chose `T0a`: it is a variant of T0, not a step between T0 and T3. |
+| Counting T0a in `t0_fts_hits` | A technical document is not a normative answer, so the promotion agent would stop seeing the gap. |
+| `kh setup` creating the clones | The clone or fork is a decision about upstream and credentials; the operator makes it and `kh setup` only checks it. |

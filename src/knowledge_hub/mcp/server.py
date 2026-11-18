@@ -25,6 +25,7 @@ class Deps:
     reader: Any = None
     worker: Any = None
     forgejo_bot: Any = None
+    tech_reader: Any = None
 
 
 def register_tools(server: MCPServer, deps: Deps) -> None:

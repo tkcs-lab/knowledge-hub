@@ -52,6 +52,12 @@ def _split(text: str) -> tuple[str, str] | None:
     return None
 
 
+def strip_frontmatter(text: str) -> str:
+    """The text after a closed leading ``---`` block, or ``text`` unchanged; the block is not parsed."""
+    parts = _split(text)
+    return text if parts is None else parts[1]
+
+
 def _review_by(value: Any) -> dt.date | None:
     if isinstance(value, str) and _DATE_RE.fullmatch(value):
         try:

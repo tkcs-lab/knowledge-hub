@@ -11,7 +11,8 @@ from knowledge_hub.mcp.errors import BAD_ID, NOT_FOUND
 from tests.support.blobs import MemoryBlobStore
 from tests.support.pg import FRESH_DB
 from tests.support.principals import alice_all, bob_mgmt, dave_none, wf_token
-from tests.support.seed import WHEN
+from tests.support.seed import WHEN, add_doc
+from tests.support.tech import TECH_CONFIG
 
 pytestmark = pytest.mark.integration
 
@@ -143,3 +144,27 @@ async def test_get_doc_shows_the_outdated_marks_of_a_record(mcp_client, seeded_d
     assert (res.data["outdated"], res.data["outdated_at"], res.data["replaced_by"], res.data["note"]) == (
         True, WHEN.isoformat(), "doc:x", "old")
     assert "outdated_by" not in res.data
+
+
+@pytest.fixture
+def t0a_doc(fresh_db, seeded_db):
+    with psycopg.connect(fresh_db.admin_dsn(FRESH_DB), autocommit=True) as conn:
+        return add_doc(conn, repo="ember-core", path="docs/a.md", tier="T0a")
+
+
+async def test_get_doc_of_a_t0a_document_has_tier_t0a(mcp_client, t0a_doc):
+    res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{t0a_doc}"})
+    assert not res.is_error, res.text
+    assert res.data["tier"] == "T0a"
+
+
+async def test_t0a_source_link_uses_the_tech_org(mcp_client, deps, t0a_doc):
+    deps.config = TECH_CONFIG
+    res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{t0a_doc}"})
+    assert res.data["source_link"] == "https://forgejo.test.example/kh-tech/ember-core/src/commit/c1/docs/a.md"
+
+
+async def test_t0_source_link_still_uses_the_org(mcp_client, deps, seeded_db):
+    deps.config = TECH_CONFIG
+    res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{seeded_db['documents']['all']}"})
+    assert res.data["source_link"] == f"https://forgejo.test.example/{TECH_CONFIG.org}/kb-all/src/commit/c1/all.md"

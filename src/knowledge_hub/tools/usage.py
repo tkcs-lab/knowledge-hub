@@ -32,7 +32,9 @@ hit AS (
   SELECT e.id, e.at, e.kind, e.who, e.query_norm, u.k,
          e.kind = 'search' AND NOT EXISTS (
            SELECT 1 FROM unnest(e.owner_keys) WITH ORDINALITY AS v(k2, p2)
-            WHERE p2 < u.pos AND left(k2, 4) = 'doc:') AS outranked
+            WHERE p2 < u.pos AND left(k2, 4) = 'doc:'
+              AND EXISTS (SELECT 1 FROM kh.documents d0
+                           WHERE 'doc:' || d0.id::text = k2 AND d0.tier = 'T0')) AS outranked
     FROM ev e CROSS JOIN LATERAL unnest(e.owner_keys) WITH ORDINALITY AS u(k, pos)
    WHERE left(u.k, 4) = 'rec:'
 ),
@@ -54,7 +56,7 @@ SELECT r.id, r.audience, r.title, r.labels, r.source, r.source_url, r.occurred_a
            ORDER BY h2.query_norm LIMIT 3) s) AS sample_queries,
        (SELECT coalesce(array_agg(x.d ORDER BY x.d), '{}'::text[]) FROM (
           SELECT DISTINCT d FROM ev e2 CROSS JOIN LATERAL unnest(e2.owner_keys) AS d
-            JOIN kh.documents dd ON d = 'doc:' || dd.id::text
+            JOIN kh.documents dd ON d = 'doc:' || dd.id::text AND dd.tier = 'T0'
            WHERE a.k = ANY(e2.owner_keys)
            ORDER BY d LIMIT 3) x) AS related_docs
   FROM agg a JOIN kh.records r ON a.k = 'rec:' || r.id::text

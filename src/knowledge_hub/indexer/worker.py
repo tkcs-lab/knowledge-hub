@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from knowledge_hub.config import KhConfig
@@ -28,6 +29,17 @@ RETURNING id, kind, repo, payload, attempts
 """
 
 
+_POLL_TECH = """
+INSERT INTO kh.index_jobs (kind, repo, payload)
+SELECT 'git_push', r, '{}'::jsonb FROM unnest(%s::text[]) AS r
+WHERE NOT EXISTS (
+    SELECT 1 FROM kh.index_jobs j
+    WHERE j.kind = 'git_push' AND j.repo = r
+      AND (j.state = 'queued' OR (j.state = 'running' AND j.created_at > now() - interval '1 hour'))
+)
+"""
+
+
 class Worker:
     def __init__(
         self,
@@ -39,6 +51,8 @@ class Worker:
         *,
         chunker_version: int = 1,
         poll_seconds: float = 2.0,
+        tech_reader: Any = None,
+        tech_poll_seconds: float = 0.0,
     ) -> None:
         self.pool = indexer_pool
         self.reader = reader
@@ -47,6 +61,9 @@ class Worker:
         self.blobs = blobs
         self.chunker_version = chunker_version
         self.poll_seconds = poll_seconds
+        self.tech_reader = tech_reader
+        self.tech_poll_seconds = tech_poll_seconds
+        self._last_tech_poll: float | None = None
         self._stop = asyncio.Event()
         # sync_repo reads stored chunks before its write transaction and its advisory lock covers only
         # the write, so one sync per repo at a time. Jobs run one by one in this worker; the lock keeps
@@ -100,10 +117,11 @@ class Worker:
     async def _git_push(self, repo: str | None) -> None:
         if repo is None:
             raise ValueError("git_push job without a repo")
-        group = self.config.group_for_repo(repo)
-        if group is not None and not self.config.is_active(group):
-            log.info("git_push skipped, group %s is archived", group)
-            return
+        if not self.config.is_tech_repo(repo):
+            group = self.config.group_for_repo(repo)
+            if group is not None and not self.config.is_active(group):
+                log.info("git_push skipped, group %s is archived", group)
+                return
         if self.reader is None:
             raise RuntimeError("no Forgejo reader configured")
         lock = self._repo_locks.setdefault(repo, asyncio.Lock())
@@ -115,6 +133,7 @@ class Worker:
                 repo,
                 self.embedder,
                 chunker_version=self.chunker_version,
+                tech_reader=self.tech_reader,
             )
 
     async def _run(self, kind: str, repo: str | None, payload: Any = None) -> None:
@@ -155,9 +174,26 @@ class Worker:
                     (error, BACKOFF_SECONDS * attempts, job_id),
                 )
 
+    async def poll_tech_repos(self) -> None:
+        """Queue one ``git_push`` job per tech repo that has no live job (plan section 3.7)."""
+        names = self.config.tech_repo_names
+        if not names:
+            return
+        async with self.pool.connection() as conn:
+            await conn.execute(_POLL_TECH, (names,))
+
+    def _tech_poll_due(self) -> bool:
+        if self.tech_poll_seconds <= 0 or not self.config.tech_repos:
+            return False
+        last = self._last_tech_poll
+        return last is None or time.monotonic() - last >= self.tech_poll_seconds
+
     async def run_forever(self) -> None:
         while not self._stop.is_set():
             try:
+                if self._tech_poll_due():
+                    self._last_tech_poll = time.monotonic()
+                    await self.poll_tech_repos()
                 worked = await self.run_once()
             except Exception:
                 log.exception("worker loop error")

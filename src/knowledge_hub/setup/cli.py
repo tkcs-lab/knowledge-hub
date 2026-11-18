@@ -15,7 +15,7 @@ from knowledge_hub.config import KhConfig, load_config
 from knowledge_hub.settings import Settings, load_settings
 from knowledge_hub.setup.steps import Step, run
 
-STEP_NAMES = ("postgres", "labels", "forgejo", "ollama", "s3")
+STEP_NAMES = ("postgres", "labels", "tech", "forgejo", "ollama", "s3")
 
 
 class _NotSet(Exception):
@@ -67,6 +67,11 @@ def _builders(
 
         return LabelsStep(config, settings.dsn("migrator"))
 
+    def tech() -> Step:
+        from knowledge_hub.setup.tech import TechStep
+
+        return TechStep(config, settings.dsn("migrator"))
+
     def forgejo() -> Step:
         from knowledge_hub.forgejo.admin import ForgejoAdmin
         from knowledge_hub.setup.forgejo import ForgejoStep
@@ -78,6 +83,11 @@ def _builders(
         )
         assert token is not None
         admin = ForgejoAdmin(settings.forgejo_url, token, config.org)
+        tech_admin = (
+            ForgejoAdmin(settings.forgejo_url, token, config.tech_org)
+            if config.tech_repos and config.tech_org
+            else None
+        )
         return ForgejoStep(
             config,
             admin,
@@ -86,6 +96,7 @@ def _builders(
             indexer_token=_read(
                 settings.forgejo_indexer_token_file, "KH_FORGEJO_INDEXER_TOKEN_FILE", required=False
             ),
+            tech_admin=tech_admin,
             slack_urls=_slack_urls(settings.setup_slack_webhooks_file),
         )
 
@@ -101,7 +112,9 @@ def _builders(
 
         return S3Step(settings, create_bucket=create_bucket)
 
-    return {"postgres": postgres, "labels": labels, "forgejo": forgejo, "ollama": ollama, "s3": s3}
+    return {
+        "postgres": postgres, "labels": labels, "tech": tech, "forgejo": forgejo, "ollama": ollama, "s3": s3,
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
