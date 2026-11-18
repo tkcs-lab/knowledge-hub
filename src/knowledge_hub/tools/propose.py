@@ -15,6 +15,7 @@ from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.propose_render import check_text, render_file, validate_path
+from knowledge_hub.search.similar import similar_items
 
 log = logging.getLogger("knowledge_hub.tools")
 
@@ -128,7 +129,10 @@ async def propose_doc(
         if supersedes:
             pr_body += "\n\nSupersedes: " + ", ".join(f"`{s}`" for s in supersedes)
         pull = await bot.open_pull(repo, branch, "main", f"Propose: {title}"[:TITLE_MAX], pr_body)
-        return {"pr_url": pull["html_url"], "pr_number": pull["number"], "branch": branch}
+        similar = await similar_items(
+            call, f"{title}\n\n{body[:2000]}", group, exclude_repo=repo, exclude_key=id
+        )
+        return {"pr_url": pull["html_url"], "pr_number": pull["number"], "branch": branch, "similar": similar}
     except (ForgejoError, KeyError, TypeError) as exc:
         log.warning("propose_doc failed: %s", exc)
         raise kh_error("propose_failed", errors.PROPOSE_FAILED) from None

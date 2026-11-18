@@ -10,6 +10,7 @@ from psycopg import errors as pg_errors
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
+from knowledge_hub.search.similar import similar_items
 
 EXCERPT_CHARS = 2000
 
@@ -98,7 +99,8 @@ async def ingest_record(
     except pg_errors.Error:
         await deps.blobs.delete(blob_key)
         raise
-    return {"id": f"rec:{key}", "existed": False}
+    similar = await similar_items(call, f"{title}\n\n{body[:EXCERPT_CHARS]}", audience)
+    return {"id": f"rec:{key}", "existed": False, "similar": similar}
 
 
 def register(server: MCPServer, deps: Deps) -> None:
@@ -107,6 +109,7 @@ def register(server: MCPServer, deps: Deps) -> None:
         description=(
             "Store a raw record (a meeting note, message or similar) readable by the named audience, "
             "which you must hold. Re-sending the same source and source_ref returns the existing id. "
-            "occurred_at is ISO 8601 with a timezone."
+            "occurred_at is ISO 8601 with a timezone. "
+            "The reply of a new record lists up to three similar items of the same group in similar."
         ),
     )(tool_guard("ingest_record", deps)(ingest_record))
