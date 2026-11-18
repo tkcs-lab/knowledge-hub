@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- `groups.<g>.slack_channel` in `kh.yaml` and the setup file `KH_SETUP_SLACK_WEBHOOKS_FILE`: `kh setup` keeps one Forgejo Slack hook per group repo that posts pull request events to the group's approver channel.
+
 ## [0.4.0] - 2026-11-18
 
 ### Added

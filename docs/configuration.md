@@ -52,8 +52,9 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 |---|---|---|
 | `KH_SETUP_PG_ADMIN_DSN_FILE` | none | File with a Postgres superuser (or role-creating) DSN. Optional: without it the `postgres` step only checks. |
 | `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` | none | Token of a Forgejo site administrator. Required by the `forgejo` step. |
+| `KH_SETUP_SLACK_WEBHOOKS_FILE` | none | YAML file mapping group name to its Slack incoming-webhook URL (`https://`). Needed only for groups with `slack_channel`. |
 
-The `kh serve` service never mounts these two files. The hub never holds admin credentials; `kh setup` does.
+The `kh serve` service never mounts these files. The hub never holds admin credentials; `kh setup` does.
 
 ### Embeddings
 
@@ -136,11 +137,12 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `forgejo_web_url` | null | Null or an `https://` URL; the base of `source_link` (empty links when null). |
 | `hub_url` | null | Null or an http(s) URL without a path: how Forgejo reaches the hub. Only `kh setup` needs it (webhook target). |
 | `people` | `{}` | Map of Forgejo login to the email PrivacyFence verifies for that person. Logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$` and are unique case-folded; an email has exactly one `@`, at most 254 characters, is stored lower-case and is unique (`config: email <e> belongs to two people`). |
-| `groups` | `{}` | Map of group name to `{repo, members, approvers}`. |
+| `groups` | `{}` | Map of group name to `{repo, members, approvers, archived, slack_channel}`. |
 | `groups.<g>.repo` | `kb-<g>` | Repo name, `^[a-z0-9][a-z0-9._-]{0,99}$`, unique. Immutable once applied. |
 | `groups.<g>.members` | `[]` | Logins; each must be in `people` (`config: group <g> member <login> is not in people`). Members read and write. |
 | `groups.<g>.approvers` | required | Non-empty subset of `members` (`config: group <g> approver <login> is not a member`). Approvers merge. |
 | `groups.<g>.archived` | `false` | An archived group is held by nobody: its documents and records are hidden, writes into it are refused (`audience is not held by this caller or not configured`), and nothing is indexed for it. Nothing is deleted. Every other group check still applies. |
+| `groups.<g>.slack_channel` | null | Null or a Slack channel `#name` (lower case, digits, `-`, `_`, at most 80 characters after `#`). `kh setup` keeps one Slack hook on the group's repo for pull request events; its URL comes from `KH_SETUP_SLACK_WEBHOOKS_FILE`. Ignored while the group is archived. |
 | `labels` | `{}` | Map of label name (`^[a-z0-9][a-z0-9_.:-]{0,62}$`) to a description of at most 200 characters; at most 500 labels. |
 | `archived_labels` | `[]` | Label names, each a key of `labels` (`config: archived_labels entry '<x>' is not in labels`, `config: archived_labels lists '<x>' twice`). An archived label is hidden from `list_labels`, from the `labels` of results (`search`, `get_doc`, `list_stale`, `usage`) and from search filters; `ingest_record` and `propose_doc` using it fail with `unknown label`. The label and its rows stay. |
 
@@ -184,18 +186,18 @@ Steps run in this order: `postgres`, `labels`, `forgejo`, `ollama`, `s3`. A step
 | `-` | remove (only with `--prune`) |
 | `!` | refused: a change the script will not make, for example `! group all: changed repo; remove the group and add a new one` |
 | `?` | unmanaged object (`? unmanaged`) |
-| `i` | information (`i webhook secret not verifiable`, `i owners: <logins> can bypass protection`) |
+| `i` | information (`i webhook secret not verifiable`, `i owners: <logins> can bypass protection`, `i slack hook <repo>: url not verifiable`) |
 
 Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit code.
 
 **Exit codes.** `plan`: 0 no drift, 1 drift, 2 error. `apply`: 0, or 2 when an error occurred or any `!` line remains.
 
-**Credential files.** Never in the YAML: `KH_SETUP_PG_ADMIN_DSN_FILE` (optional), `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, and the existing `KH_DB_*_PASSWORD_FILE`, `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE`, `KH_FORGEJO_INDEXER_TOKEN_FILE`, `KH_WEBHOOK_HMAC_FILE`, `KH_OLLAMA_URL`, `KH_EMBED_MODEL`, `KH_S3_*`. A missing required file prints `setup: <name> is not set` and exits 2. Setup never creates Forgejo users or tokens: a missing `bot_login` or `indexer_login` account is an error.
+**Credential files.** Never in the YAML: `KH_SETUP_PG_ADMIN_DSN_FILE` (optional), `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, `KH_SETUP_SLACK_WEBHOOKS_FILE` (optional), and the existing `KH_DB_*_PASSWORD_FILE`, `KH_FORGEJO_URL`, `KH_FORGEJO_BOT_TOKEN_FILE`, `KH_FORGEJO_INDEXER_TOKEN_FILE`, `KH_WEBHOOK_HMAC_FILE`, `KH_OLLAMA_URL`, `KH_EMBED_MODEL`, `KH_S3_*`. A missing required file prints `setup: <name> is not set` and exits 2. Setup never creates Forgejo users or tokens: a missing `bot_login` or `indexer_login` account is an error.
 
 **Steps.**
 
 1. `postgres`. With an admin DSN: create the roles `kh_migrator`, `kh_app` and `kh_indexer` (passwords from the `KH_DB_*_PASSWORD_FILE` files, re-set on every apply because they cannot be read back), the database owned by `kh_migrator`, `CREATE EXTENSION vector`, then run pending migrations. Without an admin DSN it only checks, and pending migrations count as drift. It then syncs `kh.groups`: groups are added; a removed group goes only with `--prune`, is refused when records exist, and its documents are deleted.
 2. `labels`. Inserts new labels and updates descriptions. A removed label is deleted only with `--prune` and only when unused (`! label <x>: in use`). After a label is added, apply queues one `git_push` job per repo so files rejected for an unknown label are retried.
-3. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only, and repos are never deleted.
+3. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams and unmanaged Slack repo hooks, and repos are never deleted. For each group with `slack_channel`: one Slack repo hook (`pull_request` events) to the group's URL from `KH_SETUP_SLACK_WEBHOOKS_FILE`, with its URL rewritten on every apply; `apply` for a group without a URL prints `! slack hook <repo>: no URL for group <g> in KH_SETUP_SLACK_WEBHOOKS_FILE` (`plan` does not need the file). A Slack hook on the repo of a group without `slack_channel` prints `? unmanaged slack hook <repo>` and is removed with `--prune`.
 4. `ollama`. `plan` checks that the model is listed and that one embedding has length `KH_EMBED_DIM`; `apply` pulls it.
 5. `s3`. Checks that the bucket exists and takes a put, get and delete of `kh-setup-probe/<uuid>`. `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
