@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from collections.abc import Sequence
 
 _PATH_RE = re.compile(r"[a-z0-9][a-z0-9/_-]*\.md")
 _BIDI = {chr(c) for c in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))}
@@ -34,7 +35,11 @@ def _q(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_file(doc_id: str, title: str, review_by: str, labels: list[str], body: str) -> str:
+def render_file(
+    doc_id: str, title: str, review_by: str, labels: list[str], body: str, supersedes: Sequence[str] = ()
+) -> str:
     flow = ", ".join(_q(label) for label in labels)
     head = f"id: {_q(doc_id)}\ntitle: {_q(title)}\nreview_by: {_q(review_by)}\nlabels: [{flow}]"
+    if supersedes:
+        head += f"\nsupersedes: [{', '.join(_q(s) for s in supersedes)}]"
     return f"---\n{head}\n---\n{body}"
