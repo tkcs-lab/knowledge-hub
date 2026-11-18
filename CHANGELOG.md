@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-18
+
 ### Added
 
 - The tool `list_audiences`: PrivacyFence's audiences source (PrivacyFence ADR 0325). It answers only PrivacyFence's service claim with the members' emails of each active group. The declaration example sets `audiences_tool: list_audiences`: upgrade PrivacyFence first, then restart `kh serve` and PrivacyFence. The `upstream_mcp.kh.groups` map and any membership file kept for the hub can go; existing n8n tokens stay valid.
