@@ -16,7 +16,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-get-doc-usage
 
-- pending
+- retry: first attempt stopped: the plan's usage SQL broke test_outranked_t0_needs_no_doc_before_the_record, whose fixture used a doc key with no document row; the orchestrator told the worker to repair the fixture with a real T0 document
+- worker: existing test test_outranked_t0_needs_no_doc_before_the_record now seeds a real T0 document (add_doc); assertion unchanged
 
 ## p4-tech-docs
 
