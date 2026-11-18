@@ -51,6 +51,7 @@ async def test_new_record(mcp_client, seeded_db, fresh_db, blobs):
     )
     assert not res.is_error, res.text
     assert res.data["existed"] is False
+    assert res.data["similar"] == []  # no embedder in this fixture
     rec_id = res.data["id"]
     assert rec_id.startswith("rec:")
     key = rec_id.removeprefix("rec:")

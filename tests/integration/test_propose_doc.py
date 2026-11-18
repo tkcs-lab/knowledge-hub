@@ -57,6 +57,7 @@ async def test_create(mcp_client, seeded_db, forgejo):
     assert not res.is_error, res.text
     branch = res.data["branch"]
     assert branch.startswith("bot/propose/")
+    assert res.data["similar"] == []  # no embedder in this fixture
     assert res.data["pr_number"] == 1 and res.data["pr_url"].endswith("/kb-all/pulls/1")
     assert "guides/new.md" not in forgejo.files("kb-all")  # main is untouched
     text = forgejo.files("kb-all", branch)["guides/new.md"]
