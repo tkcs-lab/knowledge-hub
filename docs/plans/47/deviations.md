@@ -11,7 +11,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-move-document
 
-- pending
+- worker: The open-pull cap is checked in both repos before anything is written, so a full source repo cannot leave a half-opened move (plan only says a repo that needs a new pull request). Worker also added a CHANGELOG line and one extra test (unknown document is not found).
 
 ## p3-retire-docs
 
