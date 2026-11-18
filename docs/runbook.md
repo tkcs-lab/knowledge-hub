@@ -23,46 +23,29 @@ Not run in the cloud, so yours to do and check by hand: the backup script's `pg_
 
    Until the model is available embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. To measure speed: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second.
 8. **Index.** Put the first documents in each repo through pull requests (see "Changing T0"), or run `kh rebuild` once, then `kh check` and expect exit 0.
-9. **PrivacyFence.** Declare the hub as an upstream, give the audiences of n8n workflows a group map and the administrators who create tokens a membership source, and create the n8n tokens (sections below).
+9. **PrivacyFence.** Upgrade PrivacyFence to a release that knows `audiences_tool`, declare the hub as an upstream, and create the n8n tokens (sections below).
 
 ## PrivacyFence setup
 
-Copy `deploy/privacyfence-upstream.example.yaml` to the PrivacyFence host, set `PRIVACYFENCE_UPSTREAM_MCP_FILE` to it and restart PrivacyFence; the file and the hub's tool list are read at startup only. Its `audience` equals `KH_PF_AUDIENCE`.
+Upgrade PrivacyFence first: a release that does not know `audiences_tool` refuses the declaration. Then copy `deploy/privacyfence-upstream.example.yaml` to the PrivacyFence host, set `PRIVACYFENCE_UPSTREAM_MCP_FILE` to it and restart PrivacyFence; the file and the hub's tool list are read at startup only. Its `audience` equals `KH_PF_AUDIENCE`.
 
-- People need no entry in PrivacyFence's group map: their groups come from `people` in `kh.yaml`.
+- People need no entry anywhere in PrivacyFence: their groups come from `people` in `kh.yaml` through the verified email.
 - `email_for_visibility: true` stays in the declaration because a person's groups come from their verified email; without it no person reads anything.
-- n8n tokens need the map and a membership source (see "Groups for n8n tokens").
+- `audiences_tool: list_audiences` makes the hub the source of every audience (next section). `list_audiences` is not listed under `tools`: nobody calls it but PrivacyFence.
 
-If `admin_config.json` already holds a group-to-audience map for this upstream, keep the entries for the audiences n8n workflows should hold; the entries that existed only for people can go.
+### Audiences from the hub
 
-### Groups for n8n tokens
+PrivacyFence calls `list_audiences` itself, with a `service` claim, at startup and every `audiences_refresh_seconds` (300 in the example, 30 to 3600 allowed). The answer lists the `people` emails of the members of each active group of `kh.yaml`, and replaces PrivacyFence's group map and membership source for this upstream, with no approvals. An n8n token holds its creator's hub groups at each call, intersected with the groups ticked when it was made. So:
 
-People need no entry in PrivacyFence's group map. An n8n token is different: PrivacyFence gives a scoped token its creator's audiences at each call, intersected with the audiences ticked when the token was made (PrivacyFence ADR 0298), and the hub keeps the token's audiences that are groups of `kh.yaml`. So `admin_config.json` keeps a map for this upstream with an entry only for each audience an n8n workflow should hold, and every administrator who creates an n8n token is a member of those groups:
+- A token creator must be a member of the group in `kh.yaml`, under the address they sign in to PrivacyFence with (the verified address, lower case, plain ASCII; PrivacyFence drops any other).
+- `kh.yaml` is read when `kh serve` starts: after an edit restart `kh serve`, and PrivacyFence picks the change up within one refresh interval. A failed refresh keeps the last answer; an answer older than three intervals gives nobody any audience.
+- An existing `upstream_mcp.kh.groups` entry for this upstream and a membership file kept only for the hub can be deleted: PrivacyFence ignores the map and logs that once.
+- Existing n8n tokens stay valid: the audiences source is not part of the declaration digest.
+- `kh.yaml` is refused at start-up with more than 200 active groups, more than 20000 members in all or an audience table over 1000000 characters, because PrivacyFence would refuse the answer.
 
-```json
-"upstream_mcp": {
-  "kh": {"groups": {
-    "kh-n8n-all@company.example": ["all"],
-    "kh-n8n-mgmt@company.example": ["mgmt"]
-  }}
-}
-```
+To see the state open PrivacyFence **Admin → Upstream MCP servers**, card "Knowledge hub: audiences": the state is `waiting`, `ready` or `stale`, with the counts, the last refresh and the last error. `privacyfence_status` shows `audiences_source: upstream` and `audiences_state`.
 
-Each audience is a group name of `kh.yaml`. PrivacyFence re-reads `admin_config.json` when it changes; edit it while nobody is saving on the Admin page. PrivacyFence's one unrestricted audience is also named `all`, like the example group `all` of `kh.yaml`; that works, and a member of a group mapped to `all` holds it at once, while a restricted audience such as `mgmt` is approved per person.
-
-Membership comes from one of two sources, set by the top-level `membership` key of the declaration file:
-
-- `static` (recommended when only a few administrators create tokens): uncomment the `membership` example in `deploy/privacyfence-upstream.example.yaml`, restart PrivacyFence, and write the JSON file it names, for example `{"version": 1, "groups": {"kh-n8n-all@company.example": ["admin@company.example"], "kh-n8n-mgmt@company.example": ["admin@company.example"]}}`. No approvals and no sync job; PrivacyFence re-reads the file when it changes.
-- `snapshot` (the default, used when the declaration sets no `membership` key, as the example does): a job of yours calls `privacyfence_update_group_membership` with the members of each mapped group. Nothing in the hub runs that job. An addition to `all` applies at once; an addition to a restricted audience such as `mgmt` waits until an administrator approves it in PrivacyFence, Admin, Group membership.
-
-Before the first token for a group an administrator:
-
-1. adds `"<Workspace group>": ["<kh.yaml group>"]` under `upstream_mcp.kh.groups` in `admin_config.json`;
-2. makes each administrator who creates tokens a member of that Workspace group: in the static file, or through the sync job and, for a restricted audience, an approval in Admin, Group membership.
-
-Then the token is created as in "Creating an n8n token": the group name as its audience, the gated tools ticked.
-
-When an n8n call answers `audience is not held by this caller or not configured`, check the token creator's PrivacyFence membership first: the creator must be a member of a Workspace group that the map sends to that audience (and be approved for it, if it is restricted), and the audience must be a group of `kh.yaml`. A creator who loses the membership takes the audience from the token at the next call.
+When an n8n call answers `audience is not held by this caller or not configured`, check in this order: the creator is not a member of that group in `kh.yaml`; their `people` email there is not the address they sign in to PrivacyFence with; the group is archived; `kh serve` was not restarted after the edit; or the state is `stale`.
 
 ### Creating an n8n token
 
@@ -70,7 +53,7 @@ Scoped tokens call gated upstream tools only through an administrator's tick. In
 
 1. name the token for the workflow and set an expiry;
 2. under "Upstream tools that change data or release results unseen" tick `kh_ingest_record`, and `kh_propose_doc` only when the workflow proposes document changes; tick the reads the workflow needs (`kh_search`, `kh_usage`, ...) as usual;
-3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`), and so does a group the creator does not hold: the box appears only for an audience the creator holds through the map and a membership source (see "Groups for n8n tokens");
+3. under "Audiences for Knowledge hub" tick exactly the group names the workflow may write into and read; a token never holds more than its creator. A name that is not a configured group fails closed (`audience is not held by this caller or not configured`), and so does a group the creator does not hold: the box appears only for a group the creator holds in `kh.yaml` (see "Audiences from the hub");
 4. store the secret in n8n's credential store, never in chat.
 
 `kh_move_item` is for Claude clients only: a workflow that calls it is refused, so do not tick it on an n8n token.
