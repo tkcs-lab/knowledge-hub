@@ -49,6 +49,7 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
 | `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
+| `kh label`, `kh group`, `kh person` | Manage `kh.yaml` and apply the change. |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
 | `kh daily` | Recompute stale flags, purge expired claim ids and delete usage events past the retention. |
