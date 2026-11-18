@@ -13,6 +13,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - worker: remove_group also deletes the group's kh.record_moves rows, as plan section 3.6 says and the brief does not
 - review: workers had no tld; the orchestrator ran roles required (none required) and scope check (no out-of-scope paths); integration tests could not run here (no database), the worker ran them against a local Postgres
 - final: the kh.record_moves delete sat in the shared _remove_group, so kh setup apply --prune also deleted those rows, which the plan says stays unchanged (fix-2)
+- retry: fix-2 merged: the record_moves delete now runs only for kh group remove, so kh setup apply --prune behaves as before (final review finding 4)
 
 ## p3b-steps-forgejo
 
