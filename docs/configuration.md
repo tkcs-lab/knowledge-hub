@@ -44,6 +44,7 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_FORGEJO_URL` | none | Forgejo base URL. The worker exists only when it is set. The Forgejo organisation is `org` in `kh.yaml`. |
 | `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of the `bot_login` account, used only to open `propose_doc` pull requests. |
 | `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token of the `indexer_login` account. Required when `KH_FORGEJO_URL` is set. |
+| `KH_TECH_POLL_MINUTES` | `60` | Minutes between polls that queue a `git_push` job for every repo in `tech_repos`, 0 to 10080; 0 switches the poll off. Needs `KH_FORGEJO_URL`. |
 | `KH_WEBHOOK_HMAC_FILE` | none | Secret for `X-Forgejo-Signature`. A missing or empty secret makes `/webhooks/forgejo` answer 401. `kh setup` also writes it into the org webhook. |
 
 ### Setup credentials (`kh setup` only)
@@ -87,7 +88,7 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_CHUNKER_VERSION` | `1` | Part of the chunk hash; raising it re-chunks every document on the next sync. |
 | `KH_RRF_K` | `60` | Reciprocal-rank-fusion constant. |
 | `KH_SEARCH_POOL` | `50` | Candidates per list (vector and full text) before fusion. |
-| `KH_TIER_WEIGHTS` | `T0:1.0,T3:0.4` | Score multiplier per tier; it must name exactly `T0` and `T3`. |
+| `KH_TIER_WEIGHTS` | `T0:1.0,T0a:0.7,T3:0.4` | Score multiplier per tier. `T0` and `T3` are required, `T0a` is optional (missing, it is the midpoint of T0 and T3, so `T0:1.0,T3:0.4` still starts); no other name; every weight positive and `T0 >= T0a >= T3`. |
 | `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit or an included outdated hit. |
 | `KH_SIMILAR_LIMIT` | `3` | Most `similar` items `ingest_record` and `propose_doc` return, 0 to 10; 0 switches the lookup off. |
 | `KH_SIMILAR_MIN_SCORE` | `0.5` | Smallest `similarity` (0 to 1) an item needs to be listed as similar. |
@@ -144,6 +145,12 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `labels` | `{}` | Map of label name (`^[a-z0-9][a-z0-9_.:-]{0,62}$`) to a description of at most 200 characters; at most 500 labels. |
 | `archived_labels` | `[]` | Label names, each a key of `labels` (`config: archived_labels entry '<x>' is not in labels`, `config: archived_labels lists '<x>' twice`). An archived label is hidden from `list_labels`, from the `labels` of results (`search`, `get_doc`, `list_stale`, `usage`) and from search filters; `ingest_record` and `propose_doc` using it fail with `unknown label`. The label and its rows stay. |
 
+| `tech_org` | null | Forgejo organisation that holds the clones or forks of the technical repos; a valid login that differs from `org` (case-insensitive). Required when `tech_repos` is not empty. |
+| `tech_repos` | `{}` | Map of bare repository name in `tech_org` to `{labels}`. Their `CLAUDE.md` and `docs/**/*.md` are indexed as tier T0a with audience `all`, no approval. Needs the group `all`, active. |
+| `tech_repos.<r>.labels` | `[]` | Labels put on every document of the repo; each must be a key of `labels`, none twice. A label archived later stays on the documents and is hidden. |
+
+Tech repo errors: `config: tech_repos needs tech_org`, `tech_org '<x>' is not a valid login`, `tech_org must differ from org`, `tech repo '<r>' is not a valid repository name`, `tech repo <r> is also the repo of group <g>`, `tech_repos needs the group all`, `tech_repos needs the group all to be active`, `tech repo <r> label '<x>' is not in labels`, `tech repo <r> lists label '<x>' twice`. A change needs a `kh serve` restart.
+
 The hub reads `archived` and `archived_labels` when `kh serve` starts, so changing either needs a restart.
 
 Group names match `^[a-z0-9][a-z0-9_-]{0,62}$`, are not `owners` in any case, and `<name>-approve` may not itself be a group name. Forgejo teams are derived: `<group>` (write on its repo) and `<group>-approve` (read on its repo, in the merge whitelist).
@@ -165,15 +172,19 @@ groups:
     approvers: [alice]
 labels:
   product:ember: Ember product
+tech_org: kh-tech
+tech_repos:
+  ember-core:
+    labels: [product:ember]
 ```
 
 The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart. `deploy/kh.example.yaml` is the maintained example.
 
 ## kh setup
 
-`kh setup plan|apply --config kh.yaml [--only postgres|labels|forgejo|ollama|s3] [--prune] [--create-bucket]`. `plan` is strictly read-only. `apply` performs every possible change, prints the same lines and is idempotent. `--create-bucket` matters only for `apply`. `--prune` removes objects the config no longer lists.
+`kh setup plan|apply --config kh.yaml [--only postgres|labels|tech|forgejo|ollama|s3] [--prune] [--create-bucket]`. `plan` is strictly read-only. `apply` performs every possible change, prints the same lines and is idempotent. `--create-bucket` matters only for `apply`. `--prune` removes objects the config no longer lists.
 
-Steps run in this order: `postgres`, `labels`, `forgejo`, `ollama`, `s3`. A step that fails prints `setup: <step>: <message>` and the later steps are skipped.
+Steps run in this order: `postgres`, `labels`, `tech`, `forgejo`, `ollama`, `s3`. A step that fails prints `setup: <step>: <message>` and the later steps are skipped.
 
 **Lines.** `<prefix> <object kind> <name>[: <detail>]`:
 
@@ -196,6 +207,9 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 
 1. `postgres`. With an admin DSN: create the roles `kh_migrator`, `kh_app` and `kh_indexer` (passwords from the `KH_DB_*_PASSWORD_FILE` files, re-set on every apply because they cannot be read back), the database owned by `kh_migrator`, `CREATE EXTENSION vector`, then run pending migrations. Without an admin DSN it only checks, and pending migrations count as drift. It then syncs `kh.groups`: groups are added; a removed group goes only with `--prune`, is refused when records exist, and its documents are deleted.
 2. `labels`. Inserts new labels and updates descriptions. A removed label is deleted only with `--prune` and only when unused (`! label <x>: in use`). After a label is added, apply queues one `git_push` job per repo so files rejected for an unknown label are retried.
-3. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only, and repos are never deleted.
-4. `ollama`. `plan` checks that the model is listed and that one embedding has length `KH_EMBED_DIM`; `apply` pulls it.
-5. `s3`. Checks that the bucket exists and takes a put, get and delete of `kh-setup-probe/<uuid>`. `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
+3. `tech`. Reports `? tech documents of <repo>: repo is not in tech_repos` for each repo that has T0a documents but is no longer in `tech_repos`; `apply --prune` deletes those documents and the repo's indexed head (`- tech documents of <repo>`). A configured repo is never touched.
+4. `forgejo`. Per group: both teams with exactly the configured members and approvers, the private repo with `main`, the bot (write) and indexer (read) collaborators, and branch protection of `main` (no direct push, merge whitelist the approve team, `required_approvals: 0`, `block_on_rejected_reviews`, `apply_to_admins`), read back after writing. One org webhook (push events) to `<hub_url>/webhooks/forgejo`, with its secret rewritten on every apply; a config without `hub_url` prints `! hub_url: not set`. When token files are set it checks that each token belongs to its configured login and has no excess rights, and lists the Owners-team members. Unmanaged teams and repos print `? unmanaged`; `--prune` removes unmanaged teams only, and repos are never deleted.
+5. `ollama`. `plan` checks that the model is listed and that one embedding has length `KH_EMBED_DIM`; `apply` pulls it.
+6. `s3`. Checks that the bucket exists and takes a put, get and delete of `kh-setup-probe/<uuid>`. `apply --create-bucket` also creates a missing bucket (Garage often forbids this to ordinary keys).
+
+**The tech org.** With `tech_repos` set, `forgejo` also reads `tech_org` and never creates anything there; clones and forks are made by hand. Per tech repo it prints `! tech repo <r>: not in org <tech_org>; create the clone or fork there` when it is missing, gives the indexer read access, and prints `i tech repo <r>: collaborators <logins>` (push access is the trust boundary of T0a). Repos of the org that are not configured print `? unmanaged tech repo <name>`. It adds the org webhook of the tech org (`tech webhook <url>`, `tech hub_url: not set`). It sets no teams, branch protection or repo settings, and `--prune` never touches the tech org. After a new label, `labels` also queues a `git_push` job for each tech repo.
