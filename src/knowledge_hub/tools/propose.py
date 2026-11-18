@@ -42,7 +42,7 @@ async def propose_doc(
     bot = deps.forgejo_bot
     if bot is None:
         raise kh_error("not_configured", errors.NOT_CONFIGURED)
-    if group not in caller.audiences or group not in deps.config.groups:
+    if group not in caller.audiences or not deps.config.is_active(group):
         raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
     repo = deps.config.repo_for_group(group)
     if not validate_path(path):
@@ -66,7 +66,7 @@ async def propose_doc(
         async with call.conn.cursor() as cur:
             await cur.execute("SELECT name FROM kh.labels WHERE name = ANY(%s)", (wanted,))
             known = {r[0] for r in await cur.fetchall()}
-        if known != set(wanted):
+        if known != set(wanted) or set(wanted) & deps.config.archived_label_set:
             raise kh_error("bad_label", errors.BAD_LABEL)
     text = render_file(id, title, review_by, wanted, body)
     if len(text.encode()) + len(summary.encode()) > deps.settings.propose_max_bytes:
