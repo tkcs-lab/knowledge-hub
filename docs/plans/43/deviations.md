@@ -7,6 +7,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - review: none beyond a CHANGELOG entry under Unreleased (allowed by the changelog rule)
 - None.
+- final: fix-1: an empty tech_org with tech_repos is now refused (non-blocking review finding, fixed at the owner's request); new test test_tech_repos_need_a_non_empty_tech_org
 
 ## p2-tier-schema
 
@@ -18,6 +19,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - retry: first attempt stopped: the plan's usage SQL broke test_outranked_t0_needs_no_doc_before_the_record, whose fixture used a doc key with no document row; the orchestrator told the worker to repair the fixture with a real T0 document
 - worker: existing test test_outranked_t0_needs_no_doc_before_the_record now seeds a real T0 document (add_doc); assertion unchanged
+- final: fix-1 removed the unused tier column from list_stale (final review, blocking)
 
 ## p4-tech-docs
 
@@ -34,10 +36,12 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p7-setup
 
 - None.
+- final: fix-1: _effective takes admin keyword-only (non-blocking review finding, fixed at the owner's request)
 
 ## p8-retire-docs
 
 - None.
+- final: fix-1: runbook step 4 now says the first sync is queued when kh serve starts (non-blocking review finding, fixed at the owner's request)
 
 ## Final review
 
