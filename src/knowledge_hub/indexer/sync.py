@@ -127,6 +127,8 @@ async def sync_repo(
     audience = config.group_for_repo(repo)
     if audience is None:
         raise ValueError(f"repo {repo} is in no group")
+    if not config.is_active(audience):
+        raise ValueError(f"repo {repo} is archived")
     last_sha, stored, labels, stored_chunks = await _load(indexer_pool, repo)
     head = await reader.head_sha(repo, "main")
     rewritten = bool(last_sha) and not await reader.is_ancestor(repo, last_sha, head)

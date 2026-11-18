@@ -1,10 +1,12 @@
 """``usage``: how people use the knowledge base, to find T3 records worth promoting (plan 3.5)."""
 
+from functools import partial
 from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from psycopg.rows import dict_row
 
+from knowledge_hub.config import KhConfig
 from knowledge_hub.mcp.errors import ToolCall, tool_guard
 from knowledge_hub.mcp.server import Deps
 
@@ -79,12 +81,12 @@ def _iso(value: Any) -> str:
     return value.isoformat() if value is not None else ""
 
 
-def _record_item(row: dict[str, Any]) -> dict[str, Any]:
+def _record_item(row: dict[str, Any], config: KhConfig) -> dict[str, Any]:
     return {
         "id": f"rec:{row['id']}",
         "audience": row["audience"],
         "title": row["title"],
-        "labels": list(row["labels"] or []),
+        "labels": config.visible_labels(row["labels"] or []),
         "source": row["source"],
         "source_url": row["source_url"] or "",
         "occurred_at": _iso(row["occurred_at"]),
@@ -121,7 +123,11 @@ async def usage(
     min_people = max(2, min(min_people, 50))
     limit = max(1, min(limit, 50))
     params = {"days": days, "audience": audience, "min_people": min_people, "n": limit}
-    sql, convert = (_RECORDS_SQL, _record_item) if view == "records" else (_QUERIES_SQL, _query_item)
+    config = call.deps.config
+    if view == "records":
+        sql, convert = _RECORDS_SQL, partial(_record_item, config=config)
+    else:
+        sql, convert = _QUERIES_SQL, _query_item
     async with call.conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(sql, params)
         rows = await cur.fetchall()

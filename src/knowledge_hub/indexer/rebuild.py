@@ -12,7 +12,7 @@ RECORD_GRACE = "5 minutes"
 
 
 def configured_repos(config: Any) -> list[str]:
-    return sorted(config.repo_for_group(name) for name in config.groups)
+    return sorted(config.repo_for_group(name) for name in config.active_groups)
 
 
 async def rebuild(deps: Any, repo: str | None = None) -> dict[str, SyncPlan]:
@@ -20,6 +20,8 @@ async def rebuild(deps: Any, repo: str | None = None) -> dict[str, SyncPlan]:
     repos = configured_repos(deps.config)
     if repo is not None:
         if repo not in repos:
+            if deps.config.group_for_repo(repo) is not None:
+                raise ValueError(f"repo {repo} is archived")
             raise ValueError(f"repo {repo} is in no group")
         repos = [repo]
     if deps.reader is None:

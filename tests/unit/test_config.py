@@ -182,3 +182,44 @@ def test_load_config_errors(tmp_path):
     assert load_config(p) == KhConfig()
     p.write_text("org: x\npeople: {a: a@x.io}\n")
     assert load_config(p).org == "x"
+
+
+def test_archived_group_flag_defaults_false_and_is_read():
+    c = cfg(groups={**GROUPS, "old": {"members": ["bob"], "approvers": ["bob"], "archived": True}})
+    assert c.groups["all"].archived is False
+    assert c.groups["old"].archived is True
+    refused({"groups": {"g": {"approvers": [], "archived": "maybe"}}}, "archived")
+
+
+def test_archived_labels_must_be_defined_and_unique():
+    assert cfg().archived_labels == []
+    assert cfg(labels={"a": "A"}, archived_labels=["a"]).archived_labels == ["a"]
+    refused(
+        {"labels": {"a": "A"}, "archived_labels": ["b"]},
+        "config: archived_labels entry 'b' is not in labels",
+    )
+    refused(
+        {"labels": {"a": "A"}, "archived_labels": ["a", "a"]},
+        "config: archived_labels lists 'a' twice",
+    )
+
+
+def test_active_groups_and_visible_labels():
+    c = cfg(
+        groups={**GROUPS, "old": {"members": ["bob"], "approvers": ["bob"], "archived": True}},
+        labels={"a": "A", "b": "B", "c": "C"},
+        archived_labels=["b"],
+    )
+    assert c.active_groups == ["all", "mgmt"]
+    assert c.is_active("all") is True
+    assert c.is_active("old") is False
+    assert c.is_active("missing") is False
+    assert c.archived_label_set == frozenset({"b"})
+    assert c.visible_labels(["c", "b", "a", "zzz"]) == ["c", "a", "zzz"]
+    assert cfg().visible_labels(["x", "y"]) == ["x", "y"]
+
+
+def test_audiences_for_email_skips_archived_groups():
+    c = cfg(groups={**GROUPS, "old": {"members": ["alice", "bob"], "approvers": ["alice"], "archived": True}})
+    assert c.audiences_for_email("alice@example.com") == {"all", "mgmt"}
+    assert c.audiences_for_email("bob@example.com") == {"all"}

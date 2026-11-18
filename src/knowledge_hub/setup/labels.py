@@ -62,7 +62,7 @@ class LabelsStep:
                 else:
                     out.append(change)
             if added:
-                for group in self._config.groups:
+                for group in self._config.active_groups:
                     repo = self._config.repo_for_group(group)
                     await conn.execute(
                         "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES ('git_push', %s, %s)",

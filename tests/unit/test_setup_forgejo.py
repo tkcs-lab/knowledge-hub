@@ -345,3 +345,53 @@ async def test_new_group_leaves_existing_ones_alone(fake, admin, applied):
     assert drift(await step(admin, config).plan()) == []
     writes = [p for m, p in fake.requests if m not in ("GET",)]
     assert not any("kb-all" in p or "kb-management" in p for p in writes)
+
+
+def archived_config(**extra):
+    groups = {**CONFIG["groups"], "mgmt": {**CONFIG["groups"]["mgmt"], "archived": True, **extra}}
+    return {**CONFIG, "groups": groups}
+
+
+async def test_archived_group_repo_is_archived_and_teams_untouched(fake, admin, applied):
+    teams_before = {k: dict(v) for k, v in fake.teams.items()}
+    members_before = {k: list(v) for k, v in fake.team_members.items()}
+    protection = dict(fake.protections["kb-management"])
+    changes = await step(admin, archived_config()).apply(prune=False)
+    assert "~ repo kb-management: archived" in lines(changes)
+    assert fake.repos["kb-management"]["archived"] is True
+    assert fake.teams == teams_before and fake.team_members == members_before
+    assert fake.protections["kb-management"] == protection
+    assert fake.repos["kb-all"]["archived"] is False
+
+
+async def test_archived_group_without_repo_creates_nothing(fake, admin):
+    changes = await step(admin, archived_config()).apply(prune=False)
+    assert "i group mgmt: archived, repo kb-management not created" in lines(changes)
+    assert "kb-management" not in fake.repos
+    assert not has(changes, "+", r"mgmt")
+
+
+async def test_archived_group_is_converged_on_second_plan(fake, admin, applied):
+    s = step(admin, archived_config())
+    await s.apply(prune=False)
+    again = await s.plan()
+    assert not any(c.prefix in ("~", "+") for c in again), lines(again)
+
+
+async def test_unarchived_group_unarchives_repo_before_protection(fake, admin, applied):
+    await step(admin, archived_config()).apply(prune=False)
+    assert fake.repos["kb-management"]["archived"] is True
+    fake.requests.clear()
+    changes = await step(admin).apply(prune=False)
+    assert "~ repo kb-management: archived" in lines(changes)
+    assert fake.repos["kb-management"]["archived"] is False
+    patch = fake.requests.index(("PATCH", "/api/v1/repos/kh/kb-management"))
+    prot = [i for i, (_, p) in enumerate(fake.requests) if "kb-management/branch_protections" in p]
+    assert not prot or patch < min(prot)
+
+
+async def test_archived_group_members_are_not_account_checked(fake, admin):
+    config = archived_config(members=["ghost"], approvers=["ghost"])
+    config = {**config, "people": {**config["people"], "ghost": "ghost@example.com"}}
+    changes = await step(admin, config).plan()
+    assert not any(c.prefix == "!" for c in changes), lines(changes)

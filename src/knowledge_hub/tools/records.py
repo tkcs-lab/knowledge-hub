@@ -50,7 +50,7 @@ async def ingest_record(
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
     deps, caller = call.deps, call.caller
-    if audience not in caller.audiences or audience not in deps.config.groups:
+    if audience not in caller.audiences or not deps.config.is_active(audience):
         raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
     bad = _nul_arg(
         {"source": source, "source_ref": source_ref, "title": title, "body": body,
@@ -73,7 +73,7 @@ async def ingest_record(
         async with call.conn.cursor() as cur:
             await cur.execute("SELECT name FROM kh.labels WHERE name = ANY(%s)", (wanted,))
             known = {r[0] for r in await cur.fetchall()}
-        if known != set(wanted):
+        if known != set(wanted) or set(wanted) & deps.config.archived_label_set:
             raise kh_error("bad_label", errors.BAD_LABEL)
     found = await _existing(call, audience, source, source_ref)
     if found is not None:

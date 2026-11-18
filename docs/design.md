@@ -13,6 +13,8 @@ This document records the decisions as built, the alternatives that were rejecte
 
 - A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name an n8n token carries and the access group of one T0 repo. Every group has exactly one repo.
 - A **label** matches `^[a-z0-9][a-z0-9_.:-]{0,62}$` (`product:ember` is legal), is defined in `kh.yaml` and stored in `kh.labels`. Label names are visible to every caller; do not put secrets in them.
+- An **archived group** (`archived: true` on the group in `kh.yaml`) acts as removed without deleting data: nobody holds it, so its documents and records are hidden, `ingest_record` and `propose_doc` refuse it and nothing is indexed for it. The database is unchanged; the state lives in `kh.yaml` and the hub reads it at start.
+- An **archived label** (a name listed under `archived_labels` in `kh.yaml`) vanishes from `list_labels`, from result labels (`search`, `get_doc`, `list_stale`, `usage`) and from search filters, and writes using it fail with `unknown label`. The database is unchanged: the label stays in `kh.labels`, so documents that name it are still indexed, and the state lives in `kh.yaml`.
 - Tools return the ids `doc:<uuid>` and `rec:<uuid>`. `search` defaults to `min_tier=T3`, which searches T0 and T3; `min_tier=T0` searches documents only; tier weights are `T0:1.0,T3:0.4`.
 
 ## Trust: Forgejo is the control
@@ -27,6 +29,7 @@ This document records the decisions as built, the alternatives that were rejecte
 T0 trust rests entirely on Forgejo, so `plan` checks it and reports any difference as drift:
 
 - per group, the teams `<group>` (write on the repo) and `<group>-approve` (read, in the merge whitelist) with exactly the configured members and approvers;
+- an archived group is checked only for its Forgejo repo being archived;
 - the repo is private with `main`, the bot has write and the indexer has read;
 - branch protection on `main`: no direct push, the merge whitelist is exactly the approve team, `required_approvals: 0`, `apply_to_admins: true`, read back after every write (Forgejo silently drops whitelist teams that cannot read the repo);
 - the identity of the bot and indexer tokens (`GET /user` equals the configured login, the bot has no repo admin, the indexer no push, neither is an org owner or site admin);
@@ -37,7 +40,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 
 ## Access model
 
-- **Resolution.** `ClaimMiddleware` resolves the caller's groups from the verified claim. A `claude_client` holds the groups of `kh.yaml` in which a member's `people` email equals the claim's verified email, compared in lower case; a claim without an email gives no group, and the claim's `audiences` are ignored. An `n8n_workflow` holds the claim's `audiences` that are configured groups, because a workflow has no `people` entry. A `service` calls no tool. The config is read when `kh serve` starts, so a change to `people` or to a group needs a restart.
+- **Resolution.** `ClaimMiddleware` resolves the caller's groups from the verified claim. A `claude_client` holds the groups of `kh.yaml` in which a member's `people` email equals the claim's verified email, compared in lower case; a claim without an email gives no group, and the claim's `audiences` are ignored. An `n8n_workflow` holds the claim's `audiences` that are configured, non-archived groups, because a workflow has no `people` entry. A `service` calls no tool. The config is read when `kh serve` starts, so a change to `people` or to a group needs a restart.
 - **The rule.** `kh.can_read(a)` is `a = ANY(kh.caller_audiences())`. A document, record or chunk is visible when its audience is held; inserting a record needs the audience too.
 - **One list for people.** `kh.yaml` decides both a person's Forgejo teams and what the hub lets them read, so a joiner or leaver changes one file. PrivacyFence keeps authentication, the verified email and the write popups; its group-to-audience mapping is no longer used for people. A person whose PrivacyFence email differs from their `people` email reads nothing.
 - **n8n tokens still need PrivacyFence's group map.** A person's groups come from `people` in `kh.yaml` through the verified email, so PrivacyFence needs no map entry for people. A scoped token's audiences are its creator's PrivacyFence audiences at each call, intersected with those ticked at creation (PrivacyFence ADR 0298), so `upstream_mcp.kh.groups` in PrivacyFence's `admin_config.json` keeps an entry for each audience an n8n workflow should hold, and each administrator who creates an n8n token is a member of those groups through a membership source (a `static` file, or the default `snapshot` sync, where a restricted audience is approved per person). Without the map every n8n token holds no audience, and `ingest_record` and `propose_doc` answer `audience is not held by this caller or not configured`. The hub's rule is unchanged: it ignores a `claude_client` claim's audiences and keeps an `n8n_workflow` claim's audiences that are configured groups.

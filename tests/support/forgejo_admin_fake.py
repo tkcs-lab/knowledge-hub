@@ -87,6 +87,7 @@ class FakeForgejoAdmin:
         return {
             "name": name, "full_name": f"{self.org}/{name}", "private": True, "default_branch": "main",
             "has_actions": True, "default_delete_branch_after_merge": False, "empty": False,
+            "archived": False,
         }
 
     def _team_access(self, tid: int, repo: str) -> str:

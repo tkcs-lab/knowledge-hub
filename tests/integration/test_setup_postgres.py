@@ -195,3 +195,30 @@ async def test_labels(empty, settings):
     assert len(out) == 1 and out[0].startswith("! label a")
     with psycopg.connect(mig(empty)) as conn:
         assert conn.execute("SELECT count(*) FROM kh.labels").fetchone() == (1,)
+
+
+def cfg_archived(archived=("hr",), labels=None):
+    config = cfg(("all", "hr"), labels)
+    for g in archived:
+        config.groups[g].archived = True
+    return config
+
+
+async def test_archived_group_is_kept_by_prune(empty, settings):
+    await step(empty, settings, cfg(("all", "hr"))).apply(False)
+    s = step(empty, settings, cfg_archived())
+    assert lines(await s.plan()) == []
+    assert lines(await s.apply(True)) == []
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT name FROM kh.groups ORDER BY name").fetchall() == [("all",), ("hr",)]
+
+
+async def test_labels_jobs_skip_archived_groups(empty, settings):
+    await step(empty, settings, cfg(("all", "hr"))).apply(False)
+    config = cfg_archived(labels={"a": "first"})
+    out = lines(await LabelsStep(config, mig(empty)).apply(False))
+    assert out == ["+ label a", "+ job git_push: kb-all"]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute(
+            "SELECT repo FROM kh.index_jobs WHERE kind='git_push'"
+        ).fetchall() == [("kb-all",)]
