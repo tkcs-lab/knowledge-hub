@@ -88,7 +88,9 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_RRF_K` | `60` | Reciprocal-rank-fusion constant. |
 | `KH_SEARCH_POOL` | `50` | Candidates per list (vector and full text) before fusion. |
 | `KH_TIER_WEIGHTS` | `T0:1.0,T3:0.4` | Score multiplier per tier; it must name exactly `T0` and `T3`. |
-| `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit. |
+| `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit or an included outdated hit. |
+| `KH_SIMILAR_LIMIT` | `3` | Most `similar` items `ingest_record` and `propose_doc` return, 0 to 10; 0 switches the lookup off. |
+| `KH_SIMILAR_MIN_SCORE` | `0.5` | Smallest `similarity` (0 to 1) an item needs to be listed as similar. |
 | `KH_SEARCH_MAX_OFFSET` | `100` | Largest offset a `search` cursor may carry; above it `CURSOR_FOREIGN`. |
 | `KH_MAX_RECORD_BYTES` | `1048576` | Largest `ingest_record` body (was `KH_MAX_RAW_BYTES`). |
 | `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body. |

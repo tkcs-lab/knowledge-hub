@@ -17,13 +17,14 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 
 | Tool | Use |
 |---|---|
-| `search` | Hybrid search over T0 and T3 (both by default; `min_tier=T0` for documents only), filtered by labels and group. |
+| `search` | Hybrid search over T0 and T3 (both by default; `min_tier=T0` for documents only), filtered by labels and group. Superseded documents and outdated records are hidden unless `include_outdated=true`. |
 | `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
-| `ingest_record` | Store a raw record (T3) readable by one group. |
-| `propose_doc` | Open a pull request that proposes a document change in a group's repo. |
+| `ingest_record` | Store a raw record (T3) readable by one group; the answer lists up to three `similar` items of that group. |
+| `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
+| `propose_doc` | Open a pull request that proposes a document change in a group's repo, optionally with `supersedes`; the answer lists `similar` items. |
 
 ## Quick start
 

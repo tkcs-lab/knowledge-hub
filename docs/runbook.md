@@ -145,6 +145,19 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `file rejected: unknown label <x>` | The file names a label that is not in `kh.yaml`. Add the label and run `kh setup apply`, which queues a re-sync of every repo, or remove it from the file. |
 | `file rejected: duplicate id <id>` | Two files in one repo carry the same `id`; both are rejected. Give one a new id. |
 | `main of <repo> was rewritten; run kh rebuild after review` | The new head of `main` does not continue from the last indexed sha. The index is unchanged. Inspect the force push in Forgejo. If it was intended, run `kh rebuild --repo <repo>`. If not, restore the branch from a clone and look at who could push (`kh setup plan` shows protection drift and Owners-team bypass). |
+| `supersedes unknown id <key>` | The file lists an id that no document of the repo has. The line is ignored. Fix the id or remove it by a pull request. |
+| `superseded by <n> documents; using <doc_key>` | Several documents list the same id; the one with the smallest id wins. Remove the line from the others. |
+| `supersedes cycle: <keys>` | Documents replace each other; none of them is hidden. Remove one link. |
+
+A hidden (superseded) document is still readable with `get_doc` or `search` with `include_outdated=true`.
+
+### Rollout of supersede and outdated
+
+1. Deploy the new image and run `kh migrate` (prints `applied 0003_supersede.sql`; it also applies `0002_usage_events.sql` when that is pending). It blanks every `blob_sha`.
+2. Run `kh rebuild` so every file is read again (chunks are matched by content, so nothing is embedded again), then `kh check`.
+3. Restart PrivacyFence, which reads the upstream declaration only at startup, and create the n8n tokens again for workflows that should call `mark_record_outdated`.
+
+Between steps 1 and 2 `propose_doc` with a `base_blob` waits for the rebuild. Afterwards every document has a new `commit_sha`, `indexed_at` and `source_link`, once.
 
 ## Backup and restore
 
