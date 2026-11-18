@@ -25,10 +25,15 @@ class SearchFilters:
     limit: int = 10
     offset: int = 0
     pool: int = 50
+    min_similarity: float = 0.0
     rrf_k: int = 60
     tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T0a": 0.7, "T3": 0.4})
     stale_weight: float = 0.5
     include_outdated: bool = False
+
+    def max_distance(self) -> float:
+        """Largest cosine distance a vector candidate may have; 2.0 (no limit) when the floor is off."""
+        return 2.0 if self.min_similarity <= 0 else 1.0 - self.min_similarity
 
     def tiers_at_or_above(self) -> list[str]:
         return list(TIERS[: TIERS.index(self.min_tier) + 1])
@@ -84,6 +89,7 @@ def _lists(prefix: str, tiers: str) -> str:
            WHERE c.embedding IS NOT NULL AND c.embedding_model = %(model)s AND {flt}
            ORDER BY dist, c.id
            LIMIT %(pool)s) v
+   WHERE %(max_dist)s::float8 >= 2 OR v.dist <= %(max_dist)s::float8
 ),
 {prefix}_fts AS (
   SELECT id, row_number() OVER (ORDER BY rank DESC, id) AS rnk
@@ -112,7 +118,9 @@ scored AS (
   SELECT c.id, c.owner_key, c.tier, c.stale, c.text, c.document_id, c.record_id,
          (h.owner_key IS NOT NULL) AS outdated,
          m.rrf * (%(tier_weights)s::jsonb ->> c.tier)::float8
-               * CASE WHEN c.stale OR h.owner_key IS NOT NULL THEN %(stale_weight)s ELSE 1 END AS score
+               * CASE WHEN c.stale OR h.owner_key IS NOT NULL THEN %(stale_weight)s ELSE 1 END AS score,
+         CASE WHEN c.embedding IS NOT NULL AND c.embedding_model = %(model)s
+              THEN 1 - (c.embedding <=> %(qvec)s::vector) END AS similarity
     FROM main_fused m JOIN kh.chunks c ON c.id = m.id
     LEFT JOIN hidden h ON h.owner_key = c.owner_key
 ),
@@ -138,7 +146,7 @@ meta AS (
          (SELECT count(DISTINCT c.owner_key) FROM kh.chunks c, websearch_to_tsquery('english', %(query)s) q
            WHERE c.tsv @@ q.q AND c.tier = 'T3') AS t3_fts_hits
 )
-SELECT p.id, p.owner_key, p.tier, p.stale, p.outdated, p.text, p.score,
+SELECT p.id, p.owner_key, p.tier, p.stale, p.outdated, p.text, p.score, p.similarity,
        d.superseded_by AS doc_superseded_by, r.replaced_by AS rec_replaced_by,
        d.repo AS doc_repo, d.path AS doc_path, d.blob_sha AS doc_blob_sha,
        d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
@@ -169,6 +177,7 @@ def build_search_query(filters: SearchFilters) -> tuple[str, dict[str, Any]]:
         "labels": list(filters.labels),
         "audience": filters.audience,
         "pool": filters.pool,
+        "max_dist": filters.max_distance(),
         "rrf_k": filters.rrf_k,
         "limit": filters.limit,
         "offset": filters.offset,

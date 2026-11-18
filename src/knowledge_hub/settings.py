@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     chunker_version: int = 1
     rrf_k: int = 60
     search_pool: int = 50
+    search_min_similarity: float = Field(0.0, ge=0.0, le=1.0)
     tier_weights: str = "T0:1.0,T0a:0.7,T3:0.4"
     stale_weight: float = 0.5
     similar_limit: int = Field(3, ge=0, le=10)

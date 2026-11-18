@@ -55,6 +55,7 @@ def _hit(row: dict[str, Any], config: KhConfig) -> dict[str, Any]:
             else (row["rec_replaced_by"] or "")
         ),
         "score": float(row["score"]),
+        "similarity": round(float(row["similarity"]), 3) if row["similarity"] is not None else None,
         "snippet": row["text"][:SNIPPET_CHARS],
     }
 
@@ -95,6 +96,7 @@ async def search(
         limit=limit,
         offset=offset,
         pool=settings.search_pool,
+        min_similarity=settings.search_min_similarity,
         rrf_k=settings.rrf_k,
         tier_weights=parse_tier_weights(settings.tier_weights),
         stale_weight=settings.stale_weight,

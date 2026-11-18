@@ -158,6 +158,14 @@ An n8n agent reads the usage log to find T3 records worth promoting to T0 and qu
 
 After the first deploy run the sandbox probe once: `kh setup plan` (expect `+` lines, exit 1), `kh setup apply`, `kh setup plan` again (only `i` lines, exit 0), then in Forgejo check Settings, Branches of a repo (direct push off, the merge whitelist is exactly `<group>-approve`, admins bound). Merge a `propose_doc` pull request as an approver and confirm the document appears in `search`; as a listed person confirm you read only your groups; a person whose PrivacyFence email is not in `people` must read nothing. Add a third group, run `apply` and confirm its team, repo and protection appear without changing the first two. Any `+`, `~` or `!` line after `apply` is a bug to report.
 
+### Calibrating the search similarity floor
+
+`KH_SEARCH_MIN_SIMILARITY` is 0 (off) until it is calibrated for the embedding model, once after the first deploy and again after `KH_EMBED_MODEL` changes.
+
+1. With the floor at 0, run `kh_search` for 10 or more queries that have a known right answer and 10 or more that have none (topics the hub holds nothing about). Use `limit` 50, because hits are ordered by rank and tier weight, not by similarity, so the most similar junk chunk can fall outside the first 10. Note the highest `similarity` among the hits of each query.
+2. Take the lowest of the known-good values and the highest of the no-answer values. If the first is above the second, set the floor between them, nearer the no-answer value; otherwise the model does not separate them and the floor stays 0.
+3. Set `KH_SEARCH_MIN_SIMILARITY` in the `knowledge-hub` service environment and restart `kh serve`. Run the no-answer queries again: they return no hits (a hit that still appears matches the query's words by full text; one whose `similarity` is below the floor and that has no word match would be a bug). If a no-answer query still returns a vector-only hit, raise the floor above that hit's `similarity` and repeat; if a good query loses its answer, set the floor back to 0.
+
 ## Alerts
 
 `index_alerts` is readable only by the indexer role. Read it as the Postgres superuser, or as `kh_indexer`:
