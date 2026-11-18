@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     search_pool: int = 50
     tier_weights: str = "T0:1.0,T3:0.4"
     stale_weight: float = 0.5
+    similar_limit: int = Field(3, ge=0, le=10)
+    similar_min_score: float = Field(0.5, ge=0.0, le=1.0)
     search_max_offset: int = 100
     max_record_bytes: int = 1048576
     propose_max_bytes: int = 131072

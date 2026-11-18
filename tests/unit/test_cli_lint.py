@@ -68,3 +68,10 @@ def test_lint_needs_a_file_and_no_settings(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.main(["lint"])
     assert exc.value.code == 2
+
+
+def test_duplicate_supersedes_is_reported(tmp_path, capsys):
+    text = "---\nid: a\ntitle: T\nreview_by: 2099-01-01\nsupersedes: [a2, a2]\n---\nx\n"
+    path = write(tmp_path, "bad.md", text)
+    assert cli.main(["lint", path]) == 1
+    assert capsys.readouterr().out == f"{path}: invalid supersedes\n"

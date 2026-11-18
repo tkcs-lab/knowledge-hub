@@ -12,6 +12,7 @@ from typing import Any
 from psycopg.rows import dict_row
 
 from knowledge_hub.config import KhConfig
+from knowledge_hub.indexer.supersede import DocLink, resolve
 from knowledge_hub.indexer.sync_chunks import (
     ChunkDoc,
     apply_chunks,
@@ -54,20 +55,22 @@ async def _write(conn: Any, plan: SyncPlan, chunk_plan: Any, rewritten: bool) ->
         await conn.execute(
             """
             INSERT INTO kh.documents (repo, path, doc_key, audience, title, body, labels, review_by,
-                stale, commit_sha, blob_sha)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                stale, commit_sha, blob_sha, supersedes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (repo, doc_key) DO UPDATE SET
                 path = EXCLUDED.path, audience = EXCLUDED.audience, title = EXCLUDED.title,
                 body = EXCLUDED.body, labels = EXCLUDED.labels, review_by = EXCLUDED.review_by,
                 stale = EXCLUDED.stale, commit_sha = EXCLUDED.commit_sha, blob_sha = EXCLUDED.blob_sha,
+                supersedes = EXCLUDED.supersedes,
                 indexed_at = now(), updated_at = now()
             """,
             (
                 u.repo, u.path, u.doc_key, u.audience, u.title, u.body, u.labels, u.review_by,
-                u.review_by < date.today(), u.commit_sha, u.blob_sha,
+                u.review_by < date.today(), u.commit_sha, u.blob_sha, u.supersedes,
             ),
         )  # fmt: skip
     await apply_chunks(conn, chunk_plan)
+    await _apply_supersedes(conn, repo)
     for path, message in dict.fromkeys(plan.alerts):
         await _alert(conn, repo, path, message)
     if rewritten:
@@ -77,6 +80,31 @@ async def _write(conn: Any, plan: SyncPlan, chunk_plan: Any, rewritten: bool) ->
         " ON CONFLICT (repo) DO UPDATE SET last_indexed_sha = EXCLUDED.last_indexed_sha, indexed_at = now()",
         (repo, plan.head_sha),
     )
+
+
+async def _apply_supersedes(conn: Any, repo: str) -> None:
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT id::text AS id, doc_key, path, supersedes, superseded_by::text AS superseded_by"
+            " FROM kh.documents WHERE repo = %s",
+            (repo,),
+        )
+        rows = await cur.fetchall()
+    links = [
+        DocLink(r["id"], r["doc_key"], r["path"], tuple(r["supersedes"] or ()), r["superseded_by"])
+        for r in rows
+    ]
+    resolution = resolve(links)
+    for link in links:
+        new = resolution.links[link.id]
+        if new != link.current:
+            await conn.execute(
+                "UPDATE kh.documents SET superseded_by = %s::uuid WHERE id = %s::uuid"
+                " AND superseded_by IS DISTINCT FROM %s::uuid",
+                (new, link.id, new),
+            )
+    for path, message in resolution.alerts:
+        await _alert(conn, repo, path, message)
 
 
 async def _alert(conn: Any, repo: str, path: str, message: str) -> None:
