@@ -7,6 +7,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - gate: plan section 3.4 settings did not round-trip kh.example.yaml (null written as empty); the owner allowed a None-as-null representer in _yaml() via board ask a-06ecdb19b75b93c3
 - retry: first worker stopped on the brief stop condition; a follow-up worker added the representer on the same branch
+- retry: fix-4 merged: commit creates its temp file with tempfile.mkstemp so a stale temp file cannot block it (final review finding 6)
 
 ## p3a-steps-db
 
@@ -36,6 +37,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p6-cli-groups
 
 - review: no deviation found in the diff review; workers had no tld, so the orchestrator ran roles required (none) and the scope check (clean)
+- review: fix-4 merged: kh group remove now requires --yes also with --no-apply, which plan 3.7 did not (final review finding 5, owner asked to fix all findings)
 
 ## p7-retire
 
