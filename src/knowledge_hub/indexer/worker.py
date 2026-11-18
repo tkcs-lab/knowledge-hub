@@ -100,6 +100,10 @@ class Worker:
     async def _git_push(self, repo: str | None) -> None:
         if repo is None:
             raise ValueError("git_push job without a repo")
+        group = self.config.group_for_repo(repo)
+        if group is not None and not self.config.is_active(group):
+            log.info("git_push skipped, group %s is archived", group)
+            return
         if self.reader is None:
             raise RuntimeError("no Forgejo reader configured")
         lock = self._repo_locks.setdefault(repo, asyncio.Lock())
