@@ -49,7 +49,7 @@ def fakes(monkeypatch):
         built.append(create_bucket)
         return {n: (lambda n=n: steps[n]) for n in steps}
 
-    monkeypatch.setattr(setup_cli, "_builders", builders)
+    monkeypatch.setattr(setup_cli, "build_steps", builders)
     steps["built"] = built
     return steps
 
@@ -147,7 +147,7 @@ def _build_forgejo(monkeypatch, tmp_path, yaml_text):
     import yaml
 
     config = parse_config(yaml.safe_load(yaml_text))
-    return setup_cli._builders(load_settings(), config, False)["forgejo"]()
+    return setup_cli.build_steps(load_settings(), config, False)["forgejo"]()
 
 
 def test_forgejo_step_gets_a_tech_admin_when_tech_repos_are_set(monkeypatch, tmp_path):
