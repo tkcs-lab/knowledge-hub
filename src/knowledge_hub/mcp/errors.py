@@ -12,7 +12,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.mcpserver import Context
@@ -22,6 +22,7 @@ from psycopg import AsyncConnection
 from knowledge_hub.auth.claims import Call, Caller
 from knowledge_hub.db.caller_tx import caller_tx
 from knowledge_hub.metrics import METRICS
+from knowledge_hub.usage import UsageEvent, write_events
 
 if TYPE_CHECKING:
     from knowledge_hub.mcp.server import Deps
@@ -67,6 +68,7 @@ class ToolCall:
     conn: AsyncConnection
     caller: Caller
     deps: Deps
+    events: list[UsageEvent] = field(default_factory=list)
 
 
 def _same(a: Any, b: Any) -> bool:
@@ -128,11 +130,13 @@ def tool_guard(name: str, deps: Deps) -> Callable[[_Tool], _Tool]:
                     raise ToolError(RATE_LIMIT.format(n=retry))
             started = time.monotonic()
             outcome = "ok"
+            events: list[UsageEvent] = []
             try:
                 async with caller_tx(deps.app_pool, caller) as conn:
-                    return await fn(ToolCall(conn, caller, deps), **kwargs)
+                    result = await fn(ToolCall(conn, caller, deps, events), **kwargs)
             except KhError as exc:
                 outcome = "error"
+                await write_events(deps, caller, events)
                 raise ToolError(exc.text) from None
             except ToolError:
                 outcome = "error"
@@ -142,6 +146,9 @@ def tool_guard(name: str, deps: Deps) -> Callable[[_Tool], _Tool]:
                 ref = uuid.uuid4()
                 log.exception("tool %s failed ref=%s", name, ref)
                 raise ToolError(INTERNAL.format(ref=ref)) from None
+            else:
+                await write_events(deps, caller, events)
+                return result
             finally:
                 METRICS.tool_call(name, outcome, time.monotonic() - started)
 

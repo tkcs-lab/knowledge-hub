@@ -42,6 +42,9 @@ upstreams:
       list_labels:
         gate: auto
         verb: read
+      usage:
+        gate: auto
+        verb: read
       ingest_record:
         gate: popup
         verb: add

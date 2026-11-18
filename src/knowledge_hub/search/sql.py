@@ -104,14 +104,18 @@ meta AS (
   SELECT (SELECT count(*) FROM best) AS total,
          (SELECT count(*) FROM best WHERE tier = 'T0') AS t0_hits,
          (SELECT count(*) FROM best WHERE tier = 'T3')
-           + (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS t3_hits
+           + (SELECT count(*) FROM low_owners WHERE tier = 'T3') AS t3_hits,
+         (SELECT count(DISTINCT c.owner_key) FROM kh.chunks c, websearch_to_tsquery('english', %(query)s) q
+           WHERE c.tsv @@ q.q AND c.tier = 'T0') AS t0_fts_hits,
+         (SELECT count(DISTINCT c.owner_key) FROM kh.chunks c, websearch_to_tsquery('english', %(query)s) q
+           WHERE c.tsv @@ q.q AND c.tier = 'T3') AS t3_fts_hits
 )
 SELECT p.id, p.owner_key, p.tier, p.stale, p.text, p.score,
        d.repo AS doc_repo, d.path AS doc_path, d.blob_sha AS doc_blob_sha,
        d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
        r.title AS rec_title, r.audience AS rec_audience, r.labels AS rec_labels,
        r.source_url AS rec_source_url, r.occurred_at AS rec_occurred_at,
-       meta.total, meta.t0_hits, meta.t3_hits
+       meta.total, meta.t0_hits, meta.t3_hits, meta.t0_fts_hits, meta.t3_fts_hits
   FROM meta
   LEFT JOIN page p ON true
   LEFT JOIN kh.documents d ON d.id = p.document_id

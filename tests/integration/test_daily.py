@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 import pytest
 
 from knowledge_hub.jobs.daily import run_daily
 from knowledge_hub.jobs.requeue import requeue_embeddings
-from tests.support.seed import add_chunk, add_doc, add_record
+from knowledge_hub.jobs.usage import purge_usage
+from tests.support.seed import add_chunk, add_doc, add_record, add_usage
 
 DB = "kh_fresh"
 
@@ -86,3 +87,23 @@ async def test_requeue_ignores_a_job_stuck_in_running(world, indexer_pool):
             "SELECT state FROM kh.index_jobs WHERE payload ->> 'id' = %s ORDER BY id", (stuck,)
         ).fetchall()
     assert ("queued",) in rows
+
+
+async def test_purge_usage_deletes_only_events_older_than_the_window(world, indexer_pool):
+    now = datetime.now(UTC)
+    with conn_for(world) as conn:
+        add_usage(conn, at=now - timedelta(days=200))
+        keep = add_usage(conn, at=now - timedelta(days=1))
+    assert await purge_usage(indexer_pool, 180) == 1
+    with conn_for(world) as conn:
+        assert conn.execute("SELECT id::text FROM kh.usage_events").fetchall() == [(keep,)]
+    assert await purge_usage(indexer_pool, 180) == 0
+
+
+async def test_daily_prints_the_usage_purge(world, deps, capsys):
+    from knowledge_hub.cli import _daily
+
+    with conn_for(world) as conn:
+        add_usage(conn, at=datetime.now(UTC) - timedelta(days=200))
+    assert await _daily(deps) == 0
+    assert capsys.readouterr().out.strip().endswith("usage events purged: 1")
