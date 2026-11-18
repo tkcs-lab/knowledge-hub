@@ -12,7 +12,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-t0-supersede-indexer
 
-- pending
+- None.
 
 ## p3-search-and-get-doc
 
