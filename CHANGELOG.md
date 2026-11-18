@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- The tool `list_audiences`: PrivacyFence's audiences source (PrivacyFence ADR 0325). It answers only PrivacyFence's service claim with the members' emails of each active group. The declaration example sets `audiences_tool: list_audiences`: upgrade PrivacyFence first, then restart `kh serve` and PrivacyFence. The `upstream_mcp.kh.groups` map and any membership file kept for the hub can go; existing n8n tokens stay valid.
 - The tool `move_item` (`kh_move_item`, gate `popup`, Claude clients only).
 - Migration `0005_move_record.sql`: run `kh migrate`, then restart `kh serve` and PrivacyFence and allow the tool.
 - `ForgejoBot.delete_file`.
@@ -21,6 +22,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- `kh.yaml` is refused with more than 200 active groups, more than 20000 group members in all, or an audience table over 1000000 characters.
 - The embed worker re-checks a record's group under a lock.
 - `mark_record_outdated` takes row locks.
 - `search` takes `min_tier` `T0a` (T0 and T0a only); `min_tier=T0` fails with `only T0a documents or T3 records match` when only T0a items match.

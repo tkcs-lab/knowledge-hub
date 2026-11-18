@@ -12,7 +12,7 @@ The trusted core of the company knowledge layer: one MCP interface over three ti
 
 ## Groups
 
-A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of members and a non-empty list of approvers. A person reads the groups that `kh.yaml` lists for their verified email, so a joiner or leaver is one edit of one file. Every T3 record belongs to one group, and an n8n workflow holds the group names its PrivacyFence token carries. Documents and records may also carry labels, defined in `kh.yaml`.
+A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of members and a non-empty list of approvers. A person reads the groups that `kh.yaml` lists for their verified email, so a joiner or leaver is one edit of one file. Every T3 record belongs to one group, and PrivacyFence reads the groups' members from the hub (`list_audiences`), so an n8n token holds the groups its creator holds in `kh.yaml`, narrowed to those ticked. Documents and records may also carry labels, defined in `kh.yaml`.
 
 ## Tools
 
@@ -22,6 +22,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
+| `list_audiences` | PrivacyFence only: the members' emails of each active group, its audiences source; refuses every other caller. |
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group; the answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
