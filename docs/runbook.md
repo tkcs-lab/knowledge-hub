@@ -10,7 +10,7 @@ Not run in the cloud, so yours to do and check by hand: the backup script's `pg_
 
 1. **Accounts.** In Forgejo create the organisation named by `org` in `kh.yaml` and two ordinary accounts, `bot_login` (default `kh-bot`) and `indexer_login` (default `kh-indexer`), neither an org owner nor a site admin. `kh setup` never creates users or tokens.
 2. **Secrets.** One file per secret under the secrets directory, named by the matching `*_FILE` variable: the three database passwords, the bot token, the indexer token (read only), the webhook secret `KH_WEBHOOK_HMAC_FILE`, the S3 access and secret key, `kh_cursor_key` and, for metrics, `kh_metrics_token`. For `kh setup` only: `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` (a site administrator's token) when setup should create the roles, `KH_SETUP_PG_ADMIN_DSN_FILE`, and, only when groups set `slack_channel`, `KH_SETUP_SLACK_WEBHOOKS_FILE`. The `kh serve` service never mounts those.
-3. **Write `kh.yaml`.** Start from `deploy/kh.example.yaml`: `people`, `groups`, `labels`, `hub_url`.
+3. **Write `kh.yaml`.** Start from `deploy/kh.example.yaml`: `people`, `groups`, `labels`, `hub_url`. Place the file in `./config/` next to the compose file (the compose file mounts that directory at `/etc/kh`).
 4. **Plan.** `kh setup plan --config kh.yaml`. Expect `+` lines and exit 1. Read every `!` line: it is a change the script will not make.
 5. **Apply.** `kh setup apply --config kh.yaml`. It creates the Postgres roles, database, extension and tables, groups and labels, the Forgejo teams, repos, branch protection and org webhook, and pulls the Ollama model. Run `kh setup plan` again and expect only `i` lines and exit 0. Without an admin DSN the `postgres` step only checks: create the roles and database yourself, then run `kh migrate`. The S3 bucket is only checked unless you pass `--create-bucket`.
 6. **Serve.** `kh serve` (the image does this). The worker starts only when `KH_FORGEJO_URL` is set. `/healthz` answers `ok`.
@@ -74,6 +74,8 @@ The tick is pinned to the declaration: changing a tool's gate, verb or effect, o
 
 ### Adding a group
 
+Two ways. The command form: `kh person add LOGIN EMAIL` for each new person, then `kh group add NAME --members A,B --approvers A [--repo R] [--slack-channel #C]`. It edits `kh.yaml`, creates the group row, the teams, the repo and its protection, and prints the diff first (`--dry-run` shows it without writing). The file-edit form:
+
 1. Add the group (and any new people) to `kh.yaml`. Every member needs a `people` entry; approvers are a non-empty subset of members.
 2. `kh setup plan`, then `kh setup apply`. It creates the group row, the two Forgejo teams, the repo, its protection and the webhook coverage; the other groups are untouched.
 3. Restart `kh serve`, because the config is read at start.
@@ -105,15 +107,17 @@ Anyone with push access to the repo puts unreviewed text in front of every calle
 
 ### Archiving and unarchiving
 
+Command form: `kh group archive NAME` or `kh label archive NAME` (and `kh group unarchive NAME`, `kh label unarchive NAME`). The file-edit form:
+
 1. Set `archived: true` on the group, or add the label to `archived_labels`, in `kh.yaml`.
-2. `kh setup plan`, then `kh setup apply`. For a group, `kh setup` also marks its Forgejo repo archived and leaves the teams and members as they are.
+2. `kh setup plan`, then `kh setup apply`. For a group, `kh setup` also marks its Forgejo repo archived and keeps the teams, but removes team members that `kh.yaml` no longer lists (it never adds any).
 3. Restart `kh serve`, because the config is read at start.
 
 Nothing is deleted. To unarchive, remove the flag or the `archived_labels` entry, run `kh setup apply`, restart `kh serve`, and for a group run `kh rebuild --repo <repo>` once, because pushes while archived were ignored. `kh setup apply --prune` never deletes an archived group or label. To delete one for good, remove it from `kh.yaml` and use `--prune` as before.
 
 ### Joiners and leavers
 
-One file decides both what a person can read and which Forgejo teams they are in. Edit `people` and the group `members` and `approvers` lists, run `kh setup apply`, restart `kh serve`. The restart is what changes what the hub lets them read. For a leaver, remove them from `people` and the lists in the same edit; a reassigned Workspace email gives its new holder the old person's groups until `people` is edited. Also disable the Forgejo account if they leave the company.
+One file decides both what a person can read and which Forgejo teams they are in. Commands: `kh person add LOGIN EMAIL` and `kh group member add GROUP LOGIN` for a joiner; `kh group member remove GROUP LOGIN` for one group, or `kh person remove LOGIN --from-groups` to remove a leaver from `people` and every group at once. Restart `kh serve` afterwards. The second way is the file edit: edit `people` and the group `members` and `approvers` lists, run `kh setup apply`, restart `kh serve`. The restart is what changes what the hub lets them read. For a leaver, remove them from `people` and the lists in the same edit; a reassigned Workspace email gives its new holder the old person's groups until `people` is edited. Also disable the Forgejo account if they leave the company.
 
 ### When a person reads nothing
 
