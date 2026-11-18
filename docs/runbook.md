@@ -96,6 +96,28 @@ The tick is pinned to the declaration: changing a tool's gate, verb or effect, o
 
 A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (with `--prune`) and add a new one instead. Removing a group is refused while records exist.
 
+### Adding a technical repo
+
+1. In `tech_org` (by hand; `kh setup` creates nothing there) create the pull mirror or fork of the upstream repo. Its default branch is the one indexed.
+2. Add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` if wanted. The group `all` must exist and be active.
+3. `kh migrate` (migration `0004_tech_tier.sql`, first time only), then `kh setup plan` and `kh setup apply`. It gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
+4. Restart `kh serve`, because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
+5. `kh check`. Exit 0 means the head is indexed and every document has tier T0a.
+
+Anyone with push access to the repo puts unreviewed text in front of every caller; read the `i tech repo <repo>: collaborators` line.
+
+### Changing the labels of a technical repo
+
+1. Edit `labels` of the repo in `kh.yaml` (new labels go under `labels` first).
+2. `kh setup apply`, then restart `kh serve`.
+3. Wait for the next push or poll, or run `kh rebuild --repo <repo>`. No file is fetched again; the stored documents get the new labels.
+
+### Removing a technical repo
+
+1. Remove the repo from `tech_repos` in `kh.yaml`.
+2. `kh setup apply --prune` deletes its T0a documents and indexed head; without `--prune` it only prints `? tech documents of <repo>: repo is not in tech_repos`. The Forgejo repo is not touched.
+3. Restart `kh serve`.
+
 ### Archiving and unarchiving
 
 1. Set `archived: true` on the group, or add the label to `archived_labels`, in `kh.yaml`.
@@ -163,6 +185,8 @@ Alerts are de-duplicated on repo, path and message. After you fix the cause, re-
 | `file rejected: unknown label <x>` | The file names a label that is not in `kh.yaml`. Add the label and run `kh setup apply`, which queues a re-sync of every repo, or remove it from the file. |
 | `file rejected: duplicate id <id>` | Two files in one repo carry the same `id`; both are rejected. Give one a new id. |
 | `main of <repo> was rewritten; run kh rebuild after review` | The new head of `main` does not continue from the last indexed sha. The index is unchanged. Inspect the force push in Forgejo. If it was intended, run `kh rebuild --repo <repo>`. If not, restore the branch from a clone and look at who could push (`kh setup plan` shows protection drift and Owners-team bypass). |
+| `file skipped: not UTF-8` | A tech repo file is not valid UTF-8 and is not indexed. Fix or remove it upstream. |
+| `label <x> is not in kh.labels; run kh setup apply` | A tech repo lists a label that was never applied. Run `kh setup apply`; it queues a re-sync. |
 | `supersedes unknown id <key>` | The file lists an id that no document of the repo has. The line is ignored. Fix the id or remove it by a pull request. |
 | `superseded by <n> documents; using <doc_key>` | Several documents list the same id; the one with the smallest id wins. Remove the line from the others. |
 | `supersedes cycle: <keys>` | Documents replace each other; none of them is hidden. Remove one link. |

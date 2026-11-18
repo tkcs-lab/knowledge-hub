@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     forgejo_url: str | None = None
     forgejo_bot_token_file: Path | None = None
     forgejo_indexer_token_file: Path | None = None
+    tech_poll_minutes: int = Field(60, ge=0, le=10080)
     webhook_hmac_file: Path | None = None
 
     embed_provider: Literal["ollama", "http", "fake"] = "ollama"
@@ -61,7 +62,7 @@ class Settings(BaseSettings):
     chunker_version: int = 1
     rrf_k: int = 60
     search_pool: int = 50
-    tier_weights: str = "T0:1.0,T3:0.4"
+    tier_weights: str = "T0:1.0,T0a:0.7,T3:0.4"
     stale_weight: float = 0.5
     similar_limit: int = Field(3, ge=0, le=10)
     similar_min_score: float = Field(0.5, ge=0.0, le=1.0)

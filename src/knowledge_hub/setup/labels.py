@@ -69,6 +69,12 @@ class LabelsStep:
                         (repo, Jsonb({})),
                     )
                     out.append(Change("+", f"job git_push: {repo}"))
+                for repo in self._config.tech_repo_names:
+                    await conn.execute(
+                        "INSERT INTO kh.index_jobs (kind, repo, payload) VALUES ('git_push', %s, %s)",
+                        (repo, Jsonb({})),
+                    )
+                    out.append(Change("+", f"job git_push: {repo}"))
         return out
 
     async def _remove(self, conn: psycopg.AsyncConnection, name: str) -> Change:

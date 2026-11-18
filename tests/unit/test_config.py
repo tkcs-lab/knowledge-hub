@@ -225,6 +225,104 @@ def test_audiences_for_email_skips_archived_groups():
     assert c.audiences_for_email("bob@example.com") == {"all"}
 
 
+TECH = {"tech_org": "kh-tech", "tech_repos": {"ember-core": {"labels": ["ember"]}}}
+
+
+def tech_cfg(**over):
+    data = {"labels": {"ember": "Ember"}, **TECH}
+    data.update(over)
+    return cfg(**data)
+
+
+def test_tech_repos_need_tech_org():
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_repos": {"ember-core": {}}},
+        "config: tech_repos needs tech_org",
+    )
+    refused({"tech_org": "-bad"}, "tech_org '-bad' is not a valid login")
+
+
+def test_tech_repos_need_a_non_empty_tech_org():
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "", "tech_repos": {"ember-core": {}}},
+        "config: tech_repos needs tech_org",
+    )
+
+
+def test_tech_org_must_differ_from_org():
+    refused({"org": "KH", "tech_org": "kh"}, "config: tech_org must differ from org")
+
+
+def test_tech_repo_cannot_be_a_group_repo():
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "t", "tech_repos": {"mgmt-docs": {}}},
+        "config: tech repo mgmt-docs is also the repo of group mgmt",
+    )
+    old = {**GROUPS, "old": {"members": ["bob"], "approvers": ["bob"], "archived": True}}
+    refused(
+        {"people": PEOPLE, "groups": old, "tech_org": "t", "tech_repos": {"kb-old": {}}},
+        "config: tech repo kb-old is also the repo of group old",
+    )
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "t", "tech_repos": {"Bad": {}}},
+        "config: tech repo 'Bad' is not a valid repository name",
+    )
+
+
+def test_tech_repos_need_group_all():
+    groups = {"mgmt": GROUPS["mgmt"]}
+    refused(
+        {"people": PEOPLE, "groups": groups, "tech_org": "t", "tech_repos": {"r": {}}},
+        "config: tech_repos needs the group all",
+    )
+
+
+def test_tech_repos_need_active_group_all():
+    groups = {**GROUPS, "all": {**GROUPS["all"], "archived": True}}
+    refused(
+        {"people": PEOPLE, "groups": groups, "tech_org": "t", "tech_repos": {"r": {}}},
+        "config: tech_repos needs the group all to be active",
+    )
+
+
+def test_tech_repo_label_must_exist():
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "t", "tech_repos": {"r": {"labels": ["x"]}}},
+        "config: tech repo r label 'x' is not in labels",
+    )
+
+
+def test_tech_repo_archived_label_is_accepted():
+    c = tech_cfg(archived_labels=["ember"])
+    assert c.tech_labels("ember-core") == ["ember"]
+
+
+def test_tech_repo_label_listed_twice():
+    refused(
+        {
+            "people": PEOPLE,
+            "groups": GROUPS,
+            "labels": {"a": "A"},
+            "tech_org": "t",
+            "tech_repos": {"r": {"labels": ["a", "a"]}},
+        },
+        "config: tech repo r lists label 'a' twice",
+    )
+
+
+def test_tech_helpers():
+    c = tech_cfg(tech_repos={"zeta": {}, "ember-core": {"labels": ["ember"]}})
+    assert c.is_tech_repo("ember-core") and not c.is_tech_repo("kb-all")
+    assert c.tech_labels("ember-core") == ["ember"] and c.tech_labels("zeta") == []
+    assert c.tech_repo_names == ["ember-core", "zeta"]
+
+
+def test_config_without_tech_keys_is_unchanged():
+    c = cfg()
+    assert c.tech_org is None and c.tech_repos == {}
+    assert c.tech_repo_names == [] and not c.is_tech_repo("kb-all")
+
+
 def test_slack_channel_optional_and_validated():
     assert cfg().groups["all"].slack_channel is None
     groups = {**GROUPS, "all": {**GROUPS["all"], "slack_channel": "#kh-all-approvers"}}

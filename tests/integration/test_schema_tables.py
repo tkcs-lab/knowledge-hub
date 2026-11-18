@@ -14,7 +14,7 @@ EXPECTED = {
     "labels": ["name", "description", "created_at"],
     "documents": ["id", "repo", "path", "doc_key", "audience", "title", "body", "labels", "review_by",
                   "stale", "commit_sha", "blob_sha", "indexed_at", "updated_at", "supersedes",
-                  "superseded_by"],
+                  "superseded_by", "tier"],
     "records": ["id", "audience", "source", "source_ref", "source_url", "title", "blob_key", "excerpt",
                 "content_type", "occurred_at", "labels", "written_by", "created_by_sub",
                 "created_by_type", "ingested_at", "outdated", "outdated_at", "outdated_by", "outdated_note",
@@ -130,6 +130,10 @@ def test_chunk_tier_check(conn):
     with pytest.raises(psycopg.errors.CheckViolation) as exc:
         conn.execute("UPDATE kh.chunks SET tier = 'T1'")
     assert exc.value.diag.constraint_name == "chunks_tier_check"
+    definition = conn.execute(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chunks_tier_check'"
+    ).fetchone()[0]
+    assert "'T0a'" in definition
 
 
 def test_chunks_cascade_on_owner_delete(conn):

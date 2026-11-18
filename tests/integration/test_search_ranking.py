@@ -76,10 +76,12 @@ async def test_tier_weight_orders_t0_before_t3_and_follows_the_setting(mcp_clien
     out = await hits(mcp_client, alice_all, query="wombat habitat", min_tier="T3")
     assert [h["id"] for h in out] == [f"doc:{doc}", f"rec:{rec}"]
     assert out[0]["score"] > out[1]["score"]
-    # same fixtures, weights flipped
-    app_settings.tier_weights = "T0:0.1,T3:1.0"
+    doc_score = out[0]["score"]
+    # same fixtures, equal weights (T0 >= T0a >= T3 forbids flipping them): the T0 score follows
+    app_settings.tier_weights = "T0:0.4,T3:0.4"
     out = await hits(mcp_client, alice_all, query="wombat habitat", min_tier="T3")
-    assert [h["id"] for h in out] == [f"rec:{rec}", f"doc:{doc}"]
+    assert {h["id"] for h in out} == {f"doc:{doc}", f"rec:{rec}"}
+    assert next(h["score"] for h in out if h["id"] == f"doc:{doc}") == pytest.approx(doc_score * 0.4)
 
 
 async def test_stale_weight_demotes_a_better_match(mcp_client, db):
