@@ -10,11 +10,17 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - The tool `usage` (`kh_usage`) with the views `records` and `queries`.
 - Settings `KH_USAGE_LOG` and `KH_USAGE_RETENTION_DAYS`.
 - The metric `kh_usage_events_dropped_total`.
+- Frontmatter key `supersedes` (list of document ids, at most 20, same repo): once the document is merged, `search` stops returning the documents it replaces; `get_doc` shows `supersedes`, `superseded_by` and `outdated`. Alerts `supersedes unknown id`, `superseded by <n> documents` and `supersedes cycle`. `propose_doc` takes `supersedes`.
+- The tool `mark_record_outdated` (`kh_mark_record_outdated`, gate `popup`): hides a raw record, optionally with `replaced_by` and `note`; `outdated=false` brings it back.
+- `search` argument `include_outdated`, and the fields `outdated` and `replaced_by` on every hit; `get_doc` of a record shows `outdated`, `outdated_at`, `replaced_by` and `note`. Included outdated hits are weighted by `KH_STALE_WEIGHT`.
+- `ingest_record` and `propose_doc` return `similar` (up to three items of the same group) and the settings `KH_SIMILAR_LIMIT` and `KH_SIMILAR_MIN_SCORE`.
+- Migration `0003_supersede.sql`: run `kh migrate`, then `kh rebuild`; restart PrivacyFence and create the n8n tokens again for the new tool. Every document is read once again, so `commit_sha`, `indexed_at` and `source_link` change once.
 
 ### Changed
 
 - `kh daily` also deletes usage events past the retention and prints their count.
 - The search statement returns `t0_fts_hits` and `t3_fts_hits` (internal).
+- `list_stale` no longer lists superseded documents. Cursors issued before this release answer `cursor does not belong to this query` once.
 
 ## [0.3.1] - 2026-11-17
 

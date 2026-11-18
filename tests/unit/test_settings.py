@@ -103,3 +103,17 @@ def test_changed_and_removed_settings(monkeypatch):
 
 def test_cli_has_only_serve_and_migrate():
     assert cli.COMMANDS == ("serve", "migrate")
+
+
+def test_similar_settings(monkeypatch):
+    s = Settings()
+    assert s.similar_limit == 3 and s.similar_min_score == 0.5
+    monkeypatch.setenv("KH_SIMILAR_LIMIT", "5")
+    monkeypatch.setenv("KH_SIMILAR_MIN_SCORE", "0.8")
+    s = Settings()
+    assert s.similar_limit == 5 and s.similar_min_score == 0.8
+    for name, bad in (("KH_SIMILAR_LIMIT", "11"), ("KH_SIMILAR_MIN_SCORE", "1.5")):
+        monkeypatch.setenv(name, bad)
+        with pytest.raises(ValidationError):
+            Settings()
+        monkeypatch.undo()

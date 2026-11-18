@@ -55,3 +55,17 @@ def test_render_parses_back():
 def test_render_empty_labels():
     doc = parse_document(render_file("d1", "T", "2027-01-31", [], "b"), "d1.md")
     assert isinstance(doc, ParsedDoc) and doc.labels == []
+
+
+def test_render_writes_supersedes_line_only_when_given():
+    assert "supersedes" not in render_file("d1", "T", "2027-01-31", ["x"], "b")
+    assert "supersedes" not in render_file("d1", "T", "2027-01-31", ["x"], "b", [])
+    out = render_file("d1", "T", "2027-01-31", ["x"], "b", ["a", "b"])
+    assert out == (
+        '---\nid: "d1"\ntitle: "T"\nreview_by: "2027-01-31"\nlabels: ["x"]\nsupersedes: ["a", "b"]\n---\nb'
+    )
+
+
+def test_rendered_supersedes_round_trips_through_parse_document():
+    doc = parse_document(render_file("d1", "T", "2027-01-31", [], "b", ["a", "b-2"]), "d1.md")
+    assert isinstance(doc, ParsedDoc) and doc.supersedes == ["a", "b-2"]

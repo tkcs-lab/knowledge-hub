@@ -31,6 +31,7 @@ class DocUpsert:
     review_by: dt.date
     commit_sha: str
     blob_sha: str
+    supersedes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -101,7 +102,7 @@ def build_sync_plan(
             parsed.id,
             DocUpsert(
                 repo, path, parsed.id, audience, parsed.title, parsed.body, parsed.labels,
-                parsed.review_by, head_sha, sha,
+                parsed.review_by, head_sha, sha, supersedes=parsed.supersedes,
             ),
         )  # fmt: skip
 

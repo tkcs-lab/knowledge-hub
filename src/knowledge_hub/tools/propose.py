@@ -10,11 +10,12 @@ from mcp.server.mcpserver import MCPServer
 
 from knowledge_hub.config import LABEL_RE
 from knowledge_hub.forgejo import ForgejoError
-from knowledge_hub.indexer.frontmatter import ID_RE, ParsedDoc, parse_document
+from knowledge_hub.indexer.frontmatter import ID_RE, MAX_SUPERSEDES, ParsedDoc, parse_document
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.propose_render import check_text, render_file, validate_path
+from knowledge_hub.search.similar import similar_items
 
 log = logging.getLogger("knowledge_hub.tools")
 
@@ -37,6 +38,7 @@ async def propose_doc(
     labels: list[str] = [],  # noqa: B006 - the guard reads the default; it is never mutated
     summary: str = "",
     base_blob: str = "",
+    supersedes: list[str] = [],  # noqa: B006 - the guard reads the default; it is never mutated
 ) -> dict[str, Any]:
     deps, caller = call.deps, call.caller
     bot = deps.forgejo_bot
@@ -68,7 +70,14 @@ async def propose_doc(
             known = {r[0] for r in await cur.fetchall()}
         if known != set(wanted):
             raise kh_error("bad_label", errors.BAD_LABEL)
-    text = render_file(id, title, review_by, wanted, body)
+    if (
+        len(supersedes) > MAX_SUPERSEDES
+        or len(set(supersedes)) != len(supersedes)
+        or id in supersedes
+        or not all(ID_RE.fullmatch(s) for s in supersedes)
+    ):
+        raise _bad("supersedes")
+    text = render_file(id, title, review_by, wanted, body, supersedes)
     if len(text.encode()) + len(summary.encode()) > deps.settings.propose_max_bytes:
         raise kh_error("too_large", errors.TOO_LARGE)
     back = parse_document(text, path)
@@ -76,6 +85,7 @@ async def propose_doc(
         not isinstance(back, ParsedDoc)
         or (back.id, back.title, back.review_by.isoformat(), back.labels, back.body)
         != (id, title, review_by, wanted, body)
+        or back.supersedes != supersedes
     ):
         raise kh_error("bad_text", errors.BAD_TEXT)
 
@@ -99,6 +109,13 @@ async def propose_doc(
             )
             if await cur.fetchone() is not None:
                 raise kh_error("id_in_use", errors.ID_IN_USE)
+            if supersedes:
+                await cur.execute(
+                    "SELECT doc_key FROM kh.documents WHERE repo = %s AND doc_key = ANY(%s)",
+                    (repo, supersedes),
+                )
+                if {r[0] for r in await cur.fetchall()} != set(supersedes):
+                    raise _bad("supersedes")
         branch = f"bot/propose/{uuid.uuid4()}"
         head = await bot.head_sha(repo, "main")
         await bot.create_branch(repo, branch, head)
@@ -109,8 +126,13 @@ async def propose_doc(
             f"Written-by: {deps.config.bot_login}"
         )
         pr_body = f"{summary}\n\n{trailer}" if summary else trailer
+        if supersedes:
+            pr_body += "\n\nSupersedes: " + ", ".join(f"`{s}`" for s in supersedes)
         pull = await bot.open_pull(repo, branch, "main", f"Propose: {title}"[:TITLE_MAX], pr_body)
-        return {"pr_url": pull["html_url"], "pr_number": pull["number"], "branch": branch}
+        similar = await similar_items(
+            call, f"{title}\n\n{body[:2000]}", group, exclude_repo=repo, exclude_key=id
+        )
+        return {"pr_url": pull["html_url"], "pr_number": pull["number"], "branch": branch, "similar": similar}
     except (ForgejoError, KeyError, TypeError) as exc:
         log.warning("propose_doc failed: %s", exc)
         raise kh_error("propose_failed", errors.PROPOSE_FAILED) from None
@@ -122,6 +144,8 @@ def register(server: MCPServer, deps: Deps) -> None:
         description=(
             "Propose a new or changed document in the repository of a group you hold, as a pull request "
             "that its approvers review. To change an existing file pass its current blob_sha as "
-            "base_blob; leave it empty to create a new file. review_by is YYYY-MM-DD."
+            "base_blob; leave it empty to create a new file. review_by is YYYY-MM-DD. "
+            "To change an existing document keep its supersedes list: "
+            "pass the supersedes that get_doc returned."
         ),
     )(tool_guard("propose_doc", deps)(propose_doc))

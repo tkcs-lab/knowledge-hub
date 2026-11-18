@@ -25,12 +25,13 @@ from knowledge_hub.usage import UsageEvent
 MAX_LIST_LIMIT = 50
 
 _DOC_SQL = """
-SELECT id, repo, path, audience, labels, title, body, review_by, stale, commit_sha, blob_sha
+SELECT id, repo, path, audience, labels, title, body, review_by, stale, commit_sha, blob_sha,
+       supersedes, superseded_by
   FROM kh.documents WHERE id = %s
 """
 _REC_SQL = """
 SELECT id, audience, labels, title, excerpt, blob_key, source, source_ref, source_url, occurred_at,
-       written_by
+       written_by, outdated, outdated_at, outdated_note, replaced_by
   FROM kh.records WHERE id = %s
 """
 
@@ -99,6 +100,9 @@ async def get_doc(call: ToolCall, id: str) -> dict[str, Any]:
             "stale": bool(row["stale"]),
             "commit_sha": row["commit_sha"],
             "blob_sha": row["blob_sha"],
+            "supersedes": list(row["supersedes"] or []),
+            "superseded_by": f"doc:{row['superseded_by']}" if row["superseded_by"] is not None else "",
+            "outdated": row["superseded_by"] is not None,
             "source_link": source_link(call.deps, row["repo"], row["commit_sha"], row["path"]),
         }
     row = await _one(call, _REC_SQL, key)
@@ -115,6 +119,10 @@ async def get_doc(call: ToolCall, id: str) -> dict[str, Any]:
         "source_url": row["source_url"] or "",
         "occurred_at": _iso(row["occurred_at"]),
         "written_by": row["written_by"],
+        "outdated": bool(row["outdated"]),
+        "outdated_at": _iso(row["outdated_at"]),
+        "replaced_by": row["replaced_by"],
+        "note": row["outdated_note"],
     }
 
 
@@ -169,6 +177,7 @@ _STALE_SQL = """
 SELECT id, repo, path, audience, labels, title, review_by, stale
   FROM kh.documents
  WHERE stale
+   AND superseded_by IS NULL
    AND (%(audience)s = '' OR audience = %(audience)s)
    AND (%(after_id)s::uuid IS NULL
         OR review_by > %(after_review)s::date

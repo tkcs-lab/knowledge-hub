@@ -159,3 +159,8 @@ def test_rejected_file_not_stored_is_retried_every_plan():
 def test_repo_in_no_group_is_a_value_error():
     with pytest.raises(ValueError, match="no group"):
         build_sync_plan(CFG, "other", HEAD, [], [], {}, [])
+
+
+def test_supersedes_reaches_the_upsert():
+    p = plan({"a.md": md("a", supersedes=["x", "y"])})
+    assert p.upserts[0].supersedes == ["x", "y"]

@@ -57,6 +57,7 @@ async def test_create(mcp_client, seeded_db, forgejo):
     assert not res.is_error, res.text
     branch = res.data["branch"]
     assert branch.startswith("bot/propose/")
+    assert res.data["similar"] == []  # no embedder in this fixture
     assert res.data["pr_number"] == 1 and res.data["pr_url"].endswith("/kb-all/pulls/1")
     assert "guides/new.md" not in forgejo.files("kb-all")  # main is untouched
     text = forgejo.files("kb-all", branch)["guides/new.md"]
@@ -231,3 +232,37 @@ async def test_a_branch_outside_bot_is_impossible(forgejo, deps):
 
 def test_error_texts():
     assert errors.PROPOSE_FAILED == "could not open the pull request"
+
+
+async def test_supersedes_is_written_to_the_file_and_the_pr_body(mcp_client, seeded_db, forgejo):
+    res = await call(mcp_client, {"supersedes": ["doc-all"]})
+    assert not res.is_error, res.text
+    text = forgejo.files("kb-all", res.data["branch"])["guides/new.md"]
+    assert 'labels: []\nsupersedes: ["doc-all"]\n---\n' in text
+    (pull,) = forgejo.repos["kb-all"].pulls
+    assert pull["body"].endswith("Written-by: kh-bot\n\nSupersedes: `doc-all`")
+
+
+async def test_unknown_supersedes_id_is_bad_arg(mcp_client, seeded_db, forgejo):
+    res = await call(mcp_client, {"supersedes": ["doc-all", "no-such-doc"]})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="supersedes"))
+    assert not forgejo.repos["kb-all"].pulls
+
+
+@pytest.mark.parametrize(
+    "supersedes",
+    [["doc-all", "doc-all"], ["new-guide"], ["Bad Id"], [f"d{i}" for i in range(21)]],
+)
+async def test_supersedes_duplicate_own_id_and_too_many_are_bad_arg(
+    mcp_client, seeded_db, forgejo, supersedes
+):
+    res = await call(mcp_client, {"supersedes": supersedes})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="supersedes"))
+    assert not forgejo.repos["kb-all"].pulls
+
+
+async def test_supersedes_defaults_leave_existing_behaviour(mcp_client, seeded_db, forgejo):
+    res = await call(mcp_client)
+    assert not res.is_error, res.text
+    assert "supersedes" not in forgejo.files("kb-all", res.data["branch"])["guides/new.md"]
+    assert "Supersedes" not in forgejo.repos["kb-all"].pulls[0]["body"]
