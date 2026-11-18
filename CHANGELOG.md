@@ -4,13 +4,22 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-18
-
 ### Added
 
 - `kh label add|rename|archive|unarchive|remove|list`: edit the labels of `kh.yaml` (comments kept) and apply the change.
 - `kh group add|remove|archive|unarchive|member|approver|list`: edit the groups of `kh.yaml` and apply the change to the database and Forgejo. A group cannot be renamed.
 - `kh person add|remove|list`: edit `people`; `remove --from-groups` also removes the login from every group.
+
+### Changed
+
+- `deploy/compose.example.yaml` mounts `./config:/etc/kh:ro` instead of the file `./kh.yaml`: move `kh.yaml` into `./config/` and recreate the stack.
+- `kh setup` removes members that `kh.yaml` no longer lists from the teams of an archived group (it adds none).
+- `kh group remove` also deletes the group's record moves.
+
+## [0.5.0] - 2026-11-18
+
+### Added
+
 - The tool `list_audiences`: PrivacyFence's audiences source (PrivacyFence ADR 0325). It answers only PrivacyFence's service claim with the members' emails of each active group. The declaration example sets `audiences_tool: list_audiences`: upgrade PrivacyFence first, then restart `kh serve` and PrivacyFence. The `upstream_mcp.kh.groups` map and any membership file kept for the hub can go; existing n8n tokens stay valid.
 - The tool `move_item` (`kh_move_item`, gate `popup`, Claude clients only).
 - Migration `0005_move_record.sql`: run `kh migrate`, then restart `kh serve` and PrivacyFence and allow the tool.
@@ -27,8 +36,6 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
-- `deploy/compose.example.yaml` mounts `./config:/etc/kh:ro` instead of the file `./kh.yaml`: move `kh.yaml` into `./config/` and recreate the stack.
-- `kh setup` removes members that `kh.yaml` no longer lists from the teams of an archived group (it adds none).
 - `kh.yaml` is refused with more than 200 active groups, more than 20000 group members in all, or an audience table over 1000000 characters.
 - The embed worker re-checks a record's group under a lock.
 - `mark_record_outdated` takes row locks.

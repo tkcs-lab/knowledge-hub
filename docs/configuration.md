@@ -232,7 +232,7 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 | `kh label remove NAME` | delete from `labels` and `archived_labels`; refused while a tech repo lists the label | runs the labels step, then removes the label |
 | `kh label list [--json]` | none | none |
 | `kh group add NAME --members A,B --approvers A [--repo R] [--slack-channel #C]` | new group | runs the postgres and forgejo steps for that group |
-| `kh group remove NAME --yes` | delete the group | runs the postgres and forgejo steps for that group (refused while records exist; the Forgejo repo is kept) |
+| `kh group remove NAME --yes` | delete the group | runs the postgres and forgejo steps for that group (refused while records exist; the Forgejo repo is kept). Without `--yes` the command prints the document count and the kept repo, then exits 2; `--yes` is required also with `--no-apply` |
 | `kh group archive NAME` / `unarchive NAME` | set / delete `archived` | runs the forgejo step for that group |
 | `kh group member add\|remove GROUP LOGIN [--with-approver]` | edit `members` | runs the forgejo step for that group |
 | `kh group approver add\|remove GROUP LOGIN` | edit `approvers` | runs the forgejo step for that group |
