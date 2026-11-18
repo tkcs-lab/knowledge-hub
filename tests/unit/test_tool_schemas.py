@@ -41,12 +41,12 @@ async def test_registered_tools_have_no_forbidden_arguments():
         assert not set(tool.input_schema.get("properties", {})) & FORBIDDEN_ARGUMENTS, tool.name
 
 
-async def test_search_defaults_to_both_tiers():
+async def test_search_defaults_to_all_tiers():
     deps = Deps(settings=Settings(env="test"), config=KhConfig(), app_pool=None, indexer_pool=None)
     tool = next(t for t in await build_mcp(deps).list_tools() if t.name == "search")
     assert tool.input_schema["properties"]["min_tier"]["default"] == "T3"
-    assert "exactly two tiers" in tool.description
-    assert "both are searched" in tool.description
+    assert "exactly three tiers" in tool.description
+    assert "all are searched" in tool.description
 
 
 async def test_search_has_include_outdated_defaulting_to_false():

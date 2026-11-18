@@ -88,7 +88,7 @@ def test_cli_serve_exits_2_on_settings_error(monkeypatch, capsys):
 
 def test_changed_and_removed_settings(monkeypatch):
     s = load_settings()
-    assert s.tier_weights == "T0:1.0,T3:0.4"
+    assert s.tier_weights == "T0:1.0,T0a:0.7,T3:0.4"
     assert s.max_record_bytes == 1048576
     for gone in (
         "forgejo_org", "forgejo_notes_token_file", "agent_notes_enabled", "agent_proposals_enabled",
@@ -117,3 +117,29 @@ def test_similar_settings(monkeypatch):
         with pytest.raises(ValidationError):
             Settings()
         monkeypatch.undo()
+
+
+def test_tier_weights_without_t0a_gets_the_midpoint():
+    from knowledge_hub.search.sql import parse_tier_weights
+
+    assert parse_tier_weights("T0:1.0,T3:0.4") == {"T0": 1.0, "T0a": pytest.approx(0.7), "T3": 0.4}
+    assert Settings(tier_weights="T0:1.0,T3:0.4").tier_weights == "T0:1.0,T3:0.4"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["T0:1.0,T1:0.5,T3:0.4", "T0:1.0,T0a:0.7,T3:0.4,T9:0.1"],
+)
+def test_tier_weights_reject_unknown_tier(bad):
+    with pytest.raises(ValidationError, match="KH_TIER_WEIGHTS must give a positive weight"):
+        Settings(tier_weights=bad)
+
+
+def test_tier_weights_reject_t0a_above_t0():
+    with pytest.raises(ValidationError, match="T0 >= T0a >= T3"):
+        Settings(tier_weights="T0:1.0,T0a:1.1,T3:0.4")
+
+
+def test_tier_weights_reject_t0a_below_t3():
+    with pytest.raises(ValidationError, match="T0 >= T0a >= T3"):
+        Settings(tier_weights="T0:1.0,T0a:0.3,T3:0.4")

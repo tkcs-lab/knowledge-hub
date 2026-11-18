@@ -10,6 +10,7 @@ from knowledge_hub.db.migrate import MigrationError, migrate
 BASELINE = "0001_baseline.sql"
 USAGE = "0002_usage_events.sql"
 SUPERSEDE = "0003_supersede.sql"
+TECH_TIER = "0004_tech_tier.sql"
 
 
 def _empty_db(cluster, name: str) -> str:
@@ -21,8 +22,8 @@ def _empty_db(cluster, name: str) -> str:
     return cluster.dsn("kh_migrator", name)
 
 
-def test_three_migrations_are_shipped():
-    assert [n for n, _ in migrate_mod._migration_files()] == [BASELINE, USAGE, SUPERSEDE]
+def test_four_migrations_are_shipped():
+    assert [n for n, _ in migrate_mod._migration_files()] == [BASELINE, USAGE, SUPERSEDE, TECH_TIER]
 
 
 def test_apply_twice_is_noop(fresh_db):
@@ -35,7 +36,7 @@ def test_schema_migrations_lists_all_migrations(fresh_db):
     with psycopg.connect(fresh_db.dsn("kh_migrator", "kh_fresh")) as conn:
         rows = conn.execute("SELECT name, sha256 FROM kh.schema_migrations ORDER BY name").fetchall()
     want = []
-    for name in (BASELINE, USAGE, SUPERSEDE):
+    for name in (BASELINE, USAGE, SUPERSEDE, TECH_TIER):
         text = resources.files("knowledge_hub").joinpath(f"migrations/{name}").read_text()
         want.append((name, hashlib.sha256(text.encode()).hexdigest()))
     assert rows == want
@@ -51,7 +52,7 @@ def test_modified_applied_file_raises(fresh_db, monkeypatch):
 
 def test_missing_schema_migrations_means_nothing_applied(migrated_db):
     dsn = _empty_db(migrated_db, "kh_empty")
-    assert migrate(dsn) == [BASELINE, USAGE, SUPERSEDE]
+    assert migrate(dsn) == [BASELINE, USAGE, SUPERSEDE, TECH_TIER]
 
 
 def test_foreign_schema_migrations_name_is_refused(fresh_db):
