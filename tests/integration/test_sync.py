@@ -226,3 +226,81 @@ async def test_failed_sync_leaves_state_untouched(world, fake, reader, indexer_p
     assert docs(world) == [] and q(world, "SELECT count(*) FROM kh.repo_state") == [(0,)]
     await sync(indexer_pool, reader)
     assert len(docs(world)) == 1
+
+
+def sup(world, key="old"):
+    [(v,)] = q(world, "SELECT superseded_by::text FROM kh.documents WHERE doc_key = %s", key)
+    return v
+
+
+def doc_id(world, key):
+    [(v,)] = q(world, "SELECT id::text FROM kh.documents WHERE doc_key = %s", key)
+    return v
+
+
+def alerts(world):
+    return {m for (m,) in q(world, "SELECT message FROM kh.index_alerts")}
+
+
+async def test_supersede_marks_the_old_document(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"old.md": md("old"), "new.md": md("new", supersedes=["old"])})
+    await sync(indexer_pool, reader)
+    assert sup(world) == doc_id(world, "new")
+    assert sup(world, "new") is None
+
+
+async def test_removing_supersedes_restores_the_old_document(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"old.md": md("old"), "new.md": md("new", supersedes=["old"])})
+    await sync(indexer_pool, reader)
+    fake.commit("kb-all", {"new.md": md("new")})
+    await sync(indexer_pool, reader)
+    assert sup(world) is None
+
+
+async def test_deleting_the_successor_restores_the_old_document(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"old.md": md("old"), "new.md": md("new", supersedes=["old"])})
+    await sync(indexer_pool, reader)
+    fake.commit("kb-all", {"new.md": None})
+    await sync(indexer_pool, reader)
+    assert sup(world) is None
+
+
+async def test_supersede_cycle_alerts_and_links_nothing(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"a.md": md("a", supersedes=["b"]), "b.md": md("b", supersedes=["a"])})
+    await sync(indexer_pool, reader)
+    assert sup(world, "a") is None and sup(world, "b") is None
+    assert alerts(world) == {"supersedes cycle: a, b"}
+
+
+async def test_unknown_supersedes_target_alerts(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"a.md": md("a", supersedes=["ghost"])})
+    await sync(indexer_pool, reader)
+    assert alerts(world) == {"supersedes unknown id ghost"}
+
+
+async def test_two_successors_pick_the_smallest_doc_key(world, fake, reader, indexer_pool):
+    fake.commit(
+        "kb-all",
+        {"old.md": md("old"), "z.md": md("z", supersedes=["old"]), "m.md": md("m", supersedes=["old"])},
+    )
+    await sync(indexer_pool, reader)
+    assert sup(world) == doc_id(world, "m")
+    assert alerts(world) == {"superseded by 2 documents; using m"}
+
+
+async def test_unchanged_files_are_not_touched_by_a_second_sync(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"old.md": md("old"), "new.md": md("new", supersedes=["old"])})
+    await sync(indexer_pool, reader)
+    before = q(world, "SELECT doc_key, updated_at FROM kh.documents ORDER BY doc_key")
+    fake.commit("kb-all", {"other.md": md("other")})
+    await sync(indexer_pool, reader)
+    after = q(world, "SELECT doc_key, updated_at FROM kh.documents WHERE doc_key <> 'other' ORDER BY doc_key")
+    assert after == before
+
+
+async def test_editing_a_superseded_document_keeps_it_superseded(world, fake, reader, indexer_pool):
+    fake.commit("kb-all", {"old.md": md("old"), "new.md": md("new", supersedes=["old"])})
+    await sync(indexer_pool, reader)
+    fake.commit("kb-all", {"old.md": md("old", body="Changed body.\n")})
+    await sync(indexer_pool, reader)
+    assert sup(world) == doc_id(world, "new")

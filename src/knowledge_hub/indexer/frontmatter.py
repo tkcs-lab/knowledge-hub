@@ -22,6 +22,7 @@ _Loader.yaml_implicit_resolvers = {
 }
 
 ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+MAX_SUPERSEDES = 20
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -32,6 +33,7 @@ class ParsedDoc:
     review_by: dt.date
     body: str
     labels: list[str] = field(default_factory=list)
+    supersedes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,4 +97,21 @@ def parse_document(text: str, path: str) -> ParsedDoc | Rejected:
     ):
         return Rejected("invalid labels")
 
-    return ParsedDoc(id=doc_id, title=title.strip(), review_by=review_by, body=body, labels=list(labels))
+    supersedes = data.get("supersedes")
+    if supersedes is None:
+        supersedes = []
+    elif isinstance(supersedes, str):
+        supersedes = [supersedes]
+    if (
+        not isinstance(supersedes, list)
+        or len(supersedes) > MAX_SUPERSEDES
+        or not all(isinstance(x, str) and ID_RE.fullmatch(x) for x in supersedes)
+        or len(set(supersedes)) != len(supersedes)
+        or doc_id in supersedes
+    ):
+        return Rejected("invalid supersedes")
+
+    return ParsedDoc(
+        id=doc_id, title=title.strip(), review_by=review_by, body=body, labels=list(labels),
+        supersedes=list(supersedes),
+    )  # fmt: skip

@@ -85,3 +85,24 @@ def test_invalid_review_by(bad):
 @pytest.mark.parametrize("bad", ["x", "[A]", "[a, 1]", "[a, [b]]", "{a: b}", "['']", "[a b]"])
 def test_invalid_labels(bad):
     assert reason(doc(GOOD + f"labels: {bad}\n")) == "invalid labels"
+
+
+def test_supersedes_defaults_to_empty():
+    assert parse_document(doc(GOOD), "p.md").supersedes == []
+    assert parse_document(doc(GOOD + "supersedes:\n"), "p.md").supersedes == []
+
+
+def test_supersedes_is_parsed():
+    assert parse_document(doc(GOOD + "supersedes: [a, b.c]\n"), "p.md").supersedes == ["a", "b.c"]
+
+
+def test_supersedes_accepts_a_single_string():
+    assert parse_document(doc(GOOD + "supersedes: old-id\n"), "p.md").supersedes == ["old-id"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["{a: b}", "[1]", "[BAD ID]", "[a, a]", "[doc-1]", "[" + ", ".join(f"d{i}" for i in range(21)) + "]"],
+)
+def test_supersedes_rejects_bad_values(value):
+    assert parse_document(doc(GOOD + f"supersedes: {value}\n"), "p.md") == Rejected("invalid supersedes")

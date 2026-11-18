@@ -276,7 +276,8 @@ class FakeForgejo:
 
 
 def md(doc_id: str, title: str = "T", *, labels: list[str] | None = None, review_by: str = "2099-01-01",
-       body: str = "Body text.\n") -> str:
+       body: str = "Body text.\n", supersedes: list[str] | None = None) -> str:
     """A Markdown file with the required frontmatter (``labels`` omitted when None)."""
     lab = "" if labels is None else f"labels: [{', '.join(labels)}]\n"
-    return f"---\nid: {doc_id}\ntitle: {title}\nreview_by: {review_by}\n{lab}---\n{body}"
+    sup = "" if supersedes is None else f"supersedes: [{', '.join(supersedes)}]\n"
+    return f"---\nid: {doc_id}\ntitle: {title}\nreview_by: {review_by}\n{lab}{sup}---\n{body}"
