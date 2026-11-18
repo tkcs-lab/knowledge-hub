@@ -395,3 +395,109 @@ async def test_archived_group_members_are_not_account_checked(fake, admin):
     config = {**config, "people": {**config["people"], "ghost": "ghost@example.com"}}
     changes = await step(admin, config).plan()
     assert not any(c.prefix == "!" for c in changes), lines(changes)
+
+
+# -- tech org (plan 3.8) --------------------------------------------------------------------------
+
+TECH_CONFIG = {
+    **CONFIG,
+    "labels": {"ember": "Ember product"},
+    "tech_org": "kh-tech",
+    "tech_repos": {"docs-a": {"labels": ["ember"]}, "docs-b": {}},
+}
+TECH_URL = "http://hub:8080/webhooks/forgejo"
+
+
+@pytest.fixture
+def tech_fake():
+    f = Fake(org="kh-tech", token="admin-tok")
+    f.add_user("kh-indexer", token="idx-tok")
+    return f
+
+
+@pytest.fixture
+async def tech_admin(tech_fake):
+    a = ForgejoAdmin("https://forgejo.test", "admin-tok", "kh-tech", transport=tech_fake.transport)
+    yield a
+    await a.aclose()
+
+
+def tech_step(admin, tech_admin, config=None, **kw):
+    return ForgejoStep(parse_config(config or TECH_CONFIG), admin, webhook_secret="hmac",
+                       bot_token="bot-tok", indexer_token="idx-tok", tech_admin=tech_admin, **kw)
+
+
+async def test_tech_repo_missing_is_a_refusal_line(fake, admin, tech_fake, tech_admin):
+    tech_fake.add_repo("docs-b")
+    changes = await tech_step(admin, tech_admin).plan()
+    assert "! tech repo docs-a: not in org kh-tech; create the clone or fork there" in lines(changes)
+    assert not has(changes, "!", r"^tech repo docs-b")
+    assert not any(m != "GET" for m, _ in tech_fake.requests)
+
+
+async def test_tech_repo_present_gets_indexer_read_collaborator(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    assert "+ collaborator docs-a/kh-indexer: read" in lines(await s.plan())
+    assert tech_fake.collabs["docs-a"] == {}
+    await s.apply(prune=False)
+    assert tech_fake.collabs["docs-a"] == {"kh-indexer": "read"}
+    assert tech_fake.collabs["docs-b"] == {"kh-indexer": "read"}
+    assert not any("kh-bot" in c for c in tech_fake.collabs.values())
+    assert not has(await s.plan(), "+", r"^collaborator docs-")
+
+
+async def test_tech_repo_line_lists_collaborators(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    tech_fake.add_user("zed")
+    tech_fake.add_user("amy")
+    tech_fake.collabs["docs-a"] = {"zed": "write", "amy": "read", "kh-indexer": "read"}
+    out = lines(await tech_step(admin, tech_admin).plan())
+    assert "i tech repo docs-a: collaborators amy, zed" in out
+    assert "i tech repo docs-b: collaborators none" in out
+
+
+async def test_unmanaged_tech_repo_is_reported(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b", "stray"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    assert "? unmanaged tech repo stray" in lines(await s.plan())
+    assert "? unmanaged tech repo stray" in lines(await s.apply(prune=True))
+    assert "stray" in tech_fake.repos
+
+
+async def test_tech_webhook_lines_have_the_tech_prefix(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    s = tech_step(admin, tech_admin)
+    planned = lines(await s.plan())
+    assert f"+ tech webhook {TECH_URL}" in planned
+    assert "i tech webhook secret not verifiable" in planned
+    await s.apply(prune=False)
+    assert [h["config"]["url"] for h in tech_fake.hooks.values()] == [TECH_URL]
+    assert drift(await s.plan()) == drift(await step(admin).plan())
+    no_hub = {**TECH_CONFIG}
+    no_hub.pop("hub_url")
+    assert "! tech hub_url: not set" in lines(await tech_step(admin, tech_admin, no_hub).plan())
+
+
+async def test_no_tech_repos_changes_no_output(fake, admin, tech_fake, tech_admin):
+    plain = lines(await step(admin).plan())
+    s = ForgejoStep(parse_config(CONFIG), admin, webhook_secret="hmac", bot_token="bot-tok",
+                    indexer_token="idx-tok", tech_admin=None)
+    assert lines(await s.plan()) == plain
+    assert tech_fake.requests == []
+
+
+async def test_tech_repos_never_get_teams_or_protection(fake, admin, tech_fake, tech_admin):
+    for name in ("docs-a", "docs-b"):
+        tech_fake.add_repo(name)
+    await tech_step(admin, tech_admin).apply(prune=True)
+    assert [t["name"] for t in tech_fake.teams.values()] == ["Owners"]
+    assert tech_fake.protections == {"docs-a": {}, "docs-b": {}}
+    assert tech_fake.repos["docs-a"] == tech_fake._new_repo("docs-a")
+    bad = [(m, p) for m, p in tech_fake.requests
+           if m != "GET" and "/collaborators/" not in p and "/hooks" not in p]
+    assert bad == []

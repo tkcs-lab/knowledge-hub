@@ -11,6 +11,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `tech_org` and `tech_repos` in `kh.yaml` name the Forgejo org and repositories whose technical docs the hub will index (audience `all`); a tech repo may list `labels`.
 - Tier T0a (technical documents indexed without review): migration `0004_tech_tier.sql`, the `search` tool's `min_tier` accepts `T0a`, and `KH_TIER_WEIGHTS` takes an optional `T0a` weight (default `T0:1.0,T0a:0.7,T3:0.4`; a missing T0a is the midpoint of T0 and T3).
 
+- `kh setup` checks the tech org (missing, unmanaged and collaborator lines for each tech repo, an indexer read grant, a `tech webhook`), queues a `git_push` job for each tech repo after a new label, and has a `tech` step that reports T0a documents of a repo no longer in `tech_repos` and deletes them with `--prune`.
 - `sync_repo` indexes a tech repo from its default branch (`CLAUDE.md` and `docs/**/*.md`, tier T0a, audience `all`, labels from `kh.yaml`) without a rewrite alert; `ForgejoReader.default_branch` reads the branch.
 
 ### Changed
