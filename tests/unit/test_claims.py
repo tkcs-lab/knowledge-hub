@@ -287,6 +287,14 @@ def test_resolve_audiences_other_types_are_empty():
     assert resolve_audiences(KH_CONFIG, "service", "alice@example.test", ["all"]) == frozenset()
 
 
+def test_archived_group_is_not_held_by_person_or_workflow():
+    config = KH_CONFIG.model_copy(deep=True)
+    config.groups["hr"].archived = True
+    assert resolve_audiences(config, "claude_client", "carol@example.test", []) == frozenset()
+    assert resolve_audiences(config, "claude_client", "alice@example.test", []) == {"all"}
+    assert resolve_audiences(config, "n8n_workflow", None, ["all", "hr"]) == {"all"}
+
+
 async def test_bad_audience_name_still_refused_for_claude_client():
     client, _ = make_client()
     await refused(

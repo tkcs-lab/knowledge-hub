@@ -6,6 +6,7 @@ Every error text starts with ``config:``.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -45,6 +46,7 @@ class GroupConfig(BaseModel):
     repo: str | None = None
     members: list[str] = []
     approvers: list[str]
+    archived: bool = False
 
     @field_validator("repo")
     @classmethod
@@ -64,6 +66,7 @@ class KhConfig(BaseModel):
     people: dict[str, str] = Field(default_factory=dict)
     groups: dict[str, GroupConfig] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
+    archived_labels: list[str] = Field(default_factory=list)
 
     @field_validator("forgejo_web_url")
     @classmethod
@@ -149,7 +152,29 @@ class KhConfig(BaseModel):
                 raise ValueError(f"label {label!r} is not a valid label name")
             if len(description) > MAX_LABEL_DESCRIPTION:
                 raise ValueError(f"label {label} description is longer than {MAX_LABEL_DESCRIPTION}")
+        seen_archived: set[str] = set()
+        for name in self.archived_labels:
+            if name not in self.labels:
+                raise ValueError(f"archived_labels entry {name!r} is not in labels")
+            if name in seen_archived:
+                raise ValueError(f"archived_labels lists {name!r} twice")
+            seen_archived.add(name)
         return self
+
+    @property
+    def active_groups(self) -> list[str]:
+        return [name for name, group in self.groups.items() if not group.archived]
+
+    def is_active(self, name: str) -> bool:
+        return name in self.groups and not self.groups[name].archived
+
+    @property
+    def archived_label_set(self) -> frozenset[str]:
+        return frozenset(self.archived_labels)
+
+    def visible_labels(self, labels: Iterable[str]) -> list[str]:
+        hidden = self.archived_label_set
+        return [label for label in labels if label not in hidden]
 
     @property
     def bots(self) -> frozenset[str]:
@@ -176,7 +201,7 @@ class KhConfig(BaseModel):
         return frozenset(
             name
             for name, group in self.groups.items()
-            if logins & {m.casefold() for m in group.members}
+            if not group.archived and logins & {m.casefold() for m in group.members}
         )
 
 
