@@ -39,6 +39,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p7-retire
 
 - review: no deviation found in the diff review; workers had no tld, so the orchestrator ran roles required (none) and the scope check (clean); no docs index in this repository
+- retry: fix-3 merged: changelog entries moved under Unreleased after the main merge; runbook config paths and the group remove doc row corrected (final review findings 3, 7, 8)
 
 ## Final review
 
