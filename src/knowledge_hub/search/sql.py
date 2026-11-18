@@ -28,6 +28,7 @@ class SearchFilters:
     rrf_k: int = 60
     tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T3": 0.4})
     stale_weight: float = 0.5
+    include_outdated: bool = False
 
     def tiers_at_or_above(self) -> list[str]:
         return list(TIERS[: TIERS.index(self.min_tier) + 1])
@@ -51,6 +52,7 @@ _FILTER = """
        c.tier = ANY(%({tiers})s::text[])
    AND c.labels @> %(labels)s::text[]
    AND (%(audience)s = '' OR c.audience = %(audience)s)
+   AND (%(include_outdated)s OR NOT EXISTS (SELECT 1 FROM hidden h WHERE h.owner_key = c.owner_key))
 """
 
 
@@ -82,13 +84,20 @@ def _lists(prefix: str, tiers: str) -> str:
 
 
 _BODY = """
-WITH {main_lists},
+WITH hidden AS (
+  SELECT 'doc:' || id::text AS owner_key FROM kh.documents WHERE superseded_by IS NOT NULL
+  UNION ALL
+  SELECT 'rec:' || id::text FROM kh.records WHERE outdated
+),
+{main_lists},
 {low_lists},
 scored AS (
   SELECT c.id, c.owner_key, c.tier, c.stale, c.text, c.document_id, c.record_id,
+         (h.owner_key IS NOT NULL) AS outdated,
          m.rrf * (%(tier_weights)s::jsonb ->> c.tier)::float8
-               * CASE WHEN c.stale THEN %(stale_weight)s ELSE 1 END AS score
+               * CASE WHEN c.stale OR h.owner_key IS NOT NULL THEN %(stale_weight)s ELSE 1 END AS score
     FROM main_fused m JOIN kh.chunks c ON c.id = m.id
+    LEFT JOIN hidden h ON h.owner_key = c.owner_key
 ),
 best AS (
   SELECT DISTINCT ON (owner_key) * FROM scored ORDER BY owner_key, score DESC, id
@@ -110,7 +119,8 @@ meta AS (
          (SELECT count(DISTINCT c.owner_key) FROM kh.chunks c, websearch_to_tsquery('english', %(query)s) q
            WHERE c.tsv @@ q.q AND c.tier = 'T3') AS t3_fts_hits
 )
-SELECT p.id, p.owner_key, p.tier, p.stale, p.text, p.score,
+SELECT p.id, p.owner_key, p.tier, p.stale, p.outdated, p.text, p.score,
+       d.superseded_by AS doc_superseded_by, r.replaced_by AS rec_replaced_by,
        d.repo AS doc_repo, d.path AS doc_path, d.blob_sha AS doc_blob_sha,
        d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
        r.title AS rec_title, r.audience AS rec_audience, r.labels AS rec_labels,
@@ -145,5 +155,6 @@ def build_search_query(filters: SearchFilters) -> tuple[str, dict[str, Any]]:
         "offset": filters.offset,
         "tier_weights": json.dumps(filters.tier_weights),
         "stale_weight": filters.stale_weight,
+        "include_outdated": filters.include_outdated,
     }
     return sql, params
