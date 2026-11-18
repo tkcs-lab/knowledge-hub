@@ -35,6 +35,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 - branch protection on `main`: no direct push, the merge whitelist is exactly the approve team, `required_approvals: 0`, `apply_to_admins: true`, read back after every write (Forgejo silently drops whitelist teams that cannot read the repo);
 - the identity of the bot and indexer tokens (`GET /user` equals the configured login, the bot has no repo admin, the indexer no push, neither is an org owner or site admin);
 - the org webhook exists. Forgejo never returns its secret, so `plan` can only say `i webhook secret not verifiable`;
+- for each group with `slack_channel`, exactly one Slack hook on its repo for `pull_request` events with that channel. The URL is a credential that plan cannot compare, so it says `i slack hook <repo>: url not verifiable`. The hook only notifies; it is not part of the trust chain;
 - a report-only line lists the members of the Owners team as people who can bypass protection.
 
 `plan` exits 1 on drift, so running it on a schedule catches a protection change made in the Forgejo UI.

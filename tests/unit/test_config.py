@@ -321,3 +321,16 @@ def test_config_without_tech_keys_is_unchanged():
     c = cfg()
     assert c.tech_org is None and c.tech_repos == {}
     assert c.tech_repo_names == [] and not c.is_tech_repo("kb-all")
+
+
+def test_slack_channel_optional_and_validated():
+    assert cfg().groups["all"].slack_channel is None
+    groups = {**GROUPS, "all": {**GROUPS["all"], "slack_channel": "#kh-all-approvers"}}
+    assert cfg(groups=groups).groups["all"].slack_channel == "#kh-all-approvers"
+    for value in ("kh-all", "#Kh", "#", "#" + "a" * 81):
+        groups = {**GROUPS, "all": {**GROUPS["all"], "slack_channel": value}}
+        with pytest.raises(ConfigError) as exc:
+            parse_config({"people": PEOPLE, "groups": groups})
+        assert str(exc.value) == (
+            f"config: slack_channel {value!r} is not a valid Slack channel (#name, lower case)"
+        )

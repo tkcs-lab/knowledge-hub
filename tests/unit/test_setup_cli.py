@@ -169,3 +169,34 @@ def test_step_names_include_tech_after_labels():
     names = setup_cli.STEP_NAMES
     assert names[names.index("labels") + 1] == "tech"
     assert names.index("tech") < names.index("forgejo")
+
+
+def test_slack_urls_file_parsing(tmp_path):
+    msg = "KH_SETUP_SLACK_WEBHOOKS_FILE is not a mapping of group name to https URL"
+    assert setup_cli._slack_urls(None) is None
+
+    def read(text):
+        path = tmp_path / "slack.yaml"
+        path.write_text(text)
+        return setup_cli._slack_urls(path)
+
+    assert read("all: https://hooks.slack.com/services/T0/B0/X\n") == {
+        "all": "https://hooks.slack.com/services/T0/B0/X"
+    }
+    assert read("") == {}
+    for text in ("- https://hooks.slack.com/a\n", "all: http://hooks.slack.com/a\n", "all: 12\n",
+                 "all: [unclosed\n"):
+        with pytest.raises(ValueError) as exc:
+            read(text)
+        assert str(exc.value) == msg
+        assert "unclosed" not in str(exc.value) and "hooks.slack.com" not in str(exc.value)
+
+
+def test_slack_urls_unreadable_file(config, tmp_path, monkeypatch, capsys):
+    token = tmp_path / "token"
+    token.write_text("tok\n")
+    monkeypatch.setenv("KH_FORGEJO_URL", "http://forgejo")
+    monkeypatch.setenv("KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE", str(token))
+    monkeypatch.setenv("KH_SETUP_SLACK_WEBHOOKS_FILE", str(tmp_path / "gone"))
+    assert setup_cli.main(["plan", "--config", config, "--only", "forgejo"]) == 2
+    assert capsys.readouterr().out == "setup: KH_SETUP_SLACK_WEBHOOKS_FILE is not set\n"

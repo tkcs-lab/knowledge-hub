@@ -12,6 +12,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - Tier T0a (technical documents indexed without review): migration `0004_tech_tier.sql`, the `search` tool's `min_tier` accepts `T0a`, and `KH_TIER_WEIGHTS` takes an optional `T0a` weight (default `T0:1.0,T0a:0.7,T3:0.4`; a missing T0a is the midpoint of T0 and T3). Run `kh migrate`, and restart PrivacyFence if it caches the `search` schema.
 - `kh setup` checks the tech org (missing, unmanaged and collaborator lines for each tech repo, an indexer read grant, a `tech webhook`), queues a `git_push` job for each tech repo after a new label, and has a `tech` step that reports T0a documents of a repo no longer in `tech_repos`; `kh setup apply --prune` deletes the documents of a withdrawn tech repo.
 - `sync_repo` indexes a tech repo from its default branch (`CLAUDE.md` and `docs/**/*.md`, tier T0a, audience `all`, labels from `kh.yaml`) without a rewrite alert; `ForgejoReader.default_branch` reads the branch.
+- `groups.<g>.slack_channel` in `kh.yaml` and the setup file `KH_SETUP_SLACK_WEBHOOKS_FILE`: `kh setup` keeps one Forgejo Slack hook per group repo that posts pull request events to the group's approver channel.
 
 ### Changed
 

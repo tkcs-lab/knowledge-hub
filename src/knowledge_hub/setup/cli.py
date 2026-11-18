@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import yaml
 from pydantic import ValidationError
 
 from knowledge_hub.config import KhConfig, load_config
@@ -32,6 +33,24 @@ def _read(path: Path | None, name: str, *, required: bool) -> str | None:
         return path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
         raise _NotSet(name) from exc
+
+
+def _slack_urls(path: Path | None) -> dict[str, str] | None:
+    if path is None:
+        return None
+    text = _read(path, "KH_SETUP_SLACK_WEBHOOKS_FILE", required=False)
+    bad = ValueError("KH_SETUP_SLACK_WEBHOOKS_FILE is not a mapping of group name to https URL")
+    try:
+        data = yaml.safe_load(text or "")
+    except yaml.YAMLError:
+        raise bad from None
+    if data is None:
+        return {}
+    if not isinstance(data, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v.startswith("https://") for k, v in data.items()
+    ):
+        raise bad from None
+    return data
 
 
 def _builders(
@@ -78,6 +97,7 @@ def _builders(
                 settings.forgejo_indexer_token_file, "KH_FORGEJO_INDEXER_TOKEN_FILE", required=False
             ),
             tech_admin=tech_admin,
+            slack_urls=_slack_urls(settings.setup_slack_webhooks_file),
         )
 
     def ollama() -> Step:

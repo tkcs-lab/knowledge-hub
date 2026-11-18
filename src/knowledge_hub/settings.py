@@ -77,6 +77,7 @@ class Settings(BaseSettings):
 
     setup_pg_admin_dsn_file: Path | None = None
     setup_forgejo_admin_token_file: Path | None = None
+    setup_slack_webhooks_file: Path | None = None
 
     @field_validator("dev_identity", mode="before")
     @classmethod
