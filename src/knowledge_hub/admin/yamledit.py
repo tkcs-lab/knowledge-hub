@@ -12,6 +12,7 @@ import difflib
 import fcntl
 import io
 import os
+import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,13 +95,12 @@ def locked(path: str | Path) -> Iterator[None]:
 
 def commit(path: str | Path, text: str) -> None:
     target = Path(os.path.realpath(path))
-    tmp = target.parent / f".{target.name}.{os.getpid()}.tmp"
     try:
         try:
             st = target.stat()
         except FileNotFoundError:
             st = None
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as fh:
                 fh.write(text)

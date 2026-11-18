@@ -54,6 +54,17 @@ def test_commit_replaces_atomically_and_keeps_mode(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["kh.yaml"]
 
 
+def test_commit_ignores_a_stale_temp_file_with_the_old_naming(tmp_path):
+    path = tmp_path / "kh.yaml"
+    path.write_text("org: a\n")
+    stale = tmp_path / f".kh.yaml.{os.getpid()}.tmp"
+    stale.write_text("junk")
+    yamledit.commit(path, "org: b\n")
+    assert path.read_text() == "org: b\n"
+    assert stale.read_text() == "junk"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [stale.name, "kh.yaml"]
+
+
 def test_commit_follows_a_symlink(tmp_path):
     real_dir = tmp_path / "real"
     real_dir.mkdir()
