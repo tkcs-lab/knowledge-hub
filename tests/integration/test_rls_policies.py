@@ -13,7 +13,7 @@ DB = "kh_fresh"
 SUB = "n8n-token:a"
 NOW = datetime.now(UTC)
 TABLES = ("schema_migrations", "claim_jti", "groups", "labels", "documents", "records", "chunks",
-          "index_jobs", "repo_state", "index_alerts", "usage_events")
+          "index_jobs", "repo_state", "index_alerts", "usage_events", "record_moves")
 
 # role -> table -> commands granted (a role or table not listed has no grant)
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -28,7 +28,8 @@ GRANTS = {
         "claim_jti": {"SELECT", "DELETE"}, "usage_events": {"SELECT", "DELETE"},
     },
 }
-DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated")
+DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated",
+            "move_record", "record_moved")
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
@@ -216,7 +217,7 @@ def test_indexer_cannot_write_records_or_groups(seeded_db, fresh_db):
 
 
 @pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts", "claim_jti",
-                                   "schema_migrations"])
+                                   "schema_migrations", "record_moves"])
 def test_app_has_no_access_to_internal_tables(seeded_db, fresh_db, table):
     with role_conn(fresh_db, "kh_app", "all") as conn:
         assert attempt(conn, f"SELECT * FROM kh.{table}") is errors.InsufficientPrivilege
