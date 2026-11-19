@@ -3,10 +3,9 @@
 # `kh serve` exits with code 75 when kh.yaml changes; `restart: unless-stopped` brings it back.
 services:
   knowledge-hub:
-    # The directory sync, the panel, OAuth and the admins and directory keys of kh.yaml need the first release after 0.5.1 (CHANGELOG [Unreleased]); 0.5.1 refuses this example's kh.yaml.
     # The release image (linux/arm64). Pin the digest in the stack:
-    #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.5.1
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1
+    #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.6.0
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.6.0
     restart: unless-stopped
     networks: [db, kh, egress]   # egress only for the sign-in: restrict it to the issuer's hosts by name
     read_only: true
@@ -69,7 +68,7 @@ services:
   # reaches the provider (docs/runbook-identity.md). Start it only when `directory.provider` is set.
   # With directory.provider: none the command exits 0 and restart: unless-stopped restarts it in a loop, so start it only when a provider is set.
   knowledge-hub-directory:
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1   # the same image and tag as knowledge-hub
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.6.0   # the same image and tag as knowledge-hub
     restart: unless-stopped
     command: ["directory", "sync", "--every", "300"]
     networks: [db, egress]   # egress: outbound to the provider's hosts only (for Keycloak use its internal admin network instead)
@@ -99,7 +98,7 @@ services:
   # The admin panel. Publish it only to a private network or behind an access proxy: there is no
   # `ports:` entry on purpose. Only the emails in `admins:` of kh.yaml may sign in.
   knowledge-hub-panel:
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1   # the same image and tag as knowledge-hub
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.6.0   # the same image and tag as knowledge-hub
     restart: unless-stopped
     command: ["panel", "serve", "--port", "8081"]
     networks: [db, kh, egress]   # egress only for the sign-in issuer: restrict it to the issuer's hosts by name
