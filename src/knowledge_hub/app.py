@@ -17,6 +17,8 @@ from starlette.routing import Route
 
 from knowledge_hub.auth.hostguard import PublicHostGuard
 from knowledge_hub.auth.middleware import CallerMiddleware
+from knowledge_hub.config import KhConfig
+from knowledge_hub.config_watch import config_digest
 from knowledge_hub.indexer.webhook import make_webhook_endpoint
 from knowledge_hub.mcp.server import Deps, build_mcp
 from knowledge_hub.metrics import JOB_STATES, METRICS
@@ -24,6 +26,8 @@ from knowledge_hub.oauth.routes import build_oauth_routes
 from knowledge_hub.settings import Settings
 
 log = logging.getLogger("knowledge_hub.app")
+
+DRAIN_SECONDS = 60
 
 PUBLIC_PATHS = frozenset(
     {
@@ -44,8 +48,13 @@ def allowed_hosts(settings: Settings) -> list[str]:
     return [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
 
 
-async def healthz(request: Request) -> PlainTextResponse:
-    return PlainTextResponse("ok")
+def make_healthz(config: KhConfig):
+    digest = config_digest(config)
+
+    async def healthz(request: Request) -> PlainTextResponse:
+        return PlainTextResponse("ok", headers={"X-KH-Config-Digest": digest})
+
+    return healthz
 
 
 def make_metrics_endpoint(settings: Settings, deps: Deps):
@@ -130,7 +139,7 @@ def build_app(
             if task is not None:
                 deps.worker.stop()
                 try:
-                    await asyncio.wait_for(task, 10)
+                    await asyncio.wait_for(task, DRAIN_SECONDS)
                 except (TimeoutError, asyncio.CancelledError):
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
@@ -138,7 +147,7 @@ def build_app(
 
     routes = [
         Route("/mcp", endpoint=McpRoute()),
-        Route("/healthz", healthz),
+        Route("/healthz", make_healthz(deps.config)),
         Route("/webhooks/forgejo", make_webhook_endpoint(deps), methods=["POST"]),
     ]
     if settings.metrics_token_file is not None:
