@@ -121,13 +121,16 @@ async def test_members_users_and_rules(creds):
                     member("b@example.org"),
                     member("gone@example.org"),
                     member("x@other.com"),
+                    member("s@other.com"),
+                    member("unknown@other.com"),
                     member("c@example.org", status="SUSPENDED"),
                 ],
             ]
         }
     )
     users = [[user("a@example.org", aliases=["alias@example.org"])], [user("b@example.org", suspended=True),
-             user("c@example.org")], ]
+             user("c@example.org"),
+             user("x@other.com"), user("s@other.com", suspended=True)], ]
     t = make_google_transport(g, users)
     p, _ = provider(creds, t)
     out = await p.fetch(REFS)
@@ -138,6 +141,8 @@ async def test_members_users_and_rules(creds):
         "b@example.org": False,
         "gone@example.org": False,
         "x@other.com": True,
+        "s@other.com": False,
+        "unknown@other.com": False,
         "c@example.org": False,
     }
     assert all(u.email_verified for u in out["g"].members)
