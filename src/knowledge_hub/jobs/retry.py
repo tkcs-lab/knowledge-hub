@@ -31,10 +31,11 @@ async def reclaim_stuck(pool: Any, older_than_minutes: int = 60) -> int:
         cur = await conn.execute(
             """
             UPDATE kh.index_jobs
-               SET state = 'queued', run_after = now()
+               SET state = 'queued', run_after = now(),
+                   attempts = LEAST(attempts, %s)
              WHERE state = 'running'
                AND created_at < now() - make_interval(mins => %s)
             """,
-            (older_than_minutes,),
+            (MAX_ATTEMPTS - 1, older_than_minutes),
         )
         return cur.rowcount

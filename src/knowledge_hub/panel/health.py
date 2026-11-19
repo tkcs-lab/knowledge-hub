@@ -68,7 +68,7 @@ async def run_checks(
         return _check("config", "ok", "kh.yaml is valid")
 
     async def database() -> Check:
-        async with ctx.pool.connection() as conn:
+        async with stats._read(ctx.pool) as conn:
             await conn.execute("SELECT 1")
         return _check("database", "ok")
 
@@ -142,7 +142,7 @@ async def run_checks(
         cfg = ctx.load_config().directory
         if cfg.provider == "none":
             return _check("directory", "n/a", "no directory provider")
-        async with ctx.pool.connection() as conn:
+        async with stats._read(ctx.pool) as conn:
             snap = await store.load_snapshot(conn)
         if snap is None:
             return _check("directory", "fail", "no snapshot")

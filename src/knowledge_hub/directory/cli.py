@@ -57,7 +57,7 @@ async def _sync(settings: Settings, config: KhConfig, args: argparse.Namespace) 
     try:
         if args.every is not None:
             watcher = None
-            if settings.config_file is not None:
+            if settings.config_file is not None and settings.config_watch_seconds > 0:
                 watcher = ConfigWatcher(settings.config_file, config)
             return await run_every(
                 config,
