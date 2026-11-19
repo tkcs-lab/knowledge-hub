@@ -73,12 +73,13 @@ async def _check(deps: Any) -> int:
 
 
 async def _daily(deps: Any) -> int:
-    from knowledge_hub.jobs.daily import run_daily
+    from knowledge_hub.jobs.daily import purge_identity, run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
     stale = await run_daily(deps.indexer_pool)
+    identity = await purge_identity(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
-    print(f"stale flags changed: {stale}; usage events purged: {usage}")
+    print(f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}")
     return 0
 
 
@@ -119,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.admin.cli import main as admin_main
 
         return admin_main(argv)
+    if argv and argv[0] == "directory":
+        from knowledge_hub.directory.cli import main as directory_main
+
+        return directory_main(argv[1:])
     if argv and argv[0] == "key":
         from knowledge_hub.auth.keys_cli import main as key_main
 

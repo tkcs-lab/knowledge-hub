@@ -84,7 +84,12 @@ def test_daily_and_requeue(monkeypatch, capsys):
         assert days == 180
         return 5
 
+    async def purge_identity(pool):
+        assert pool == "pool"
+        return 2
+
     monkeypatch.setattr(daily_mod, "run_daily", run_daily)
+    monkeypatch.setattr(daily_mod, "purge_identity", purge_identity)
     monkeypatch.setattr(usage_mod, "purge_usage", purge_usage)
     monkeypatch.setattr(requeue_mod, "requeue_embeddings", requeue)
     assert cli.main(["daily"]) == 0

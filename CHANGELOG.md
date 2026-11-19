@@ -10,6 +10,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `directory/store.py`: the directory snapshot store, `MembershipCache` (fails closed to the static membership when the snapshot is missing, of another provider or older than `max_stale_seconds`) and `load_membership`; the gauge `kh_directory_snapshot_age_seconds`.
 - Migration `0006_identity.sql`: tables and `SECURITY DEFINER` functions for hub keys, the OAuth server state and the directory snapshot, and `deploy/rollback-0006.sql` to undo it. `kh daily` purges expired OAuth state through `jobs/daily.py` `purge_identity`.
 
+- `kh directory sync [--once | --every N] [--accept-change]`, `plan`, `people [--json]` and `show` (`directory/sync.py`, `directory/cli.py`): the separate sync process that fetches directory groups, refuses a snapshot whose user count shrinks or grows too much (exit 3) and stores it as `kh_indexer`. `kh daily` also purges expired OAuth state and prints `identity rows purged`.
+
 ### Changed
 
 - `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
