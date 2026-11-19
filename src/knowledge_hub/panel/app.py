@@ -18,6 +18,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
+from knowledge_hub.panel.api_health import build_health_routes
 from knowledge_hub.panel.api_read import build_read_routes
 from knowledge_hub.panel.auth import build_auth_routes, current_admin
 from knowledge_hub.panel.context import PanelContext
@@ -30,6 +31,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 ROUTE_BUILDERS: tuple[Callable[[PanelContext], list[Route]], ...] = (
     build_auth_routes,
     build_read_routes,
+    build_health_routes,
 )
 
 CSP = (
