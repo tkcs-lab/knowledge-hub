@@ -44,7 +44,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-directory-store
 
-- pending
+- conflict: CHANGELOG.md conflict with p6 resolved by keeping both bullets (mechanical).
 
 ## p11-directory-sync
 
