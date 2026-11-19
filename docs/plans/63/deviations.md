@@ -29,7 +29,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-panel-app-shell
 
-- pending
+- worker: tld was unavailable in the worker, so the orchestrator ran the roles step (none required); no other deviation.
 
 ## p8-panel-read-api
 
