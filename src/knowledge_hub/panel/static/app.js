@@ -1,3 +1,5 @@
+import "/static/labels.js";
+
 export async function api(method, path, body) {
   const init = { method, headers: {}, credentials: "same-origin" };
   if (method !== "GET") {

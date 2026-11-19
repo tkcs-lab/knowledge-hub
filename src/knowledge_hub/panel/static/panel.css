@@ -41,3 +41,12 @@ th { color: var(--muted); font-weight: 600; }
 .muted { color: var(--muted); }
 .error { color: var(--fail); }
 pre { overflow: auto; padding: 0.5rem; border: 1px solid var(--line); }
+.op-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 40rem; margin: 0.5rem 0; }
+.field { display: flex; flex-direction: column; gap: 0.15rem; }
+.field input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0.25rem 0.5rem; }
+.field input[readonly] { color: var(--muted); }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.op-status p { margin: 0.25rem 0; }
+pre.op-output { max-height: 20rem; white-space: pre-wrap; word-break: break-word; }
+.row-actions { min-width: 14rem; }
+.inline-form { margin-top: 0.25rem; }
