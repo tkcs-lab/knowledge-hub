@@ -20,6 +20,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p4-migration-identity
 
 - None.
+- conflict: CHANGELOG.md merge conflict with p3 resolved by keeping both entries (mechanical).
 
 ## p5-directory-core
 
