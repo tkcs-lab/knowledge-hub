@@ -75,9 +75,24 @@ async def _with_deps(settings: Settings, config: KhConfig, run: Any) -> int:
         await close_deps(deps)
 
 
-async def _rebuild(deps: Any, repo: str | None) -> int:
-    from knowledge_hub.indexer.rebuild import rebuild
+async def _rebuild(deps: Any, repo: str | None, queue: bool = False) -> int:
+    from knowledge_hub.indexer.rebuild import configured_repos, configured_tech_repos, rebuild
 
+    if queue:
+        if repo is None:
+            print("kh rebuild --queue needs --repo")
+            return 2
+        if repo not in configured_repos(deps.config) + configured_tech_repos(deps.config):
+            if deps.config.group_for_repo(repo) is not None:
+                raise ValueError(f"repo {repo} is archived")
+            raise ValueError(f"repo {repo} is in no group")
+        from knowledge_hub.jobs.rebuild_queue import queue_rebuild
+
+        if await queue_rebuild(deps.indexer_pool, repo):
+            print(f"queued rebuild of {repo}")
+        else:
+            print(f"rebuild of {repo} is already queued")
+        return 0
     for name, plan in (await rebuild(deps, repo)).items():
         print(f"rebuilt {name} at {plan.head_sha}")
     return 0
@@ -158,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         if name == "rebuild":
             p.add_argument("--repo")
+            p.add_argument("--queue", action="store_true")
     sub.add_parser("setup", help="plan or apply the deployment setup (kh setup --help)")
     sub.add_parser("lint").add_argument("files", nargs="+", metavar="FILE")
     args = parser.parse_args(argv)
@@ -172,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "migrate":
         return _migrate(settings)
     jobs = {
-        "rebuild": lambda deps: _rebuild(deps, getattr(args, "repo", None)),
+        "rebuild": lambda deps: _rebuild(deps, getattr(args, "repo", None), getattr(args, "queue", False)),
         "check": _check,
         "daily": _daily,
         "requeue-embeddings": _requeue,
