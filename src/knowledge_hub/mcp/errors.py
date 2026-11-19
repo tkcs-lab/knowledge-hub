@@ -53,6 +53,7 @@ MOVE_CONFLICT = "the target group already has an item with this source and sourc
 MOVE_LINKED = "another item names this one as its replacement or successor; clear that first"
 RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
 MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
+TOOL_NOT_ALLOWED = "this credential may not call this tool"
 MOVE_PARTIAL = "the removal pull request could not be opened; call move_item again to open it"
 
 
@@ -127,6 +128,9 @@ def tool_guard(name: str, deps: Deps) -> Callable[[_Tool], _Tool]:
                 raise _refuse("not a tools/call")
             if call.name != name:
                 raise _refuse("tool name differs from the hashed call")
+            if caller.tools is not None and name not in caller.tools:
+                METRICS.tool_call(name, "error", 0.0)
+                raise ToolError(TOOL_NOT_ALLOWED)
             expected = {**defaults, **call.arguments}
             if not _same(kwargs, expected):
                 raise _refuse("arguments differ from the hashed call")
