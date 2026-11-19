@@ -49,7 +49,8 @@ def parse_tier_weights(text: str) -> dict[str, float]:
     positive, no other tier is allowed, and ``T0 >= T0a >= T3``.
     """
     message = (
-        "KH_TIER_WEIGHTS must give a positive weight for T0 and T3, and optionally T0a, with T0 >= T0a >= T3"
+        "KH_TIER_WEIGHTS must give a positive weight for T0 and T3, and optionally T0a, "
+        "with T0 >= T0a >= T3"
     )
     out: dict[str, float] = {}
     try:

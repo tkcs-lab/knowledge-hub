@@ -69,10 +69,8 @@ def test_an_old_database_is_refused_before_anything_runs(migrated_db):
     dsn = _empty_db(migrated_db, "kh_old")
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("CREATE SCHEMA kh")
-        conn.execute(
-            "CREATE TABLE kh.schema_migrations (name text PRIMARY KEY, sha256 text NOT NULL,"
-            " applied_at timestamptz NOT NULL DEFAULT now())"
-        )
+        conn.execute("CREATE TABLE kh.schema_migrations (name text PRIMARY KEY, sha256 text NOT NULL,"
+                     " applied_at timestamptz NOT NULL DEFAULT now())")
         conn.execute("INSERT INTO kh.schema_migrations (name, sha256) VALUES ('0001_schema_grants.sql', 'x')")
     with pytest.raises(MigrationError, match="fresh install is required"):
         migrate(dsn)

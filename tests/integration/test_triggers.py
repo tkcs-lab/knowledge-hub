@@ -118,9 +118,7 @@ def test_chunk_of_a_document_copies_its_owner(admin):
     assert chunk_row(admin, c) == (f"doc:{d}", "T0", "mgmt", ["ember"], True)
     created = admin.execute(
         "SELECT c.owner_created_at = d.indexed_at FROM kh.chunks c"
-        " JOIN kh.documents d ON d.id = c.document_id WHERE c.id = %s",
-        [c],
-    ).fetchone()
+        " JOIN kh.documents d ON d.id = c.document_id WHERE c.id = %s", [c]).fetchone()
     assert created == (True,)
 
 
@@ -130,9 +128,7 @@ def test_chunk_of_a_record_copies_its_owner(admin):
     assert chunk_row(admin, c) == (f"rec:{r}", "T3", "hr", ["other"], False)
     assert admin.execute(
         "SELECT c.owner_created_at = r.ingested_at FROM kh.chunks c"
-        " JOIN kh.records r ON r.id = c.record_id WHERE c.id = %s",
-        [c],
-    ).fetchone() == (True,)
+        " JOIN kh.records r ON r.id = c.record_id WHERE c.id = %s", [c]).fetchone() == (True,)
 
 
 def test_indexer_inserts_chunks_through_the_trigger(seeded_db, fresh_db, admin):
@@ -141,9 +137,7 @@ def test_indexer_inserts_chunks_through_the_trigger(seeded_db, fresh_db, admin):
         cid = str(uuid.uuid4())
         conn.execute(
             "INSERT INTO kh.chunks (id, document_id, owner_key, owner_created_at, ordinal, text, content_sha,"
-            " tier, audience) VALUES (%s, %s, '', now(), 0, 't', 's', 'T3', 'all')",
-            [cid, d],
-        )
+            " tier, audience) VALUES (%s, %s, '', now(), 0, 't', 's', 'T3', 'all')", [cid, d])
     assert chunk_row(admin, cid) == (f"doc:{d}", "T0", "mgmt", ["ember"], False)
 
 
@@ -152,21 +146,17 @@ def test_document_update_propagates_to_chunks(admin):
     c1, c2 = add_chunk(admin, document_id=d), add_chunk(admin, document_id=d, ordinal=1)
     other = add_chunk(admin, document_id=add_doc(admin))
     admin.execute(
-        "UPDATE kh.documents SET audience = 'hr', labels = '{ember,other}', stale = true WHERE id = %s", [d]
-    )
+        "UPDATE kh.documents SET audience = 'hr', labels = '{ember,other}', stale = true WHERE id = %s", [d])
     for c in (c1, c2):
         assert chunk_row(admin, c)[2:] == ("hr", ["ember", "other"], True)
     assert chunk_row(admin, other)[2:] == ("all", [], False)
 
 
-@pytest.mark.parametrize(
-    ("sql", "want"),
-    [
-        ("UPDATE kh.documents SET stale = true WHERE id = %s", ("all", [], True)),
-        ("UPDATE kh.documents SET labels = '{ember}' WHERE id = %s", ("all", ["ember"], False)),
-        ("UPDATE kh.documents SET audience = 'mgmt' WHERE id = %s", ("mgmt", [], False)),
-    ],
-)
+@pytest.mark.parametrize(("sql", "want"), [
+    ("UPDATE kh.documents SET stale = true WHERE id = %s", ("all", [], True)),
+    ("UPDATE kh.documents SET labels = '{ember}' WHERE id = %s", ("all", ["ember"], False)),
+    ("UPDATE kh.documents SET audience = 'mgmt' WHERE id = %s", ("mgmt", [], False)),
+])
 def test_each_propagated_column_reaches_the_chunks(admin, sql, want):
     d = add_doc(admin)
     c = add_chunk(admin, document_id=d)

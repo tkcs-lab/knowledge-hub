@@ -23,7 +23,9 @@ def config(labels):
 
 def jobs(fresh_db):
     with psycopg.connect(fresh_db.dsn("kh_migrator", DB)) as conn:
-        return conn.execute("SELECT repo FROM kh.index_jobs WHERE kind = 'git_push' ORDER BY repo").fetchall()
+        return conn.execute(
+            "SELECT repo FROM kh.index_jobs WHERE kind = 'git_push' ORDER BY repo"
+        ).fetchall()
 
 
 async def test_new_label_queues_a_git_push_for_each_tech_repo(fresh_db):

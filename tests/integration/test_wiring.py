@@ -105,7 +105,9 @@ async def test_lifespan_runs_the_worker_and_stops_it(wiring_settings, fresh_db, 
             conn.execute(
                 "INSERT INTO kh.groups (name, repo) VALUES (%s, %s)", (name, KH_CONFIG.repo_for_group(name))
             )
-        conn.execute("INSERT INTO kh.index_jobs (kind, repo) VALUES ('git_push', 'kb-all') RETURNING id")
+        conn.execute(
+            "INSERT INTO kh.index_jobs (kind, repo) VALUES ('git_push', 'kb-all') RETURNING id"
+        )
     fake = FakeForgejo()
     fake.add_repo("kb-all")
     fake.commit("kb-all", {"a.md": md("a", "A")})
@@ -114,12 +116,8 @@ async def test_lifespan_runs_the_worker_and_stops_it(wiring_settings, fresh_db, 
         indexer_pool, reader, FakeEmbedder(1024), KH_CONFIG, None, chunker_version=1, poll_seconds=0.05
     )
     deps = Deps(
-        settings=wiring_settings,
-        config=KH_CONFIG,
-        app_pool=app_pool,
-        indexer_pool=indexer_pool,
-        reader=reader,
-        worker=worker,
+        settings=wiring_settings, config=KH_CONFIG, app_pool=app_pool, indexer_pool=indexer_pool,
+        reader=reader, worker=worker,
     )
     app = build_app(wiring_settings, deps)
     try:

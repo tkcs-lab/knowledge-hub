@@ -36,10 +36,7 @@ def app_settings(db_settings, cursor_key):
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings,
-        config=kh_config,
-        app_pool=app_pool,
-        indexer_pool=indexer_pool,
+        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
 
@@ -93,7 +90,9 @@ async def test_replaced_by_a_same_group_record_and_a_document(mcp_client, db):
         assert got.data["outdated"] is True and got.data["replaced_by"] == successor
 
 
-async def test_replaced_by_other_group_missing_and_malformed_all_answer_bad_arg_replaced_by(mcp_client, db):
+async def test_replaced_by_other_group_missing_and_malformed_all_answer_bad_arg_replaced_by(
+    mcp_client, db
+):
     rec = add_record(db)
     other_group = add_doc(db, repo="kb-mgmt", audience="mgmt")
     db.commit()

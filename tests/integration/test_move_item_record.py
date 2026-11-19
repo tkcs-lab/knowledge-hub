@@ -35,10 +35,7 @@ def app_settings(db_settings, cursor_key):
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings,
-        config=kh_config,
-        app_pool=app_pool,
-        indexer_pool=indexer_pool,
+        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
 
@@ -52,8 +49,7 @@ def db(seeded_db, fresh_db):
 
 async def move(mcp_client, caller, id, from_group="all", to_group="mgmt"):
     return await mcp_client.call(
-        caller, "move_item", {"id": id, "from_group": from_group, "to_group": to_group}
-    )
+        caller, "move_item", {"id": id, "from_group": from_group, "to_group": to_group})
 
 
 async def test_move_changes_group_and_keeps_id(mcp_client, db):
@@ -61,13 +57,8 @@ async def test_move_changes_group_and_keeps_id(mcp_client, db):
     db.commit()
     res = await move(mcp_client, multi, f"rec:{rec}")
     assert not res.is_error, res.text
-    assert res.data == {
-        "tier": "T3",
-        "id": f"rec:{rec}",
-        "from_group": "all",
-        "to_group": "mgmt",
-        "moved": True,
-    }
+    assert res.data == {"tier": "T3", "id": f"rec:{rec}", "from_group": "all", "to_group": "mgmt",
+                        "moved": True}
     assert db.execute("SELECT audience FROM kh.records WHERE id = %s", (rec,)).fetchone() == ("mgmt",)
     db.commit()
 
@@ -125,9 +116,8 @@ async def test_target_with_same_source_ref_is_conflict(mcp_client, db):
 async def test_linked_record_is_refused(mcp_client, db):
     rec, other = add_record(db), add_record(db)
     db.commit()
-    res = await mcp_client.call(
-        alice_all, "mark_record_outdated", {"id": f"rec:{other}", "replaced_by": f"rec:{rec}"}
-    )
+    res = await mcp_client.call(alice_all, "mark_record_outdated",
+                                {"id": f"rec:{other}", "replaced_by": f"rec:{rec}"})
     assert not res.is_error, res.text
     res = await move(mcp_client, multi, f"rec:{rec}")
     assert res.is_error and res.text.endswith(errors.MOVE_LINKED)

@@ -12,78 +12,31 @@ from psycopg import errors
 DB = "kh_fresh"
 SUB = "n8n-token:a"
 NOW = datetime.now(UTC)
-TABLES = (
-    "schema_migrations",
-    "groups",
-    "labels",
-    "documents",
-    "records",
-    "chunks",
-    "index_jobs",
-    "repo_state",
-    "index_alerts",
-    "usage_events",
-    "record_moves",
-    "api_keys",
-    "oauth_clients",
-    "oauth_pending",
-    "oauth_codes",
-    "oauth_tokens",
-    "oauth_consents",
-    "directory_snapshot",
-)
+TABLES = ("schema_migrations", "groups", "labels", "documents", "records", "chunks",
+          "index_jobs", "repo_state", "index_alerts", "usage_events", "record_moves",
+          "api_keys", "oauth_clients", "oauth_pending", "oauth_codes", "oauth_tokens", "oauth_consents",
+          "directory_snapshot")
 
 # role -> table -> commands granted (a role or table not listed has no grant)
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
 GRANTS = {
     "kh_app": {
-        "groups": {"SELECT"},
-        "labels": {"SELECT"},
-        "documents": {"SELECT"},
-        "records": {"SELECT", "INSERT"},
-        "chunks": {"SELECT"},
-        "usage_events": {"SELECT", "INSERT"},
+        "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": {"SELECT"},
+        "records": {"SELECT", "INSERT"}, "chunks": {"SELECT"}, "usage_events": {"SELECT", "INSERT"},
     },
     "kh_indexer": {
-        "groups": {"SELECT"},
-        "labels": {"SELECT"},
-        "documents": ALL,
-        "records": {"SELECT"},
-        "chunks": ALL,
-        "index_jobs": ALL,
-        "repo_state": ALL,
-        "index_alerts": ALL,
+        "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": ALL, "records": {"SELECT"},
+        "chunks": ALL, "index_jobs": ALL, "repo_state": ALL, "index_alerts": ALL,
         "usage_events": {"SELECT", "DELETE"},
     },
 }
-DEFINERS = (
-    "records_enqueue_embed",
-    "labels_in_use_guard",
-    "mark_record_outdated",
-    "move_record",
-    "record_moved",
-    "api_key_get",
-    "api_key_touch",
-    "oauth_client_get",
-    "oauth_client_put",
-    "oauth_client_authorize",
-    "oauth_client_touch",
-    "oauth_pending_put",
-    "oauth_pending_take",
-    "oauth_pending_peek",
-    "oauth_code_put",
-    "oauth_code_take",
-    "oauth_token_put",
-    "oauth_token_get",
-    "oauth_refresh_use",
-    "oauth_token_revoke",
-    "oauth_family_revoke",
-    "oauth_consent_has",
-    "oauth_consent_put",
-    "directory_snapshot_get",
-    "directory_snapshot_put",
-    "oauth_purge",
-)
+DEFINERS = ("records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated",
+            "move_record", "record_moved",
+            "api_key_get", "api_key_touch", "oauth_client_get", "oauth_client_put",
+            "oauth_client_authorize", "oauth_client_touch", "oauth_pending_put", "oauth_pending_take",
+            "oauth_pending_peek", "oauth_code_put", "oauth_code_take", "oauth_token_put", "oauth_token_get",
+            "oauth_refresh_use", "oauth_token_revoke", "oauth_family_revoke", "oauth_consent_has",
+            "oauth_consent_put", "directory_snapshot_get", "directory_snapshot_put", "oauth_purge",)
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
@@ -119,30 +72,17 @@ def attempt(conn, query, params=()):
 
 
 def record_row(audience="all", sub=SUB, **over):
-    row = dict(
-        id=uid(),
-        audience=audience,
-        source="meet",
-        source_ref=uid(),
-        title="t",
-        blob_key="records/x",
-        excerpt="e",
-        content_type="text/plain",
-        occurred_at=NOW,
-        written_by="kh-bot",
-        created_by_sub=sub,
-        created_by_type="n8n_workflow",
-    )
+    row = dict(id=uid(), audience=audience, source="meet", source_ref=uid(), title="t",
+               blob_key="records/x", excerpt="e", content_type="text/plain", occurred_at=NOW,
+               written_by="kh-bot", created_by_sub=sub, created_by_type="n8n_workflow")
     row.update(over)
     return row
 
 
 def insert_sql(table: str, row: dict):
     cols = list(row)
-    return (
-        f"INSERT INTO kh.{table} ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))})",
-        list(row.values()),
-    )
+    return (f"INSERT INTO kh.{table} ({', '.join(cols)}) VALUES ({', '.join(['%s'] * len(cols))})",
+            list(row.values()))
 
 
 # --------------------------------------------------------------------------- catalog
@@ -214,7 +154,8 @@ def test_grant_matrix(fresh_db):
                     assert got is want, (role, table, priv)
                 for priv in ("TRUNCATE", "REFERENCES", "TRIGGER"):
                     q = "SELECT has_table_privilege(%s, %s, %s)"
-                    assert not conn.execute(q, (role, f"kh.{table}", priv)).fetchone()[0], (role, table, priv)
+                    assert not conn.execute(q, (role, f"kh.{table}", priv)).fetchone()[0], (
+                        role, table, priv)
 
 
 def test_roles_are_plain_and_there_are_exactly_three(fresh_db):
@@ -223,11 +164,8 @@ def test_roles_are_plain_and_there_are_exactly_three(fresh_db):
             "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles"
             " WHERE rolname LIKE 'kh\\_%' ORDER BY 1"
         ).fetchall()
-    assert rows == [
-        ("kh_app", False, False, True),
-        ("kh_indexer", False, False, True),
-        ("kh_migrator", False, False, True),
-    ]
+    assert rows == [("kh_app", False, False, True), ("kh_indexer", False, False, True),
+                    ("kh_migrator", False, False, True)]
 
 
 def test_definers_are_owned_by_migrator_with_a_pinned_search_path(fresh_db):
@@ -236,15 +174,11 @@ def test_definers_are_owned_by_migrator_with_a_pinned_search_path(fresh_db):
             rows = conn.execute(
                 "SELECT pg_get_userbyid(p.proowner), p.prosecdef, p.proconfig FROM pg_proc p"
                 " JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'kh'"
-                " AND p.proname = %s",
-                (fn,),
-            ).fetchall()
+                " AND p.proname = %s", (fn,)).fetchall()
             assert rows == [("kh_migrator", True, ["search_path=kh, pg_temp"])], fn
         for fn in HELPERS:
-            q = (
-                "SELECT p.prosecdef, has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
-                " WHERE p.proname = %s AND p.pronamespace = 'kh'::regnamespace"
-            )
+            q = ("SELECT p.prosecdef, has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
+                 " WHERE p.proname = %s AND p.pronamespace = 'kh'::regnamespace")
             assert conn.execute(q, ("kh_app", fn)).fetchone() == (False, True), fn
             assert conn.execute(q, ("kh_indexer", fn)).fetchone() == (False, False), fn
 
@@ -280,29 +214,14 @@ def test_indexer_cannot_write_records_or_groups(seeded_db, fresh_db):
         assert attempt(conn, *insert_sql("records", record_row())) is errors.InsufficientPrivilege
         assert attempt(conn, "UPDATE kh.records SET title = 'x'") is errors.InsufficientPrivilege
         assert attempt(conn, "DELETE FROM kh.labels") is errors.InsufficientPrivilege
-        assert (
-            attempt(conn, "INSERT INTO kh.groups (name, repo) VALUES ('z', 'kb-z')")
+        assert attempt(conn, "INSERT INTO kh.groups (name, repo) VALUES ('z', 'kb-z')") \
             is errors.InsufficientPrivilege
-        )
 
 
-@pytest.mark.parametrize(
-    "table",
-    [
-        "index_jobs",
-        "repo_state",
-        "index_alerts",
-        "schema_migrations",
-        "record_moves",
-        "api_keys",
-        "oauth_clients",
-        "oauth_pending",
-        "oauth_codes",
-        "oauth_tokens",
-        "oauth_consents",
-        "directory_snapshot",
-    ],
-)
+@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts",
+                                   "schema_migrations", "record_moves",
+                                   "api_keys", "oauth_clients", "oauth_pending", "oauth_codes",
+                                   "oauth_tokens", "oauth_consents", "directory_snapshot"])
 def test_app_has_no_access_to_internal_tables(seeded_db, fresh_db, table):
     with role_conn(fresh_db, "kh_app", "all") as conn:
         assert attempt(conn, f"SELECT * FROM kh.{table}") is errors.InsufficientPrivilege
@@ -311,31 +230,23 @@ def test_app_has_no_access_to_internal_tables(seeded_db, fresh_db, table):
 @pytest.mark.parametrize("table", ["documents", "records", "chunks", "groups", "labels"])
 def test_app_cannot_update_or_delete(seeded_db, fresh_db, table):
     with role_conn(fresh_db, "kh_app", "all,mgmt,hr") as conn:
-        for stmt in (
-            f"UPDATE kh.{table} SET description = description"
-            if table == "labels"
-            else f"UPDATE kh.{table} SET audience = audience"
-            if table != "groups"
-            else "UPDATE kh.groups SET repo = repo",
-            f"DELETE FROM kh.{table}",
-        ):
+        for stmt in (f"UPDATE kh.{table} SET description = description" if table == "labels"
+                     else f"UPDATE kh.{table} SET audience = audience" if table != "groups"
+                     else "UPDATE kh.groups SET repo = repo", f"DELETE FROM kh.{table}"):
             assert attempt(conn, stmt) is errors.InsufficientPrivilege, stmt
 
 
 # --------------------------------------------------------------------------- audiences
 
 
-@pytest.mark.parametrize(
-    ("held", "visible"),
-    [
-        ("", set()),
-        ("all", {"all"}),
-        ("mgmt", {"mgmt"}),
-        ("all,mgmt", {"all", "mgmt"}),
-        ("all,mgmt,hr", {"all", "mgmt", "hr"}),
-        ("nope", set()),
-    ],
-)
+@pytest.mark.parametrize(("held", "visible"), [
+    ("", set()),
+    ("all", {"all"}),
+    ("mgmt", {"mgmt"}),
+    ("all,mgmt", {"all", "mgmt"}),
+    ("all,mgmt,hr", {"all", "mgmt", "hr"}),
+    ("nope", set()),
+])
 def test_reads_follow_held_audiences(seeded_db, fresh_db, held, visible):
     with role_conn(fresh_db, "kh_app", held) as conn:
         for table in ("documents", "records"):
@@ -353,11 +264,8 @@ def test_guessed_id_of_unheld_row_returns_nothing(seeded_db, fresh_db):
 
 def test_can_read_is_false_for_null_and_unset(fresh_db):
     with role_conn(fresh_db, "kh_app", "all") as conn:
-        assert conn.execute("SELECT kh.can_read('all'), kh.can_read('hr'), kh.can_read(NULL)").fetchone() == (
-            True,
-            False,
-            False,
-        )
+        assert conn.execute("SELECT kh.can_read('all'), kh.can_read('hr'), kh.can_read(NULL)").fetchone() \
+            == (True, False, False)
     with role_conn(fresh_db, "kh_app", "") as conn:
         assert conn.execute("SELECT kh.can_read('all')").fetchone() == (False,)
 
@@ -376,10 +284,8 @@ def test_insert_needs_the_audience(seeded_db, fresh_db):
 def test_insert_needs_created_by_sub_to_be_the_caller(seeded_db, fresh_db):
     with role_conn(fresh_db, "kh_app", "all", sub="n8n-token:me") as conn:
         assert attempt(conn, *insert_sql("records", record_row(sub="n8n-token:me"))) == 1
-        assert (
-            attempt(conn, *insert_sql("records", record_row(sub="n8n-token:other")))
+        assert attempt(conn, *insert_sql("records", record_row(sub="n8n-token:other"))) \
             is errors.InsufficientPrivilege
-        )
 
 
 def test_insert_without_caller_sub_is_refused(seeded_db, fresh_db):
@@ -418,14 +324,10 @@ def test_a_reader_of_another_group_never_sees_the_duplicate(seeded_db, fresh_db)
 
 
 def test_mark_record_outdated_is_not_executable_by_public_or_indexer(fresh_db):
-    q = (
-        "SELECT has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
-        " WHERE p.proname = 'mark_record_outdated' AND p.pronamespace = 'kh'::regnamespace"
-    )
+    q = ("SELECT has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
+         " WHERE p.proname = 'mark_record_outdated' AND p.pronamespace = 'kh'::regnamespace")
     with psycopg.connect(fresh_db.admin_dsn(DB)) as conn:
         assert conn.execute(q, ("kh_app",)).fetchone()[0]
         assert not conn.execute(q, ("kh_indexer",)).fetchone()[0]
-        assert conn.execute(
-            "SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a"
-            " WHERE p.proname = 'mark_record_outdated' AND a.grantee = 0"
-        ).fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a"
+                            " WHERE p.proname = 'mark_record_outdated' AND a.grantee = 0").fetchone() == (0,)

@@ -75,19 +75,11 @@ def mig(cluster):
 async def test_plan_apply_converge(empty, settings, capsys):
     s = step(empty, settings)
     planned = lines(await s.plan())
-    for expected in (
-        "+ role kh_migrator",
-        "+ role kh_app",
-        "+ role kh_indexer",
-        f"+ database {DB}",
-        "+ extension vector",
-        "+ migration 0001_baseline.sql",
-        "+ migration 0002_usage_events.sql",
-        "+ migration 0003_supersede.sql",
-        "+ migration 0005_move_record.sql",
-        "+ migration 0006_identity.sql",
-        "+ group all",
-    ):
+    for expected in ("+ role kh_migrator", "+ role kh_app", "+ role kh_indexer", f"+ database {DB}",
+                     "+ extension vector", "+ migration 0001_baseline.sql",
+                     "+ migration 0002_usage_events.sql", "+ migration 0003_supersede.sql",
+                     "+ migration 0005_move_record.sql", "+ migration 0006_identity.sql",
+                     "+ group all"):
         assert expected in planned
     with pytest.raises(psycopg.OperationalError):
         psycopg.connect(mig(empty))  # plan changed nothing
@@ -97,8 +89,7 @@ async def test_plan_apply_converge(empty, settings, capsys):
     with psycopg.connect(empty.admin_dsn()) as conn:
         rows = conn.execute(
             "SELECT rolcanlogin, rolsuper, rolbypassrls, rolpassword IS NOT NULL OR true FROM pg_roles "
-            "WHERE rolname = ANY(%s)",
-            (list(ROLES),),
+            "WHERE rolname = ANY(%s)", (list(ROLES),)
         ).fetchall()
         assert len(rows) == 3 and all(r[0] and not r[1] and not r[2] for r in rows)
         assert conn.execute(
@@ -240,9 +231,9 @@ async def test_labels_jobs_skip_archived_groups(empty, settings):
     out = lines(await LabelsStep(config, mig(empty)).apply(False))
     assert out == ["+ label a", "+ job git_push: kb-all"]
     with psycopg.connect(mig(empty)) as conn:
-        assert conn.execute("SELECT repo FROM kh.index_jobs WHERE kind='git_push'").fetchall() == [
-            ("kb-all",)
-        ]
+        assert conn.execute(
+            "SELECT repo FROM kh.index_jobs WHERE kind='git_push'"
+        ).fetchall() == [("kb-all",)]
 
 
 async def test_remove_label_deletes_unused_label_and_refuses_used(empty, settings):

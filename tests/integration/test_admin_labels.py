@@ -76,3 +76,4 @@ def test_label_remove_in_use_keeps_the_file(cfg, fresh_db, capsys):
     assert cfg.read_text() == before
     assert "kh.yaml unchanged" in capsys.readouterr().out
     assert "ember" in names(fresh_db)
+

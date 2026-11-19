@@ -128,16 +128,10 @@ async def test_get_doc_shows_the_supersede_marks_of_a_document(mcp_client, seede
         conn.execute("UPDATE kh.documents SET supersedes = %s WHERE id = %s", (["doc-all"], new))
     res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{old}"})
     assert (res.data["superseded_by"], res.data["outdated"], res.data["supersedes"]) == (
-        f"doc:{new}",
-        True,
-        [],
-    )
+        f"doc:{new}", True, [])
     res = await mcp_client.call(bob_mgmt, "get_doc", {"id": f"doc:{new}"})
     assert (res.data["superseded_by"], res.data["outdated"], res.data["supersedes"]) == (
-        "",
-        False,
-        ["doc-all"],
-    )
+        "", False, ["doc-all"])
 
 
 async def test_get_doc_shows_the_outdated_marks_of_a_record(mcp_client, seeded_db, fresh_db):
@@ -145,16 +139,10 @@ async def test_get_doc_shows_the_outdated_marks_of_a_record(mcp_client, seeded_d
     with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
         conn.execute(
             "UPDATE kh.records SET outdated = true, outdated_at = %s, outdated_by = 'alice', "
-            "outdated_note = 'old', replaced_by = 'doc:x' WHERE id = %s",
-            (WHEN, key),
-        )
+            "outdated_note = 'old', replaced_by = 'doc:x' WHERE id = %s", (WHEN, key))
     res = await mcp_client.call(alice_all, "get_doc", {"id": f"rec:{key}"})
     assert (res.data["outdated"], res.data["outdated_at"], res.data["replaced_by"], res.data["note"]) == (
-        True,
-        WHEN.isoformat(),
-        "doc:x",
-        "old",
-    )
+        True, WHEN.isoformat(), "doc:x", "old")
     assert "outdated_by" not in res.data
 
 
@@ -173,15 +161,10 @@ async def test_get_doc_of_a_t0a_document_has_tier_t0a(mcp_client, t0a_doc):
 async def test_t0a_source_link_uses_the_tech_org(mcp_client, deps, t0a_doc):
     deps.config = TECH_CONFIG
     res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{t0a_doc}"})
-    assert (
-        res.data["source_link"] == "https://forgejo.test.example/kh-tech/ember-core/src/commit/c1/docs/a.md"
-    )
+    assert res.data["source_link"] == "https://forgejo.test.example/kh-tech/ember-core/src/commit/c1/docs/a.md"
 
 
 async def test_t0_source_link_still_uses_the_org(mcp_client, deps, seeded_db):
     deps.config = TECH_CONFIG
     res = await mcp_client.call(alice_all, "get_doc", {"id": f"doc:{seeded_db['documents']['all']}"})
-    assert (
-        res.data["source_link"]
-        == f"https://forgejo.test.example/{TECH_CONFIG.org}/kb-all/src/commit/c1/all.md"
-    )
+    assert res.data["source_link"] == f"https://forgejo.test.example/{TECH_CONFIG.org}/kb-all/src/commit/c1/all.md"

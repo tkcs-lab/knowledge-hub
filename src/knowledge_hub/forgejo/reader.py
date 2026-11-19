@@ -126,10 +126,8 @@ class ForgejoReader(_Http):
                 for e in batch
             )
             total = data.get("total_count")
-            if (
-                not batch
-                or (total is not None and len(entries) >= total)
-                or (total is None and len(batch) < TREE_PAGE)
+            if not batch or (total is not None and len(entries) >= total) or (
+                total is None and len(batch) < TREE_PAGE
             ):
                 break
         return entries

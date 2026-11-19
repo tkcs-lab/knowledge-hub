@@ -53,7 +53,9 @@ def _slack_urls(path: Path | None) -> dict[str, str] | None:
     return data
 
 
-def build_steps(settings: Settings, config: KhConfig, create_bucket: bool) -> dict[str, Callable[[], Step]]:
+def build_steps(
+    settings: Settings, config: KhConfig, create_bucket: bool
+) -> dict[str, Callable[[], Step]]:
     def postgres() -> Step:
         from knowledge_hub.setup.postgres import PostgresStep
 
@@ -111,12 +113,7 @@ def build_steps(settings: Settings, config: KhConfig, create_bucket: bool) -> di
         return S3Step(settings, create_bucket=create_bucket)
 
     return {
-        "postgres": postgres,
-        "labels": labels,
-        "tech": tech,
-        "forgejo": forgejo,
-        "ollama": ollama,
-        "s3": s3,
+        "postgres": postgres, "labels": labels, "tech": tech, "forgejo": forgejo, "ollama": ollama, "s3": s3,
     }
 
 

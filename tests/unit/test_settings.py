@@ -91,25 +91,11 @@ def test_changed_and_removed_settings(monkeypatch):
     assert s.tier_weights == "T0:1.0,T0a:0.7,T3:0.4"
     assert s.max_record_bytes == 1048576
     for gone in (
-        "forgejo_org",
-        "forgejo_notes_token_file",
-        "agent_notes_enabled",
-        "agent_proposals_enabled",
-        "agent_email_domains",
-        "agent_note_daily_limit",
-        "agent_proposal_daily_limit",
-        "agent_max_body_bytes",
-        "ci_status_logins",
-        "promotion_daily_limit",
-        "superseded_weight",
-        "disputed_weight",
-        "grist_url",
-        "grist_doc_id",
-        "grist_key_file",
-        "max_raw_bytes",
-        "pf_issuer",
-        "pf_audience",
-        "pf_jwks_url",
+        "forgejo_org", "forgejo_notes_token_file", "agent_notes_enabled", "agent_proposals_enabled",
+        "agent_email_domains", "agent_note_daily_limit", "agent_proposal_daily_limit",
+        "agent_max_body_bytes", "ci_status_logins", "promotion_daily_limit", "superseded_weight",
+        "disputed_weight", "grist_url", "grist_doc_id", "grist_key_file", "max_raw_bytes",
+        "pf_issuer", "pf_audience", "pf_jwks_url",
     ):
         assert gone not in Settings.model_fields, gone
     monkeypatch.setenv("KH_MAX_RECORD_BYTES", "10")
@@ -204,11 +190,7 @@ def test_oauth_defaults_and_properties(monkeypatch):
     assert s.oauth_access_ttl_seconds == 3600 and s.oauth_refresh_ttl_days == 30
     assert s.oauth_max_clients == 200 and s.oauth_register_per_min == 30 and s.oauth_authorize_per_min == 600
     assert s.directory_keycloak_subgroups is False
-    assert s.redirect_allowlist_tuple == (
-        "https://claude.ai/api/mcp/auth_callback",
-        "http://localhost",
-        "http://127.0.0.1",
-    )
+    assert s.redirect_allowlist_tuple == ("https://claude.ai/api/mcp/auth_callback", "http://localhost", "http://127.0.0.1")
     _oauth(monkeypatch)
     s = Settings()
     assert s.oauth_enabled and s.resource_url == "https://kh.example.com/mcp"
@@ -217,16 +199,11 @@ def test_oauth_defaults_and_properties(monkeypatch):
 
 def test_oauth_numeric_bounds(monkeypatch):
     for name, bad in (
-        ("OAUTH_ACCESS_TTL_SECONDS", "299"),
-        ("OAUTH_ACCESS_TTL_SECONDS", "86401"),
-        ("OAUTH_REFRESH_TTL_DAYS", "0"),
-        ("OAUTH_REFRESH_TTL_DAYS", "366"),
-        ("OAUTH_MAX_CLIENTS", "0"),
-        ("OAUTH_MAX_CLIENTS", "10001"),
-        ("OAUTH_REGISTER_PER_MIN", "1001"),
-        ("OAUTH_AUTHORIZE_PER_MIN", "100001"),
-        ("DIRECTORY_VIEW_SECONDS", "4"),
-        ("DIRECTORY_VIEW_SECONDS", "601"),
+        ("OAUTH_ACCESS_TTL_SECONDS", "299"), ("OAUTH_ACCESS_TTL_SECONDS", "86401"),
+        ("OAUTH_REFRESH_TTL_DAYS", "0"), ("OAUTH_REFRESH_TTL_DAYS", "366"),
+        ("OAUTH_MAX_CLIENTS", "0"), ("OAUTH_MAX_CLIENTS", "10001"),
+        ("OAUTH_REGISTER_PER_MIN", "1001"), ("OAUTH_AUTHORIZE_PER_MIN", "100001"),
+        ("DIRECTORY_VIEW_SECONDS", "4"), ("DIRECTORY_VIEW_SECONDS", "601"),
     ):
         monkeypatch.setenv(f"KH_{name}", bad)
         with pytest.raises(ValidationError):

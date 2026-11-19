@@ -60,8 +60,7 @@ def _record(conn, audience="all") -> str:
         "INSERT INTO kh.records (id, audience, source, source_ref, title, blob_key, excerpt, content_type,"
         " occurred_at, written_by, created_by_sub, created_by_type)"
         " VALUES (%s, %s, 'meet', %s, 't', 'records/x', 'e', 'text/plain', %s, 'kh-bot', %s, 'n8n_workflow')",
-        (rid, audience, uid(), NOW, SUB),
-    )
+        (rid, audience, uid(), NOW, SUB))
     return rid
 
 
@@ -70,8 +69,7 @@ def _document(conn, audience="all", blob_sha="b") -> str:
     conn.execute(
         "INSERT INTO kh.documents (id, repo, path, doc_key, audience, title, body, review_by, commit_sha,"
         " blob_sha) VALUES (%s, %s, %s, %s, %s, 't', 'b', current_date, 'c', %s)",
-        (did, f"kb-{audience}", f"{did}.md", did, audience, blob_sha),
-    )
+        (did, f"kb-{audience}", f"{did}.md", did, audience, blob_sha))
     return did
 
 
@@ -85,9 +83,7 @@ def admin(fresh_db):
 def _state(admin, rid):
     return admin.execute(
         "SELECT outdated, outdated_at IS NOT NULL, outdated_by, outdated_note, replaced_by"
-        " FROM kh.records WHERE id = %s",
-        (rid,),
-    ).fetchone()
+        " FROM kh.records WHERE id = %s", (rid,)).fetchone()
 
 
 def test_upgrade_from_baseline_adds_columns_and_resets_blob_sha(migrated_db):
@@ -104,22 +100,18 @@ def test_upgrade_from_baseline_adds_columns_and_resets_blob_sha(migrated_db):
         rid = _record(conn)
     assert migrate(dsn) == [SUPERSEDE, TECH_TIER, MOVE, IDENTITY]
     with psycopg.connect(migrated_db.admin_dsn("kh_upgrade")) as conn:
-        assert conn.execute(
-            "SELECT supersedes, superseded_by, blob_sha FROM kh.documents WHERE id = %s", (did,)
-        ).fetchone() == ([], None, "")
+        assert conn.execute("SELECT supersedes, superseded_by, blob_sha FROM kh.documents WHERE id = %s",
+                            (did,)).fetchone() == ([], None, "")
         assert conn.execute(
             "SELECT outdated, outdated_at, outdated_by, outdated_note, replaced_by FROM kh.records"
-            " WHERE id = %s",
-            (rid,),
-        ).fetchone() == (False, None, "", "", "")
+            " WHERE id = %s", (rid,)).fetchone() == (False, None, "", "", "")
 
 
 def test_mark_function_sets_and_clears_outdated(admin, fresh_db):
     rid, succ = _record(admin), _record(admin)
     with role_conn(fresh_db, "kh_app", "all") as app:
-        assert app.execute(
-            "SELECT kh.mark_record_outdated(%s, true, %s, 'old')", (rid, f"rec:{succ}")
-        ).fetchone() == (True,)
+        assert app.execute("SELECT kh.mark_record_outdated(%s, true, %s, 'old')",
+                           (rid, f"rec:{succ}")).fetchone() == (True,)
         app.commit()
     assert _state(admin, rid) == (True, True, SUB, "old", f"rec:{succ}")
     with role_conn(fresh_db, "kh_app", "all") as app:
@@ -145,15 +137,8 @@ def test_mark_function_refuses_foreign_or_self_successor(admin, fresh_db):
     rid = _record(admin)
     foreign = _record(admin, "mgmt")
     foreign_doc = _document(admin, "mgmt")
-    bad = [
-        f"rec:{foreign}",
-        f"doc:{foreign_doc}",
-        f"rec:{uid()}",
-        f"doc:{uid()}",
-        "rec:nope",
-        "garbage",
-        f"rec:{rid}",
-    ]
+    bad = [f"rec:{foreign}", f"doc:{foreign_doc}", f"rec:{uid()}", f"doc:{uid()}", "rec:nope", "garbage",
+           f"rec:{rid}"]
     with role_conn(fresh_db, "kh_app", "all,mgmt") as app:
         for successor in bad:
             with pytest.raises(psycopg.Error) as exc, app.transaction():
@@ -165,25 +150,20 @@ def test_mark_function_refuses_foreign_or_self_successor(admin, fresh_db):
 def test_a_document_can_be_the_successor(admin, fresh_db):
     rid, did = _record(admin), _document(admin)
     with role_conn(fresh_db, "kh_app", "all") as app:
-        assert app.execute(
-            "SELECT kh.mark_record_outdated(%s, true, %s, '')", (rid, f"doc:{did}")
-        ).fetchone() == (True,)
+        assert app.execute("SELECT kh.mark_record_outdated(%s, true, %s, '')",
+                           (rid, f"doc:{did}")).fetchone() == (True,)
         app.commit()
     assert _state(admin, rid)[4] == f"doc:{did}"
 
 
 def test_outdated_check_constraint(admin):
     rid = _record(admin)
-    assert (
-        attempt(admin, "UPDATE kh.records SET replaced_by = 'rec:x' WHERE id = %s", (rid,))
+    assert attempt(admin, "UPDATE kh.records SET replaced_by = 'rec:x' WHERE id = %s", (rid,)) \
         is errors.CheckViolation
-    )
 
 
 def test_kh_app_still_cannot_update_records(admin, fresh_db):
     rid = _record(admin)
     with role_conn(fresh_db, "kh_app", "all") as app:
-        assert (
-            attempt(app, "UPDATE kh.records SET outdated = true WHERE id = %s", (rid,))
+        assert attempt(app, "UPDATE kh.records SET outdated = true WHERE id = %s", (rid,)) \
             is errors.InsufficientPrivilege
-        )

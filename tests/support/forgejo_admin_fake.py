@@ -63,13 +63,8 @@ class FakeForgejoAdmin:
         self._next_id += 1
         tid = self._next_id
         self.teams[tid] = {
-            "id": tid,
-            "name": name,
-            "description": "",
-            "permission": permission,
-            "includes_all_repositories": False,
-            "can_create_org_repo": False,
-            "units_map": {},
+            "id": tid, "name": name, "description": "", "permission": permission,
+            "includes_all_repositories": False, "can_create_org_repo": False, "units_map": {},
         }
         self.team_members[tid] = list(members or [])
         self.team_repos[tid] = []
@@ -93,13 +88,8 @@ class FakeForgejoAdmin:
 
     def _new_repo(self, name: str) -> dict[str, Any]:
         return {
-            "name": name,
-            "full_name": f"{self.org}/{name}",
-            "private": True,
-            "default_branch": "main",
-            "has_actions": True,
-            "default_delete_branch_after_merge": False,
-            "empty": False,
+            "name": name, "full_name": f"{self.org}/{name}", "private": True, "default_branch": "main",
+            "has_actions": True, "default_delete_branch_after_merge": False, "empty": False,
             "archived": False,
         }
 
@@ -356,13 +346,8 @@ class FakeForgejoAdmin:
         if not body.get("type") or not isinstance(body.get("config"), dict):
             return httpx.Response(422, json={"message": "type and config required"})
         self._next_id += 1
-        hook = {
-            "id": self._next_id,
-            "type": body["type"],
-            "config": dict(body["config"]),
-            "events": list(body.get("events") or []),
-            "active": bool(body.get("active", False)),
-        }
+        hook = {"id": self._next_id, "type": body["type"], "config": dict(body["config"]),
+                "events": list(body.get("events") or []), "active": bool(body.get("active", False))}
         self.hooks[hook["id"]] = hook
         return httpx.Response(201, json=dict(hook))
 
@@ -392,13 +377,8 @@ class FakeForgejoAdmin:
         if body["type"] == "slack" and not body["config"].get("channel"):
             return httpx.Response(422, json={"message": "Custom channel is invalid"})
         self._next_id += 1
-        hook = {
-            "id": self._next_id,
-            "type": body["type"],
-            "config": dict(body["config"]),
-            "events": list(body.get("events") or []),
-            "active": bool(body.get("active", False)),
-        }
+        hook = {"id": self._next_id, "type": body["type"], "config": dict(body["config"]),
+                "events": list(body.get("events") or []), "active": bool(body.get("active", False))}
         self.repo_hooks[m[1]][hook["id"]] = hook
         return httpx.Response(201, json=dict(hook))
 

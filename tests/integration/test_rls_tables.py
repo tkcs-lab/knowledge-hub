@@ -73,9 +73,8 @@ async def test_select_returns_exactly_the_held_rows(app_pool, seeded_db, who):
 async def test_guessed_id_of_a_hidden_row_returns_nothing(app_pool, seeded_db, who, table):
     key = {"documents": "documents", "records": "records", "chunks": "chunks"}[table]
     for group in set(KH_CONFIG.groups) - EXPECTED[who]:
-        got = await _col(
-            app_pool, CALLERS[who], f"SELECT id::text FROM kh.{table} WHERE id = %s", (seeded_db[key][group],)
-        )
+        got = await _col(app_pool, CALLERS[who], f"SELECT id::text FROM kh.{table} WHERE id = %s",
+                         (seeded_db[key][group],))
         assert got == set(), f"{who} saw hidden {table} row of {group}"
 
 

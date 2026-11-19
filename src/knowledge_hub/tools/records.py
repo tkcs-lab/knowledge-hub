@@ -53,14 +53,8 @@ async def ingest_record(
     if audience not in caller.audiences or not deps.config.is_active(audience):
         raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
     bad = _nul_arg(
-        {
-            "source": source,
-            "source_ref": source_ref,
-            "title": title,
-            "body": body,
-            "source_url": source_url,
-            "content_type": content_type,
-        },
+        {"source": source, "source_ref": source_ref, "title": title, "body": body,
+         "source_url": source_url, "content_type": content_type},
         labels,
     )
     if bad is not None:
@@ -97,22 +91,9 @@ async def ingest_record(
         async with call.conn.transaction():  # a savepoint: a unique violation must not abort the call
             await call.conn.execute(
                 _INSERT_SQL,
-                (
-                    key,
-                    audience,
-                    source,
-                    source_ref,
-                    source_url,
-                    title,
-                    blob_key,
-                    body[:EXCERPT_CHARS],
-                    content_type,
-                    when,
-                    list(labels),
-                    deps.config.bot_login,
-                    caller.sub,
-                    caller.principal_type,
-                ),
+                (key, audience, source, source_ref, source_url, title, blob_key, body[:EXCERPT_CHARS],
+                 content_type, when, list(labels), deps.config.bot_login, caller.sub,
+                 caller.principal_type),
             )
     except pg_errors.UniqueViolation:
         await deps.blobs.delete(blob_key)
