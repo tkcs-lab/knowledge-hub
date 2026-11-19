@@ -1,3 +1,4 @@
+import { BUSY_MESSAGE } from "/static/ops.js";
 import "/static/labels.js";
 import "/static/groups.js";
 import "/static/repos.js";
@@ -25,6 +26,9 @@ export async function api(method, path, body) {
   }
   if (!resp.ok) {
     const detail = data && (data.detail || data.error);
+    if (resp.status === 409 || (data && data.error === "busy")) {
+      throw new Error(BUSY_MESSAGE);
+    }
     throw new Error(detail || "request failed (" + resp.status + ")");
   }
   return data;

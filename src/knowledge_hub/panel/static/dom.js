@@ -31,3 +31,11 @@ export function clear(node) {
 export function fmt(n) {
   return Number(n || 0).toLocaleString("en-US");
 }
+
+export function when(value) {
+  if (!value) {
+    return "never";
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+}
