@@ -2,6 +2,8 @@
 
 The trusted core of the company knowledge layer: one MCP interface over three tiers of knowledge. Every result carries its tier and is filtered by the caller's groups inside Postgres (row-level security), not in Python. Agents reach it with OAuth (Claude connectors) or a hub key (n8n), and its tools are `search`, `get_doc`, `ingest_record` and so on.
 
+It needs PostgreSQL 16 with pgvector, Forgejo, an S3-compatible store, Ollama and an OIDC provider; see the [deployment guide](docs/deployment.md).
+
 ## The three tiers
 
 | Tier | Source | Trust |
@@ -45,7 +47,7 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 
 | Command | Use |
 |---|---|
-| `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
+| `kh serve` | Run the HTTP app (`/mcp`, the OAuth paths, `/webhooks/forgejo`, `/healthz` and `/metrics` when `KH_METRICS_TOKEN_FILE` is set) and the job worker. |
 | `kh panel serve` | Run the admin panel (sign-in with `admins` in `kh.yaml`; labels, groups, repos, pipeline and health). |
 | `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
@@ -60,8 +62,9 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 
 ## Documentation
 
+- [Deployment guide](docs/deployment.md): components and dependencies, secrets, where each command runs, scheduled jobs, first deploy, verify and upgrade.
 - [Design](docs/design.md): tiers, trust, the access model, schema, search and rejected alternatives.
 - [Configuration](docs/configuration.md): every `KH_*` variable, every `kh.yaml` key, `kh setup`.
-- [Runbook](docs/runbook.md): install order, routine tasks, alerts, restore, rotation and releasing.
+- [Runbook](docs/runbook.md): routine tasks, alerts, moves, restore, rotation and releasing.
 - [Admin panel](docs/runbook.md#admin-panel): first start, the five tabs, how a change reaches the hub and what to do when something fails.
 - [Identity runbook](docs/runbook-identity.md): sign-in, the directory, hub keys and the move to them.
