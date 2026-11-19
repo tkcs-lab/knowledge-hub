@@ -74,7 +74,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: Blocking finding 1 (p13): Groups and Repos actions applied at once without Preview, against Design 3.8; being fixed in fix-1.
+- final: Blocking finding 2 (p14): Pipeline buttons used a copy of the op flow from groups.js instead of opForm previewless, and was not recorded; being fixed in fix-1.
 
 ## Finishing
 
