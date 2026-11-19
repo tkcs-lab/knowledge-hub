@@ -11,7 +11,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-remove-privacyfence
 
-- pending
+- None.
 
 ## p3-config-settings
 
