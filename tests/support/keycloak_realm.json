@@ -1,0 +1,49 @@
+{
+  "realm": "kh-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "groups": [
+    {
+      "name": "kh-all",
+      "path": "/kh-all",
+      "subGroups": [{"name": "team", "path": "/kh-all/team"}]
+    },
+    {"name": "kh-all-approvers", "path": "/kh-all-approvers"}
+  ],
+  "clients": [
+    {
+      "clientId": "kh-hub",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "secret": "test-only-not-a-secret",
+      "redirectUris": ["http://localhost:8080/oauth/callback"],
+      "attributes": {"pkce.code.challenge.method": "S256"}
+    },
+    {
+      "clientId": "kh-directory",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "test-only-not-a-secret"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-kh-directory",
+      "enabled": true,
+      "serviceAccountClientId": "kh-directory",
+      "clientRoles": {"realm-management": ["view-users", "query-users", "query-groups"]}
+    },
+    {"username": "alice", "email": "alice@example.org", "enabled": true, "emailVerified": true, "groups": ["/kh-all", "/kh-all-approvers"]},
+    {"username": "bob", "email": "bob@example.org", "enabled": true, "emailVerified": true, "groups": ["/kh-all"]},
+    {"username": "carol", "email": "carol@example.org", "enabled": true, "emailVerified": true, "groups": ["/kh-all-approvers"]},
+    {"username": "dave", "email": "dave@example.org", "enabled": false, "emailVerified": true, "groups": ["/kh-all"]},
+    {"username": "erin", "email": "erin@example.org", "enabled": true, "emailVerified": false, "groups": ["/kh-all"]},
+    {"username": "frank", "email": "frank@other.com", "enabled": true, "emailVerified": true, "groups": ["/kh-all"]},
+    {"username": "gina", "email": "gina@example.org", "enabled": true, "emailVerified": true, "groups": ["/kh-all/team"]}
+  ]
+}
