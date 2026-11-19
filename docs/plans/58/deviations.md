@@ -24,7 +24,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-directory-core
 
-- pending
+- None.
 
 ## p6-hub-keys
 
