@@ -7,6 +7,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - worker: Worker deleted two PrivacyFence-claim tests (claim audiences in test_http_e2e, jwks-url settings error in test_wiring) besides the files the brief names; integration tests were converted but not run (no pgvector here).
 - retry: Sent back once: tip commit lacked the Plan-Phase trailer; owner chose unit-only verification (integration tests left to CI).
+- scope: src/knowledge_hub/mcp/errors.py: unused AUDIENCES_SERVICE_ONLY constant removed outside touches; collides with p2 and p6.
 
 ## p2-remove-privacyfence
 
