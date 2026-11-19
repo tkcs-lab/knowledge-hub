@@ -72,7 +72,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p17-forgejo-membership
 
-- pending
+- None.
 
 ## p18-flow-tests
 
