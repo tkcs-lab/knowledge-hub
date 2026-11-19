@@ -24,9 +24,6 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "test", "prod"] = "prod"
     dev_identity: DevIdentity | None = None
-    pf_issuer: str | None = None
-    pf_audience: str | None = None
-    pf_jwks_url: str | None = None
     allowed_hosts: str = ""
     max_body_bytes: int = 1048576
 

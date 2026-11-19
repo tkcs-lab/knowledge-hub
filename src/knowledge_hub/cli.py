@@ -76,9 +76,9 @@ async def _daily(deps: Any) -> int:
     from knowledge_hub.jobs.daily import run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
-    stale, purged = await run_daily(deps.indexer_pool)
+    stale = await run_daily(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
-    print(f"stale flags changed: {stale}; expired claims purged: {purged}; usage events purged: {usage}")
+    print(f"stale flags changed: {stale}; usage events purged: {usage}")
     return 0
 
 
