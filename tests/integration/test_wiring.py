@@ -26,9 +26,6 @@ def wiring_settings(db_settings):
         update={
             "env": "test",
             "embed_provider": "fake",
-            "pf_issuer": "https://pf.test.example",
-            "pf_audience": "https://hub.test.example/mcp",
-            "pf_jwks_url": "https://pf.test.example/.well-known/jwks.json",
         }
     )
 
@@ -52,15 +49,9 @@ async def test_build_deps_returns_working_dependencies(wiring_settings):
         assert isinstance(deps.embedder, FakeEmbedder)
         assert deps.blobs is None
         assert deps.reader is None and deps.worker is None
-        assert deps.verifier is not None
+        assert deps.bearer is None
     finally:
         await close_deps(deps)
-
-
-async def test_build_deps_without_jwks_url_is_a_settings_error(wiring_settings):
-    settings = wiring_settings.model_copy(update={"pf_jwks_url": None})
-    with pytest.raises(ValueError, match="KH_PF_JWKS_URL"):
-        await build_deps(settings, KhConfig())
 
 
 async def test_build_deps_builds_reader_and_worker_when_forgejo_url_is_set(forgejo_settings):
@@ -85,7 +76,7 @@ async def test_build_deps_needs_the_indexer_token_file_with_forgejo_url(forgejo_
 
 async def test_app_from_build_deps_answers_healthz(wiring_settings):
     deps = await build_deps(wiring_settings, KhConfig())
-    app = build_app(wiring_settings, deps, deps.verifier)
+    app = build_app(wiring_settings, deps)
     try:
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
@@ -99,7 +90,7 @@ async def test_app_from_build_deps_answers_healthz(wiring_settings):
 
 async def test_webhook_route_is_post_only(wiring_settings):
     deps = await build_deps(wiring_settings, KhConfig())
-    app = build_app(wiring_settings, deps, deps.verifier)
+    app = build_app(wiring_settings, deps)
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http:
             assert (await http.get("/webhooks/forgejo")).status_code == 405
@@ -128,7 +119,7 @@ async def test_lifespan_runs_the_worker_and_stops_it(wiring_settings, fresh_db, 
         settings=wiring_settings, config=KH_CONFIG, app_pool=app_pool, indexer_pool=indexer_pool,
         reader=reader, worker=worker,
     )
-    app = build_app(wiring_settings, deps, deps.verifier)
+    app = build_app(wiring_settings, deps)
     try:
         async with app.router.lifespan_context(app):
             for _ in range(100):

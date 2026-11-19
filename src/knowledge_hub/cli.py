@@ -25,7 +25,7 @@ async def _serve(settings: Settings, config: KhConfig, port: int) -> None:
 
     deps = await build_deps(settings, config)
     try:
-        app = build_app(settings, deps, deps.verifier)
+        app = build_app(settings, deps)
         server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info"))
         await server.serve()
     finally:

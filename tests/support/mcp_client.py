@@ -1,9 +1,4 @@
-"""Run the app in process and call tools the way PrivacyFence does (plan 3.2).
-
-PrivacyFence opens a fresh MCP session per call: ``initialize``, ``notifications/initialized`` and
-``tools/call``, each request with its own signed claim; only the ``tools/call`` claim carries the
-caller's audiences and the ``req`` hash of the call.
-"""
+"""Run the app in process and call tools with bearer tokens from the test resolver (plan 3.10)."""
 
 from __future__ import annotations
 
@@ -14,8 +9,7 @@ from typing import Any
 import httpx
 
 from knowledge_hub.auth.claims import Caller
-from knowledge_hub.auth.pf_claim_verify import CLAIM_HEADER
-from tests.support.claims import mint_claim, rpc_body
+from tests.support.bearer import TestBearerResolver, rpc_body
 
 HOST = "hub.test.example:8080"
 BASE_URL = f"http://{HOST}"
@@ -31,8 +25,9 @@ class ToolResult:
 
 
 class McpClient:
-    def __init__(self, http: httpx.AsyncClient) -> None:
+    def __init__(self, http: httpx.AsyncClient, resolver: TestBearerResolver) -> None:
         self.http = http
+        self.resolver = resolver
 
     def _headers(self, token: str | None) -> dict[str, str]:
         headers = {
@@ -41,7 +36,7 @@ class McpClient:
             "mcp-protocol-version": PROTOCOL_VERSION,
         }
         if token is not None:
-            headers[CLAIM_HEADER] = token
+            headers["authorization"] = f"Bearer {token}"
         return headers
 
     async def post(self, body: bytes, token: str | None) -> httpx.Response:
@@ -56,26 +51,27 @@ class McpClient:
         token: str | None = None,
         handshake: bool = True,
     ) -> ToolResult:
-        """Handshake, then ``tools/call`` signed for exactly ``arguments`` (or with ``token``)."""
+        """Handshake, then ``tools/call`` with the registered token of ``caller`` (or ``token``)."""
         args = arguments if arguments is not None else {}
-        who = {"sub": caller.sub, "principal_type": caller.principal_type, "email": caller.email}
+        registered = self.resolver.register(caller)
+        if token is None:
+            token = registered
         if handshake:
             init = rpc_body(
                 "initialize",
                 {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": {"name": "privacyfence", "version": "0"},
+                    "clientInfo": {"name": "test", "version": "0"},
                 },
                 id=0,
             )
-            first = await self.post(init, mint_claim(**who, audiences=[]))
-            assert first.status_code == 200, first.text
+            first = await self.post(init, token)
+            if first.status_code != 200:
+                return ToolResult(first.status_code, True, first.text)
             note = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
-            await self.post(note, mint_claim(**who, audiences=[]))
+            await self.post(note, token)
         body = rpc_body("tools/call", {"name": tool, "arguments": args}, id=1)
-        if token is None:
-            token = mint_claim(**who, audiences=sorted(caller.audiences), tool=tool, arguments=args)
         return self._result(await self.post(body, token))
 
     @staticmethod

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from knowledge_hub.auth.pf_claim_verify import ClaimVerifier
 from knowledge_hub.blobs.s3 import S3BlobStore
 from knowledge_hub.config import KhConfig
 from knowledge_hub.db.pool import make_app_pool, make_indexer_pool
@@ -59,26 +58,8 @@ def make_bot(settings: Settings, config: KhConfig) -> ForgejoBot | None:
     return ForgejoBot(settings.forgejo_url, token, config.org)
 
 
-def make_verifier(settings: Settings) -> ClaimVerifier | None:
-    """The production verifier. Without PrivacyFence settings only the dev identity may stand in."""
-    if settings.pf_jwks_url and settings.pf_issuer and settings.pf_audience:
-        # Replay protection lives in the middleware (``PgReplayCache``), so the verifier has none.
-        return ClaimVerifier(
-            issuer=settings.pf_issuer,
-            audience=settings.pf_audience,
-            jwks_url=settings.pf_jwks_url,
-            replay_cache=None,
-        )
-    if settings.dev_identity is not None:
-        return None
-    raise ValueError(
-        "KH_PF_JWKS_URL, KH_PF_ISSUER and KH_PF_AUDIENCE are required unless KH_DEV_IDENTITY is set"
-    )
-
-
 async def build_deps(settings: Settings, config: KhConfig) -> Deps:
     """Create every dependency; both pools are open when this returns."""
-    verifier = make_verifier(settings)
     embedder = make_embedder(settings)
     blobs = make_blob_store(settings)
     reader = make_reader(settings, config)
@@ -118,7 +99,6 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
         indexer_pool=indexer_pool,
         embedder=embedder,
         blobs=blobs,
-        verifier=verifier,
         ratelimiter=RateLimiter(settings.rate_limit_per_min),
         reader=reader,
         worker=worker,
