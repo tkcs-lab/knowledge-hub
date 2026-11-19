@@ -28,7 +28,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6-hub-keys
 
-- pending
+- None.
 
 ## p7-oidc-relying-party
 
