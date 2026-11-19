@@ -6,7 +6,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -68,17 +67,6 @@ def _compose():
     return yaml.safe_load(COMPOSE.read_text())
 
 
-def test_compose_example_claim_settings():
-    env = _compose()["services"]["knowledge-hub"]["environment"]
-    issuer = urlparse(env["KH_PF_ISSUER"])
-    jwks = urlparse(env["KH_PF_JWKS_URL"])
-    assert issuer.scheme == "https" and issuer.path == ""
-    assert jwks.scheme == "http"
-    assert jwks.path == "/upstream-mcp/jwks"
-    assert jwks.hostname == issuer.hostname
-    assert "well-known" not in COMPOSE.read_text()
-
-
 def test_compose_example_networks():
     data = _compose()
     used = set()
@@ -86,7 +74,8 @@ def test_compose_example_networks():
         used |= set(svc.get("networks", []))
     for name in used:
         assert data["networks"][name]["internal"] is True
-    assert "pf-kh" in data["services"]["knowledge-hub"]["networks"]
+    assert set(data["networks"]) == {"db", "kh"}
+    assert used == {"db", "kh"}
 
 
 def test_compose_example_ollama_and_image():

@@ -5,14 +5,12 @@ Every error text starts with ``config:``.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import pydantic_core
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -33,19 +31,6 @@ TECH_AUDIENCE = "all"
 MAX_LABELS = 500
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
-MAX_AUDIENCES = 200
-MAX_AUDIENCE_ADDRESSES = 20000
-MAX_AUDIENCE_ANSWER_CHARS = 1_000_000
-
-
-def _audience_table(people: dict[str, str], groups: dict[str, Any]) -> dict[str, list[str]]:
-    """Active group name -> sorted, de-duplicated member emails (the PrivacyFence audiences answer)."""
-    by_login = {login.casefold(): email.lower() for login, email in people.items()}
-    return {
-        name: sorted({by_login[m.casefold()] for m in group.members if m.casefold() in by_login})
-        for name, group in sorted(groups.items())
-        if not group.archived
-    }
 
 
 def _check_logins(logins: list[str], where: str) -> None:
@@ -178,26 +163,6 @@ class KhConfig(BaseModel):
                 if login.casefold() not in members:
                     raise ValueError(f"group {name} approver {login} is not a member")
 
-        table = _audience_table(self.people, self.groups)
-        if len(table) > MAX_AUDIENCES:
-            raise ValueError(
-                "active groups are more than 200; "
-                "PrivacyFence accepts at most 200 audiences"
-            )
-        if sum(len(v) for v in table.values()) > MAX_AUDIENCE_ADDRESSES:
-            raise ValueError(
-                f"active groups list more than {MAX_AUDIENCE_ADDRESSES} members in all; "
-                f"PrivacyFence accepts at most {MAX_AUDIENCE_ADDRESSES} addresses"
-            )
-        answer = {"version": 1, "audiences": table}
-        # PrivacyFence caps the text and the structured content separately, and the text is indented.
-        size = max(len(json.dumps(answer)), len(pydantic_core.to_json(answer, indent=2).decode()))
-        if size > MAX_AUDIENCE_ANSWER_CHARS:
-            raise ValueError(
-                f"the audience table is larger than {MAX_AUDIENCE_ANSWER_CHARS} characters; "
-                "PrivacyFence refuses it"
-            )
-
         if len(self.labels) > MAX_LABELS:
             raise ValueError(f"labels has more than {MAX_LABELS} entries")
         for label, description in self.labels.items():
@@ -291,9 +256,6 @@ class KhConfig(BaseModel):
             for name, group in self.groups.items()
             if not group.archived and logins & {m.casefold() for m in group.members}
         )
-
-    def audience_members(self) -> dict[str, list[str]]:
-        return _audience_table(self.people, self.groups)
 
 
 def _wrap(exc: ValidationError) -> ConfigError:

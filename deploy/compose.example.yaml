@@ -1,7 +1,3 @@
-# Example services for the compose stack. The three networks at the bottom are the ones the stack defines;
-# they are repeated here so that `docker compose -f deploy/compose.example.yaml config` passes on its own.
-# `db` (Postgres) and `kh` (Forgejo, Garage, Ollama) have no internet access. `pf-kh` is a private
-# network shared only with PrivacyFence, which reaches the hub there at http://knowledge-hub:8080/mcp.
 # Secrets are files under /run/secrets; this file holds no secret value.
 services:
   knowledge-hub:
@@ -9,7 +5,7 @@ services:
     #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.1.0
     image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0
     restart: unless-stopped
-    networks: [db, kh, pf-kh]
+    networks: [db, kh]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -17,15 +13,6 @@ services:
     environment:
       KH_ENV: prod
       KH_ALLOWED_HOSTS: "knowledge-hub:8080"
-      # Production shape: KH_PF_ISSUER=https://pf.tkcs.name (the address PrivacyFence is served at; no path).
-      #   KH_PF_JWKS_URL=http://pf.tkcs.name:8765/upstream-mcp/jwks
-      # The JWKS URL reaches PrivacyFence over the private `pf-kh` network, where the PrivacyFence container
-      # has the network alias pf.tkcs.name. Its host must be the issuer's host name, or PrivacyFence's Host
-      # allowlist answers 400. 8765 is PrivacyFence's default port (PRIVACYFENCE_PORT). Why http is safe:
-      # docs/configuration.md, "Claim verification over the private network".
-      KH_PF_ISSUER: "https://pf.example.invalid"
-      KH_PF_AUDIENCE: "knowledge-hub"   # the `audience` of the upstream in privacyfence-upstream.example.yaml
-      KH_PF_JWKS_URL: "http://pf.example.invalid:8765/upstream-mcp/jwks"
       KH_DB_HOST: postgres
       KH_DB_NAME: kh
       KH_DB_MIGRATOR_PASSWORD_FILE: /run/secrets/pg_kh_migrator
@@ -86,7 +73,6 @@ services:
 networks:
   db: {internal: true}
   kh: {internal: true}
-  pf-kh: {internal: true}
 
 volumes:
   ollama-models:

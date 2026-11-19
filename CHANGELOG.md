@@ -8,6 +8,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 - `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
 
+### Removed
+
+- The PrivacyFence integration: the claim verifier and replay cache modules, the `KH_PF_ISSUER`, `KH_PF_AUDIENCE` and `KH_PF_JWKS_URL` settings (a leftover `KH_PF_*` variable is ignored), the audience-count limits in `kh.yaml` validation, the `pf-kh` network and `KH_PF_*` variables of `deploy/compose.example.yaml`, and `deploy/privacyfence-upstream.example.yaml`. `kh daily` no longer purges claim rows.
+
 ## [0.5.1] - 2026-11-18
 
 ### Added

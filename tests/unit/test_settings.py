@@ -95,6 +95,7 @@ def test_changed_and_removed_settings(monkeypatch):
         "agent_email_domains", "agent_note_daily_limit", "agent_proposal_daily_limit",
         "agent_max_body_bytes", "ci_status_logins", "promotion_daily_limit", "superseded_weight",
         "disputed_weight", "grist_url", "grist_doc_id", "grist_key_file", "max_raw_bytes",
+        "pf_issuer", "pf_audience", "pf_jwks_url",
     ):
         assert gone not in Settings.model_fields, gone
     monkeypatch.setenv("KH_MAX_RECORD_BYTES", "10")

@@ -1,6 +1,4 @@
-import json
 
-import pydantic_core
 import pytest
 
 from knowledge_hub.config import (
@@ -337,69 +335,3 @@ def test_slack_channel_optional_and_validated():
         assert str(exc.value) == (
             f"config: slack_channel {value!r} is not a valid Slack channel (#name, lower case)"
         )
-
-
-def test_audience_members_lists_active_groups_with_sorted_emails():
-    c = cfg(
-        people={"alice": "alice@example.com", "bob": "Bob@Example.com", "carol": "carol@example.com"},
-        groups={
-            "mgmt": {"members": ["carol", "alice", "BOB"], "approvers": ["alice"]},
-            "all": {"members": ["bob", "alice"], "approvers": ["alice"]},
-            "old": {"members": ["alice"], "approvers": ["alice"], "archived": True},
-        },
-    )
-    assert c.audience_members() == {
-        "all": ["alice@example.com", "bob@example.com"],
-        "mgmt": ["alice@example.com", "bob@example.com", "carol@example.com"],
-    }
-    assert list(c.audience_members()) == ["all", "mgmt"]
-
-
-def test_audience_members_of_default_config_is_empty():
-    assert KhConfig().audience_members() == {}
-
-
-def _many_groups(n):
-    people = {f"u{i}": f"u{i}@example.test" for i in range(n)}
-    groups = {f"g{i}": {"members": [f"u{i}"], "approvers": [f"u{i}"]} for i in range(n)}
-    return people, groups
-
-
-def test_more_than_200_active_groups_refused():
-    people, groups = _many_groups(201)
-    refused(
-        {"people": people, "groups": groups},
-        "active groups are more than 200; PrivacyFence accepts at most 200 audiences",
-    )
-    groups["g200"]["archived"] = True
-    assert len(parse_config({"people": people, "groups": groups}).audience_members()) == 200
-
-
-def test_more_than_20000_audience_addresses_refused():
-    people = {f"u{i}": f"u{i}@example.test" for i in range(20001)}
-    members = list(people)
-    refused(
-        {"people": people, "groups": {"all": {"members": members, "approvers": ["u0"]}}},
-        "active groups list more than 20000 members in all; PrivacyFence accepts at most 20000 addresses",
-    )
-
-
-def _big(count, pad, email_digits):
-    people = {f"u{i:04d}": "a" * pad + f"{i:0{email_digits}d}@example.test" for i in range(count)}
-    return {"people": people, "groups": {"all": {"members": list(people), "approvers": ["u0000"]}}}
-
-
-def test_audience_table_over_one_million_characters_refused():
-    refused(
-        _big(4200, 236, 5),
-        "the audience table is larger than 1000000 characters; PrivacyFence refuses it",
-    )
-
-
-def test_audience_table_refused_when_only_the_indented_text_is_too_large():
-    data = _big(4000, 223, 4)
-    emails = sorted(data["people"].values())
-    assert all(len(e) == 240 for e in emails)
-    answer = {"version": 1, "audiences": {"all": emails}}
-    assert len(json.dumps(answer)) <= 1_000_000 < len(pydantic_core.to_json(answer, indent=2).decode())
-    refused(data, "the audience table is larger than 1000000 characters; PrivacyFence refuses it")
