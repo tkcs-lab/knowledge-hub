@@ -139,7 +139,7 @@ class ForgejoStep:
             return [Change("!", "directory: snapshot missing")]
         if age > directory.max_stale_seconds:
             limit = directory.max_stale_seconds
-        return [Change("!", f"directory: snapshot is {int(age)}s old (limit {limit}s)")]
+            return [Change("!", f"directory: snapshot is {int(age)}s old (limit {limit}s)")]
         return [Change("i", f"directory: {len(self._membership.people)} people from the directory snapshot")]
 
     # -- calls ForgejoAdmin has no public method for ----------------------------------------------
