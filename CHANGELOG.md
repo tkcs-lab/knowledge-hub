@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-19
+
 ### Added
 
 - App wiring of authentication: `BearerResolver` (hub keys and OAuth access tokens, scope-limited tool allowlists, audiences from the live membership), `PublicHostGuard` (404 for non-public paths on the public host), `build_deps` building the OAuth stack when configured, and a membership refresh task in the app lifespan.
