@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- App wiring of authentication: `BearerResolver` (hub keys and OAuth access tokens, scope-limited tool allowlists, audiences from the live membership), `PublicHostGuard` (404 for non-public paths on the public host), `build_deps` building the OAuth stack when configured, and a membership refresh task in the app lifespan.
 - OAuth routes (`oauth/routes.py`, `oauth/consent.py`): hub-owned authorization-server and protected-resource metadata, the SDK routes with limiters on `/register` and `/authorize`, `/oauth/callback` and `/oauth/consent`, and the consent page with its security headers. App wiring arrives in a later phase.
 - OAuth authorization flow (`oauth/flow.py`): the upstream callback, the consent ticket and decision, and single-use authorization codes. The routes arrive in a later phase.
 - `kh setup` and the admin commands build Forgejo teams from the effective membership (static plus directory snapshot); directory people without a Forgejo account or with a different account email are left out and reported, and a missing or stale snapshot prints `! directory: ...`.

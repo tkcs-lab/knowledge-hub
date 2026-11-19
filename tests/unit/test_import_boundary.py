@@ -20,3 +20,17 @@ def test_app_import_leaves_admin_code_out():
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_app_import_leaves_directory_sync_code_out():
+    code = (
+        "import sys, knowledge_hub.app\n"
+        "banned = ('knowledge_hub.directory.sync', 'knowledge_hub.directory.cli', "
+        "'knowledge_hub.directory.google', 'knowledge_hub.directory.keycloak', "
+        "'knowledge_hub.auth.keys_cli')\n"
+        "bad = [m for m in sys.modules if m in banned]\n"
+        "print(','.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
