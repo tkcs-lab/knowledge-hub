@@ -403,3 +403,24 @@ def test_audience_table_refused_when_only_the_indented_text_is_too_large():
     answer = {"version": 1, "audiences": {"all": emails}}
     assert len(json.dumps(answer)) <= 1_000_000 < len(pydantic_core.to_json(answer, indent=2).decode())
     refused(data, "the audience table is larger than 1000000 characters; PrivacyFence refuses it")
+
+
+def test_tech_dirs_default_and_nested():
+    c = tech_cfg(tech_repos={"ember-core": {"labels": ["ember"]}, "r": {"dirs": ["docs/adr", "adr"]}})
+    assert c.tech_dirs("ember-core") == ["docs"]
+    assert c.tech_dirs("r") == ["docs/adr", "adr"]
+
+
+def dirs_refused(dirs, message):
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "t", "tech_repos": {"r": {"dirs": dirs}}},
+        message,
+    )
+
+
+def test_tech_dirs_rejections():
+    dirs_refused([], "config: tech repo r needs at least one dir")
+    dirs_refused([f"d{i}" for i in range(21)], "config: tech repo r has more than 20 dirs")
+    for bad in ["", "/docs", "docs/", "../x", ".github", "docs//x"]:
+        dirs_refused([bad], f"config: tech repo r dir {bad!r} is not a valid directory")
+    dirs_refused(["docs", "docs"], "config: tech repo r lists dir 'docs' twice")

@@ -9,7 +9,7 @@ This document records the decisions as built, the alternatives that were rejecte
 | Tier | Source | Written by | Trust |
 |---|---|---|---|
 | T0 | `kh.documents`, from `*.md` files on `main` of a group's repo | a pull request merged by one of the group's approvers | normative |
-| T0a | `kh.documents` (tier T0a), from `docs/**/*.md` and the root `CLAUDE.md` on the default branch of a tech repo | the hourly poll and the push webhook, no approval | indexed without review |
+| T0a | `kh.documents` (tier T0a), from the root `CLAUDE.md` and the `.md` files under the repo's `dirs` (default `docs`) on the default branch of a tech repo | the hourly poll and the push webhook, no approval | indexed without review |
 | T3 | `kh.records`, body in S3 | `ingest_record` | raw material |
 
 - A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name an n8n token carries and the access group of one T0 repo. Every group has exactly one repo.
@@ -43,7 +43,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 ## Technical documents (T0a)
 
 - **Trust.** Nothing approves a T0a document. The indexer reads the default branch of a tech repo as Forgejo reports it, so whoever can push there puts text in front of every caller: every row has audience `all`, decided by the owner. Its text is data, not instructions; `search` and `get_doc` say so.
-- **Source.** `tech_org` and `tech_repos` in `kh.yaml`. The operator creates the mirror or fork in `tech_org`; `kh setup` creates nothing there. The files are the root `CLAUDE.md` and `docs/**/*.md` (no dot-prefixed segment, at most 1 MiB). The webhook queues a job for a push to the default branch, and the worker polls every tech repo every `KH_TECH_POLL_MINUTES`.
+- **Source.** `tech_org` and `tech_repos` in `kh.yaml`. The operator creates the mirror or fork in `tech_org`; `kh setup` creates nothing there. The files are the root `CLAUDE.md` and the `.md` files under the repo's `dirs` in `kh.yaml`, default `docs` (whole-segment prefix, no dot-prefixed segment, at most 1 MiB). A directory that leaves `dirs` loses its documents at the next sync. The webhook queues a job for a push to the default branch, and the worker polls every tech repo every `KH_TECH_POLL_MINUTES`.
 - **Synthesised header.** A tech file is not parsed for frontmatter: a leading `---` block is dropped, so no file is rejected. The title is `<repo>: CLAUDE.md` for the root file, else the first `# ` heading outside a fenced block, else the file name; the key is the path (shortened with a hash past 100 characters); `review_by` is 100 years ahead, so a T0a document is never stale; `supersedes` is empty; labels come only from `labels` of the repo in `kh.yaml`. A label change moves no blob, so the plan relabels the stored documents.
 - **No rewrite alert.** Clones and forks are force-pushed upstream all the time, so a tech sync never raises `main ... was rewritten` and the next sync simply follows the head.
 - **Prune.** A repo removed from `tech_repos` keeps its T0a documents until `kh setup apply --prune` deletes them and the repo's `repo_state` row; `plan` and `apply` only report them.
@@ -195,6 +195,7 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | A separate usage key file | One more secret; the sub-key derived from the cursor key is enough. |
 | Logging n8n workflows | They are not people, and the agent's own searches would feed back into its signal. |
 | Parsing frontmatter in technical files | Rejects files nobody reviewed and needs one rule per file kind; a synthesised header covers every file. |
+| A glob list per tech repo (`include: ["docs/**", "adr/*.md"]`) | The operator asked for directories; a directory list is easy to validate and to explain. |
 | A tier named `T1` | The owner chose `T0a`: it is a variant of T0, not a step between T0 and T3. |
 | Counting T0a in `t0_fts_hits` | A technical document is not a normative answer, so the promotion agent would stop seeing the gap. |
 | `kh setup` creating the clones | The clone or fork is a decision about upstream and credentials; the operator makes it and `kh setup` only checks it. |

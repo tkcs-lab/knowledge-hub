@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.setup.cli import main as setup_main
 
         return setup_main(argv[1:])
-    if argv and argv[0] in ("label", "group", "person"):
+    if argv and argv[0] in ("label", "group", "person", "repo"):
         from knowledge_hub.admin.cli import main as admin_main
 
         return admin_main(argv)

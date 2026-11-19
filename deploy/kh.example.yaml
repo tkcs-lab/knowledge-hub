@@ -29,3 +29,4 @@ labels:
 # tech_repos:
 #   ember-core:               # bare repository name in tech_org
 #     labels: [product:ember] # optional; each must be a key of labels
+#     dirs: [docs, adr]       # optional, default [docs]; the root CLAUDE.md is always indexed

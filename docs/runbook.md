@@ -86,24 +86,23 @@ A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (
 ### Adding a technical repo
 
 1. In `tech_org` (by hand; `kh setup` creates nothing there) create the pull mirror or fork of the upstream repo. Its default branch is the one indexed.
-2. Add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` if wanted. The group `all` must exist and be active.
-3. `kh migrate` (migration `0004_tech_tier.sql`, first time only), then `kh setup plan` and `kh setup apply`. It gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
+2. Command form: `kh repo add <repo> [--dirs docs,adr] [--labels product:ember]` (`tech_org` must be set; `dirs` defaults to `docs`; the root `CLAUDE.md` is always indexed). It edits `kh.yaml` and runs the forgejo step for that repo. File-edit form: add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` and `dirs` if wanted; the group `all` must exist and be active.
+3. `kh migrate` (migration `0004_tech_tier.sql`, first time only). With the file-edit form, run `kh setup plan` and `kh setup apply` too. The setup gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
 4. Restart `kh serve`, because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
 5. `kh check`. Exit 0 means the head is indexed and every document has tier T0a.
 
 Anyone with push access to the repo puts unreviewed text in front of every caller; read the `i tech repo <repo>: collaborators` line.
 
-### Changing the labels of a technical repo
+### Changing the labels or dirs of a technical repo
 
-1. Edit `labels` of the repo in `kh.yaml` (new labels go under `labels` first).
-2. `kh setup apply`, then restart `kh serve`.
-3. Wait for the next push or poll, or run `kh rebuild --repo <repo>`. No file is fetched again; the stored documents get the new labels.
+1. Command form: `kh repo set <repo> --labels a,b` and/or `--dirs docs,adr` (`--labels ""` clears the labels). File-edit form: edit `labels` or `dirs` of the repo in `kh.yaml` (new labels go under `labels` first).
+2. Restart `kh serve` first: its worker keeps the old config and would undo the change. With the file-edit form run `kh setup apply` too.
+3. After the restart, wait for the next push or poll, or run `kh rebuild --repo <repo>`. A label change fetches no file again; a new directory fetches its files, and the documents of a directory that left `dirs` are deleted.
 
 ### Removing a technical repo
 
-1. Remove the repo from `tech_repos` in `kh.yaml`.
-2. `kh setup apply --prune` deletes its T0a documents and indexed head; without `--prune` it only prints `? tech documents of <repo>: repo is not in tech_repos`. The Forgejo repo is not touched.
-3. Restart `kh serve`.
+1. Command form: `kh repo remove <repo>` (`--yes` when it has indexed documents). It removes the entry and deletes its T0a documents and indexed head. File-edit form: remove the repo from `tech_repos` in `kh.yaml`, then `kh setup apply --prune` (without `--prune` it only prints `? tech documents of <repo>: repo is not in tech_repos`). The Forgejo repo is not touched.
+2. Restart `kh serve` now: until then its worker still indexes the repo and would bring the documents back, because it keeps the old config.
 
 ### Archiving and unarchiving
 
