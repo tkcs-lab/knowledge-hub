@@ -29,6 +29,38 @@ Not run in the cloud, so yours to do and check by hand: the backup script's `pg_
 
 Sign-in with OAuth, the directory providers and hub keys for n8n are in [runbook-identity](runbook-identity.md).
 
+## Admin panel
+
+The admin panel is `kh panel serve`, a separate service of the same image (`knowledge-hub-panel` in `deploy/compose.example.yaml`). Administrators sign in with the company account and manage labels, groups, people and technical repos, watch the indexing pipeline and read the health of the stack, without a shell. It holds the setup admin credentials (Forgejo and Postgres), the `kh_indexer` and migrator passwords, its own OIDC client secret and a session key; `kh serve` holds none of the admin credentials, so keep the panel on a private network or behind an access proxy. The reasons are in [design](design.md#admin-panel).
+
+**First start, in this order.**
+
+1. At the OIDC provider create a client for the panel (Google: a Web application client; Keycloak: a confidential client with the standard flow) and add the redirect URI `https://<panel host>/auth/callback`.
+2. Write two secret files: the client secret (`kh_panel_oidc_client_secret`) and a session key of at least 32 bytes (`head -c 48 /dev/urandom | base64 > kh_panel_session_key`). Secrets never go through chat or the repository.
+3. Add your email, in lower case, under `admins:` in `kh.yaml`. Only that list decides who gets in, and it is read again on every request; the panel cannot edit it.
+4. Start the `knowledge-hub-panel` service with the `KH_PANEL_*` variables of [configuration](configuration.md#admin-panel-kh-panel-serve-only). Every kh container (`knowledge-hub`, `-directory`, `-panel`, one-off commands) must run the same image tag: an older image refuses a `kh.yaml` that has `admins`.
+5. Open the panel address, sign in, and check that a person who is not in `admins` sees `not an administrator`.
+
+**The five tabs.**
+
+| Tab | What it does |
+|---|---|
+| Groups | Per group: members, approvers, directory references and the amount of information (documents by tier, records, chunks, stale and outdated counts, last indexing time). Add, archive, unarchive and remove a group; add and remove members and approvers; add and remove people. |
+| Labels | The labels with their document, record and technical repo counts. Add, describe, archive, unarchive and remove a label. |
+| Repos | Group repos and technical repos with the indexed head. Add, change `dirs` and `labels` of, and remove a technical repo. |
+| Pipeline | The job counts, failed jobs and alerts. Rebuild a repo, Retry a failed job or every dead job, reclaim jobs stuck in `running`, requeue missing embeddings. |
+| Health | Checks for `config`, `database`, `migrations`, `hub`, `queue`, `alerts`, `indexed`, `embeddings` and `directory`, plus the buttons `setup plan` and `kh check`. |
+
+**How a change reaches the hub.** Every change has Preview (a dry run that shows the diff of `kh.yaml` and writes nothing) and Apply, which stays disabled until a Preview of the same values succeeded. The panel runs the same `kh label|group|person|repo` commands as the command line, one at a time. After a successful Apply the file has changed; within `KH_CONFIG_WATCH_SECONDS` plus the debounce (about 20 seconds with the default 10) `kh serve` finishes its running jobs and exits with code 75, the container restarts it, and the Health `hub` check turns ok again. While it shows `the hub runs an older kh.yaml than the one on disk` the restart is still pending. A change made only to `admins`, to comments or to formatting restarts nothing.
+
+**When `kh.yaml` is invalid.** The panel fails closed: nobody counts as an administrator while the file is invalid, so requests answer 401 and the sign-in ends with 403 `panel unavailable: kh.yaml is invalid`. `kh serve` keeps serving the config it loaded and does not restart. Fix the file by hand, or with `kh label|group|person|repo` on the command line, then sign in again. Do not hand-edit `kh.yaml` while an operation runs: the command checks the file again before it writes and refuses with `admin: kh.yaml changed while the command ran; run it again` (the panel shows the text; run the operation again). Another change that runs at the same moment gives `Another change is running; try again in a minute`.
+
+**A failed job.** The worker retries a failed job five times. A job that failed all five times is dead and shows in the Pipeline tab with its last error; fix the cause (Forgejo, Ollama, the database), then press Retry. Retry puts the job back with a fresh attempt count and keeps its last error. A job left in `running` for over an hour (the hub stopped mid-job) is put back with Reclaim; a job that waited long in the queue and is really still running can then run twice, which costs only repeated work.
+
+**Rebuild is asynchronous.** The panel never runs `kh rebuild` itself (it needs the embedding model and cannot finish in the timeout on a CPU). Rebuild deletes the indexed head of the repo and queues one sync job; the hub's worker runs it. The Pipeline tab shows the queue and the new head when it is done. From a shell the same is `kh rebuild --repo R --queue`. If the `hub` check warns that the hub runs an older `kh.yaml`, the worker may still use the old repo list: wait for the restart first.
+
+**Accepted risks.** A signed session cookie lives up to `KH_PANEL_SESSION_HOURS` (8 hours by default): removing an email from `admins` takes effect on the next request, but a stolen cookie is not revoked earlier for a person who stays in `admins`. Do not run the panel next to a tool that renders `kh.yaml` from its own registry (the compose repo's kh tab): it would drop `admins` and overwrite `tech_repos`.
+
 ## Routine tasks
 
 | Task | Command and notes |
@@ -47,7 +79,7 @@ Two ways. The command form: `kh person add LOGIN EMAIL` for each new person, the
 
 1. Add the group (and any new people) to `kh.yaml`. Every member needs a `people` entry; approvers are a non-empty subset of members.
 2. `kh setup plan`, then `kh setup apply`. It creates the group row, the two Forgejo teams, the repo, its protection and the webhook coverage; the other groups are untouched.
-3. Restart `kh serve`, because the config is read at start.
+3. `kh serve` restarts itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce (a second poll) when the restart policy allows it (`restart: unless-stopped` in the compose example); with `KH_CONFIG_WATCH_SECONDS=0` restart it by hand, because the config is read at start.
 4. Put the first files into the new repo through a pull request.
 
 A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (with `--prune`) and add a new one instead. Removing a group is refused while records exist.
@@ -57,7 +89,7 @@ A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (
 1. In `tech_org` (by hand; `kh setup` creates nothing there) create the pull mirror or fork of the upstream repo. Its default branch is the one indexed.
 2. Command form: `kh repo add <repo> [--dirs docs,adr] [--labels product:ember]` (`tech_org` must be set; `dirs` defaults to `docs`; the root `CLAUDE.md` is always indexed). It edits `kh.yaml` and runs the forgejo step for that repo. File-edit form: add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` and `dirs` if wanted; the group `all` must exist and be active.
 3. `kh migrate` (migration `0004_tech_tier.sql`, first time only). With the file-edit form, run `kh setup plan` and `kh setup apply` too. The setup gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
-4. Restart `kh serve`, because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
+4. Wait for `kh serve` to restart itself (within `KH_CONFIG_WATCH_SECONDS` plus the debounce; by hand when the watch is off), because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
 5. `kh check`. Exit 0 means the head is indexed and every document has tier T0a.
 
 Anyone with push access to the repo puts unreviewed text in front of every caller; read the `i tech repo <repo>: collaborators` line.
@@ -65,13 +97,13 @@ Anyone with push access to the repo puts unreviewed text in front of every calle
 ### Changing the labels or dirs of a technical repo
 
 1. Command form: `kh repo set <repo> --labels a,b` and/or `--dirs docs,adr` (`--labels ""` clears the labels). File-edit form: edit `labels` or `dirs` of the repo in `kh.yaml` (new labels go under `labels` first).
-2. Restart `kh serve` first: its worker keeps the old config and would undo the change. With the file-edit form run `kh setup apply` too.
+2. Let `kh serve` restart first (it does itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce; by hand when the watch is off): its worker keeps the old config until then and would undo the change. With the file-edit form run `kh setup apply` too.
 3. After the restart, wait for the next push or poll, or run `kh rebuild --repo <repo>`. A label change fetches no file again; a new directory fetches its files, and the documents of a directory that left `dirs` are deleted.
 
 ### Removing a technical repo
 
 1. Command form: `kh repo remove <repo>` (`--yes` when it has indexed documents). It removes the entry and deletes its T0a documents and indexed head. File-edit form: remove the repo from `tech_repos` in `kh.yaml`, then `kh setup apply --prune` (without `--prune` it only prints `? tech documents of <repo>: repo is not in tech_repos`). The Forgejo repo is not touched.
-2. Restart `kh serve` now: until then its worker still indexes the repo and would bring the documents back, because it keeps the old config.
+2. Make sure `kh serve` restarts now (itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce; by hand when the watch is off): until then its worker still indexes the repo and would bring the documents back, because it keeps the old config.
 
 ### Archiving and unarchiving
 
@@ -79,17 +111,17 @@ Command form: `kh group archive NAME` or `kh label archive NAME` (and `kh group 
 
 1. Set `archived: true` on the group, or add the label to `archived_labels`, in `kh.yaml`.
 2. `kh setup plan`, then `kh setup apply`. For a group, `kh setup` also marks its Forgejo repo archived and keeps the teams, but removes team members that `kh.yaml` no longer lists (it never adds any).
-3. Restart `kh serve`, because the config is read at start.
+3. `kh serve` restarts itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce when the restart policy allows it; with the watch off, restart it by hand.
 
-Nothing is deleted. To unarchive, remove the flag or the `archived_labels` entry, run `kh setup apply`, restart `kh serve`, and for a group run `kh rebuild --repo <repo>` once, because pushes while archived were ignored. `kh setup apply --prune` never deletes an archived group or label. To delete one for good, remove it from `kh.yaml` and use `--prune` as before.
+Nothing is deleted. To unarchive, remove the flag or the `archived_labels` entry, run `kh setup apply`, wait for the `kh serve` restart (or do it by hand when the watch is off), and for a group run `kh rebuild --repo <repo>` once, because pushes while archived were ignored. `kh setup apply --prune` never deletes an archived group or label. To delete one for good, remove it from `kh.yaml` and use `--prune` as before.
 
 ### Joiners and leavers
 
-Static people and groups live in `kh.yaml`; with `directory.provider` set, group membership comes from Google or Keycloak as well. For a joiner or leaver, change the group in the directory: directory access follows within about six minutes (the next sync plus the 30 second view reload; `kh directory sync --once` forces it) and Forgejo teams within about twenty-one (the next `kh setup apply --only forgejo`, normally a 15-minute timer), and no restart is needed. `kh person add LOGIN EMAIL`, `kh group member add GROUP LOGIN`, `kh group member remove GROUP LOGIN` and `kh person remove LOGIN --from-groups` still edit the static entries only; keep them for break-glass people and groups that have no directory reference, and restart `kh serve` after such an edit. A person who was a static member stays one until the entry is removed. Also disable the Forgejo account if they leave the company, and see [runbook-identity](runbook-identity.md) for the directory.
+Static people and groups live in `kh.yaml`; with `directory.provider` set, group membership comes from Google or Keycloak as well. For a joiner or leaver, change the group in the directory: directory access follows within about six minutes (the next sync plus the 30 second view reload; `kh directory sync --once` forces it) and Forgejo teams within about twenty-one (the next `kh setup apply --only forgejo`, normally a 15-minute timer), and no restart is needed. `kh person add LOGIN EMAIL`, `kh group member add GROUP LOGIN`, `kh group member remove GROUP LOGIN` and `kh person remove LOGIN --from-groups` still edit the static entries only; keep them for break-glass people and groups that have no directory reference, and expect `kh serve` to restart itself after such an edit (by hand when the watch is off). A person who was a static member stays one until the entry is removed. Also disable the Forgejo account if they leave the company, and see [runbook-identity](runbook-identity.md) for the directory.
 
 ### When a person reads nothing
 
-First check that the email of their sign-in equals their `people` email in `kh.yaml` or their address in the directory (compared in lower case), then run `kh directory plan` and look for a `skip` line naming them. A different address, a missing entry or a missing group all give no groups. For a static edit check that `kh serve` was restarted; for the directory check `kh directory show` for a snapshot age under `max_stale_seconds`. See [runbook-identity](runbook-identity.md).
+First check that the email of their sign-in equals their `people` email in `kh.yaml` or their address in the directory (compared in lower case), then run `kh directory plan` and look for a `skip` line naming them. A different address, a missing entry or a missing group all give no groups. For a static edit check that `kh serve` restarted (Health in the admin panel shows the `hub` check); for the directory check `kh directory show` for a snapshot age under `max_stale_seconds`. See [runbook-identity](runbook-identity.md).
 
 ### Slack notifications for approvers
 
@@ -128,7 +160,7 @@ After the first deploy run the sandbox probe once: `kh setup plan` (expect `+` l
 
 1. With the floor at 0, run `search` for 10 or more queries that have a known right answer and 10 or more that have none (topics the hub holds nothing about). Use `limit` 50, because hits are ordered by rank and tier weight, not by similarity, so the most similar junk chunk can fall outside the first 10. Note the highest `similarity` among the hits of each query.
 2. Take the lowest of the known-good values and the highest of the no-answer values. If the first is above the second, set the floor between them, nearer the no-answer value; otherwise the model does not separate them and the floor stays 0.
-3. Set `KH_SEARCH_MIN_SIMILARITY` in the `knowledge-hub` service environment and restart `kh serve`. Run the no-answer queries again: they return no hits (a hit that still appears matches the query's words by full text; one whose `similarity` is below the floor and that has no word match would be a bug). If a no-answer query still returns a vector-only hit, raise the floor above that hit's `similarity` and repeat; if a good query loses its answer, set the floor back to 0.
+3. Set `KH_SEARCH_MIN_SIMILARITY` in the `knowledge-hub` service environment and restart `kh serve` (a change of the environment is not a change of `kh.yaml`, so it does not restart by itself). Run the no-answer queries again: they return no hits (a hit that still appears matches the query's words by full text; one whose `similarity` is below the floor and that has no word match would be a bug). If a no-answer query still returns a vector-only hit, raise the floor above that hit's `similarity` and repeat; if a good query loses its answer, set the floor back to 0.
 
 ## Alerts
 
