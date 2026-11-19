@@ -27,4 +27,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- review: Scope disposition: the only drift is docs/runbook.md in fix-1 (a runbook restore-step fix the first final review asked for), accepted as merged. The full pytest run fails here (15 failed, 699 errors) because the container's Postgres lacks the pgvector extension; the diff changes no code, test or workflow, so the result equals main's.
