@@ -19,6 +19,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from knowledge_hub.panel.api_health import build_health_routes
+from knowledge_hub.panel.api_ops import build_ops_routes
 from knowledge_hub.panel.api_read import build_read_routes
 from knowledge_hub.panel.auth import build_auth_routes, current_admin
 from knowledge_hub.panel.context import PanelContext
@@ -32,6 +33,7 @@ ROUTE_BUILDERS: tuple[Callable[[PanelContext], list[Route]], ...] = (
     build_auth_routes,
     build_read_routes,
     build_health_routes,
+    build_ops_routes,
 )
 
 CSP = (
