@@ -40,7 +40,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9-keycloak-provider
 
-- pending
+- None.
 
 ## p10-directory-store
 
