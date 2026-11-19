@@ -189,10 +189,10 @@ Documents and chunks are rebuilt from Forgejo, groups and labels from `kh.yaml`,
 
 **Not in the backup and not rebuildable.** `kh.api_keys`: every hub key is lost; create the keys again with `kh key create` and switch every n8n credential. `kh.oauth_*`: every Claude connector signs in again. `kh.record_moves`: do not re-send a record that was moved, because a re-sent record is accepted again. `kh.usage_events`: lost.
 
-1. Start with an empty database: run `kh setup apply --only postgres` when `directory.provider` is set (a plain apply ends with `! directory: snapshot missing` and exit 2), otherwise `kh setup apply` (or create the roles and run `kh migrate`), so the schema, groups and labels exist.
+1. Start with an empty database: run `kh setup apply --only postgres --config kh.yaml` when `directory.provider` is set (a plain apply ends with `! directory: snapshot missing` and exit 2), which creates the roles, the database, the schema and the groups; otherwise `kh setup apply --config kh.yaml` (or create the roles and run `kh migrate`), which also creates the labels.
 2. As the Postgres superuser restore the records: `pg_restore --no-owner -d kh kh-t2t3-<date>.dump` (INSERT format, so RLS does not block it).
 3. Copy the blobs back: `aws s3 sync "<BACKUP_DIR>/blobs/" s3://<bucket> --endpoint-url <endpoint>`.
-4. If `directory.provider` is set run `kh directory sync --once`, then `kh setup apply`, then `kh rebuild` for the git-derived tables.
+4. If `directory.provider` is set run `kh directory sync --once`, then `kh setup apply --config kh.yaml`, then `kh rebuild` for the git-derived tables.
 5. Run `kh requeue-embeddings`: chunks are not in the dump, so this is required after every restore.
 6. Run `kh check` and expect exit 0, then `search` for a restored record.
 
