@@ -21,7 +21,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-job-queue-ops
 
-- pending
+- worker: tld was unavailable in the worker; the orchestrator ran the roles step (none required). The new integration tests could not run in this environment (the database fixture fails with FeatureNotSupported, apparently no pgvector); only unit tests and lint ran, so CI has to run them.
 
 ## p6-panel-session-auth
 
