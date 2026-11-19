@@ -7,6 +7,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 ### Added
 
 - Hub keys for workflows: `kh key create|list|revoke` (`auth/keys.py`, `auth/keys_cli.py`), keys `khk_<id>.<secret>` bound to one group and a tool list, and a tool allowlist in `tool_guard` that refuses a tool outside `Caller.tools` with `this credential may not call this tool`. The request path that accepts these keys arrives with the caller middleware.
+- `directory/store.py`: the directory snapshot store, `MembershipCache` (fails closed to the static membership when the snapshot is missing, of another provider or older than `max_stale_seconds`) and `load_membership`; the gauge `kh_directory_snapshot_age_seconds`.
 - Migration `0006_identity.sql`: tables and `SECURITY DEFINER` functions for hub keys, the OAuth server state and the directory snapshot, and `deploy/rollback-0006.sql` to undo it. `kh daily` purges expired OAuth state through `jobs/daily.py` `purge_identity`.
 
 ### Changed
