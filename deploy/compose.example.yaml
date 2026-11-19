@@ -5,14 +5,21 @@ services:
     #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.1.0
     image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0
     restart: unless-stopped
-    networks: [db, kh]
+    networks: [db, kh, egress]   # egress only for the sign-in: restrict it to the issuer's hosts by name
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     environment:
       KH_ENV: prod
-      KH_ALLOWED_HOSTS: "knowledge-hub:8080"
+      KH_ALLOWED_HOSTS: "knowledge-hub:8080"   # add the public host when KH_PUBLIC_URL is set
+      # Sign-in and OAuth: all four or none (docs/runbook-identity.md).
+      # KH_PUBLIC_URL: "https://kh.example.com"
+      # KH_OIDC_ISSUER: "https://accounts.google.com"
+      # KH_OIDC_CLIENT_ID: "example-client-id.apps.example.com"
+      # KH_OIDC_ALLOWED_DOMAINS: "example.com"
+      # KH_OIDC_HOSTED_DOMAINS: "example.com"
+      # KH_OIDC_CLIENT_SECRET_FILE: /run/secrets/kh_oidc_client_secret   # OAuth is on only when all of these are set
       KH_DB_HOST: postgres
       KH_DB_NAME: kh
       KH_DB_MIGRATOR_PASSWORD_FILE: /run/secrets/pg_kh_migrator
@@ -45,6 +52,7 @@ services:
       - kh_s3_secret_key
       - kh_cursor_key
       - kh_metrics_token
+      - kh_oidc_client_secret
     volumes:
       - ./config:/etc/kh:ro
     healthcheck:
@@ -53,6 +61,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # The directory sync: the only container that holds a directory credential and the only one that
+  # reaches the provider (docs/runbook-identity.md). Start it only when `directory.provider` is set.
+  knowledge-hub-directory:
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0   # the same image and tag as knowledge-hub
+    restart: unless-stopped
+    command: ["directory", "sync", "--every", "300"]
+    networks: [db, egress]   # egress: outbound to the provider's hosts only (for Keycloak use its internal admin network instead)
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      KH_ENV: prod
+      KH_DB_HOST: postgres
+      KH_DB_NAME: kh
+      KH_DB_INDEXER_PASSWORD_FILE: /run/secrets/pg_kh_indexer
+      KH_CONFIG_FILE: /etc/kh/kh.yaml
+      KH_DIRECTORY_GOOGLE_CREDENTIALS_FILE: /run/secrets/kh_directory_google_key
+      # KH_DIRECTORY_GOOGLE_SUBJECT: "kh-directory-reader@example.com"
+      KH_DIRECTORY_KEYCLOAK_CLIENT_SECRET_FILE: /run/secrets/kh_directory_keycloak_secret
+    secrets:
+      - pg_kh_indexer
+      - kh_directory_google_key
+      - kh_directory_keycloak_secret
+    volumes:
+      - ./config:/etc/kh:ro
 
   # Embeddings for bge-m3 on CPU. The `kh` network has no internet access, so `ollama pull` cannot run
   # here: pull the model once with a short-lived container (docs/runbook.md, install step 5).
@@ -73,6 +108,7 @@ services:
 networks:
   db: {internal: true}
   kh: {internal: true}
+  egress: {}   # not internal: allow only the issuer's and the provider's hosts at a proxy or firewall
 
 volumes:
   ollama-models:
@@ -89,3 +125,6 @@ secrets:
   kh_s3_secret_key: {file: /etc/stack-secrets/kh_s3_secret_key}
   kh_cursor_key: {file: /etc/stack-secrets/kh_cursor_key}
   kh_metrics_token: {file: /etc/stack-secrets/kh_metrics_token}
+  kh_oidc_client_secret: {file: /etc/stack-secrets/kh_oidc_client_secret}
+  kh_directory_google_key: {file: /etc/stack-secrets/kh_directory_google_key}
+  kh_directory_keycloak_secret: {file: /etc/stack-secrets/kh_directory_keycloak_secret}

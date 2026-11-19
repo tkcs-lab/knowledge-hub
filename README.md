@@ -1,6 +1,6 @@
 # knowledge-hub
 
-The trusted core of the company knowledge layer: one MCP interface over three tiers of knowledge. Every result carries its tier and is filtered by the caller's groups inside Postgres (row-level security), not in Python. Agents reach it through PrivacyFence, where its tools appear as `kh_search`, `kh_get_doc`, `kh_ingest_record` and so on.
+The trusted core of the company knowledge layer: one MCP interface over three tiers of knowledge. Every result carries its tier and is filtered by the caller's groups inside Postgres (row-level security), not in Python. Agents reach it with OAuth (Claude connectors) or a hub key (n8n), and its tools are `search`, `get_doc`, `ingest_record` and so on.
 
 ## The three tiers
 
@@ -12,7 +12,7 @@ The trusted core of the company knowledge layer: one MCP interface over three ti
 
 ## Groups
 
-A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of members and a non-empty list of approvers. A person reads the groups that `kh.yaml` lists for their verified email, so a joiner or leaver is one edit of one file. Every T3 record belongs to one group, and PrivacyFence reads the groups' members from the hub (`list_audiences`), so an n8n token holds the groups its creator holds in `kh.yaml`, narrowed to those ticked. Documents and records may also carry labels, defined in `kh.yaml`.
+A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of members and approvers (static or from the directory). A person reads the groups that `kh.yaml` lists for their verified email plus those of the directory (Google or Keycloak groups), so a joiner or leaver is one change in one place. Every T3 record belongs to one group, and a hub key holds one group. Documents and records may also carry labels, defined in `kh.yaml`.
 
 ## Tools
 
@@ -22,7 +22,6 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `get_doc` | One document (`doc:<uuid>`) or record (`rec:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
-| `list_audiences` | PrivacyFence only: the members' emails of each active group, its audiences source; refuses every other caller. |
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group; the answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
@@ -50,9 +49,11 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
 | `kh label`, `kh group`, `kh person` | Manage `kh.yaml` and apply the change. |
+| `kh key` | Create, list and revoke hub keys for workflows (`create`, `list`, `revoke`). |
+| `kh directory` | Sync the directory snapshot and inspect it (`sync`, `plan`, `people`, `show`). |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
-| `kh daily` | Recompute stale flags, purge expired claim ids and delete usage events past the retention. |
+| `kh daily` | Recompute stale flags, purge expired OAuth rows and delete usage events past the retention. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
 | `kh lint FILE...` | Offline frontmatter check of Markdown files; exit 1 on a problem. |
 
@@ -61,3 +62,4 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 - [Design](docs/design.md): tiers, trust, the access model, schema, search and rejected alternatives.
 - [Configuration](docs/configuration.md): every `KH_*` variable, every `kh.yaml` key, `kh setup`.
 - [Runbook](docs/runbook.md): install order, routine tasks, alerts, restore, rotation and releasing.
+- [Identity runbook](docs/runbook-identity.md): sign-in, the directory, hub keys and the move to them.
