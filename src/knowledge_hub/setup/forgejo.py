@@ -7,9 +7,11 @@ drops a merge-whitelist team that has no read access to the repo.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from knowledge_hub.config import KhConfig
+from knowledge_hub.directory.model import Membership
 from knowledge_hub.forgejo.admin import OWNERS_TEAM, ForgejoAdmin
 from knowledge_hub.forgejo.reader import q
 from knowledge_hub.setup.steps import Change
@@ -96,8 +98,12 @@ class ForgejoStep:
         indexer_token: str | None,
         tech_admin: ForgejoAdmin | None = None,
         slack_urls: dict[str, str] | None = None,
+        membership_loader: Callable[[], Awaitable[tuple[Membership, float | None]]] | None = None,
     ) -> None:
         self._config = config
+        self._loader = membership_loader
+        self._membership = Membership.from_config(config)
+        self._snapshot_age: float | None = None
         self._admin = admin
         self._tech_admin = tech_admin
         self._secret = webhook_secret
@@ -105,10 +111,36 @@ class ForgejoStep:
         self._tokens = {config.bot_login: bot_token, config.indexer_login: indexer_token}
 
     async def plan(self) -> list[Change]:
+        await self._load()
         return await self._sync(write=False, prune=False)
 
     async def apply(self, prune: bool) -> list[Change]:
+        await self._load()
         return await self._sync(write=True, prune=prune)
+
+    async def _load(self) -> None:
+        if self._loader is None:
+            self._membership, self._snapshot_age = Membership.from_config(self._config), None
+        else:
+            self._membership, self._snapshot_age = await self._loader()
+
+    def _members(self, group: str) -> list[str]:
+        return sorted(self._membership.members.get(group, ()))
+
+    def _approvers(self, group: str) -> list[str]:
+        return sorted(self._membership.approvers.get(group, ()))
+
+    def directory_changes(self) -> list[Change]:
+        directory = self._config.directory
+        if directory.provider == "none":
+            return []
+        age = self._snapshot_age
+        if age is None:
+            return [Change("!", "directory: snapshot missing")]
+        if age > directory.max_stale_seconds:
+            limit = directory.max_stale_seconds
+        return [Change("!", f"directory: snapshot is {int(age)}s old (limit {limit}s)")]
+        return [Change("i", f"directory: {len(self._membership.people)} people from the directory snapshot")]
 
     # -- calls ForgejoAdmin has no public method for ----------------------------------------------
 
@@ -151,6 +183,7 @@ class ForgejoStep:
                 out.append(Change("?", f"unmanaged repo {name}"))
         if owners:
             out.append(Change("i", f"owners: {', '.join(owners)} can bypass protection"))
+        out += self.directory_changes()
         return out
 
     async def sync_group(self, name: str, *, write: bool) -> list[Change]:
@@ -158,10 +191,11 @@ class ForgejoStep:
         out: list[Change] = []
         cfg = self._config
         gc = cfg.groups[name]
+        await self._load()
         owners = sorted(str(u.get("login")) for u in await self._admin.org_owners())
         logins = [cfg.bot_login, cfg.indexer_login]
         if not gc.archived:
-            logins += gc.members + gc.approvers
+            logins += self._members(name) + self._approvers(name)
         missing = await self._check_accounts(out, logins, owners)
         teams = {str(t.get("name")): t for t in await self._admin.org_teams()}
         repos = {str(r.get("name")): r for r in await self._admin.repos()}
@@ -201,12 +235,12 @@ class ForgejoStep:
         repo = cfg.repo_for_group(name)
         if gc.archived:
             await self._archive(out, repos, name, repo, write)
-            for team_name, keep in ((name, gc.members), (f"{name}-approve", gc.approvers)):
+            for team_name, keep in ((name, self._members(name)), (f"{name}-approve", self._approvers(name))):
                 await self._trim(out, teams.get(team_name), team_name, keep, write)
             return
-        write_team = await self._team(out, teams, name, "write", gc.members, missing, write)
+        write_team = await self._team(out, teams, name, "write", self._members(name), missing, write)
         approve_team = await self._team(
-            out, teams, f"{name}-approve", "read", gc.approvers, missing, write
+            out, teams, f"{name}-approve", "read", self._approvers(name), missing, write
         )
         repo_exists = await self._repo(out, repos, repo, write)
         for team_name, tid in ((name, write_team), (f"{name}-approve", approve_team)):
@@ -259,9 +293,9 @@ class ForgejoStep:
         """Every login the config names must exist; the bots must be neither org owner nor site admin."""
         cfg = self._config
         logins = [cfg.bot_login, cfg.indexer_login]
-        for gc in cfg.groups.values():
+        for group, gc in cfg.groups.items():
             if not gc.archived:
-                logins += gc.members + gc.approvers
+                logins += self._members(group) + self._approvers(group)
         return await self._check_accounts(out, logins, owners)
 
     async def _check_accounts(self, out: list[Change], logins: list[str], owners: list[str]) -> set[str]:
@@ -273,9 +307,19 @@ class ForgejoStep:
         missing: set[str] = set()
         for folded, login in unique.items():
             account = await self._account(login)
+            from_directory = login in self._membership.people and login not in cfg.people
             if account is None:
                 missing.add(login)
-                out.append(Change("!", f"account {login}: does not exist"))
+                if from_directory:
+                    out.append(Change(
+                        "i", f"account {login}: no Forgejo account yet; not added to its teams"
+                    ))
+                else:
+                    out.append(Change("!", f"account {login}: does not exist"))
+                continue
+            if from_directory and str(account.get("email") or "").lower() != self._membership.people[login]:
+                missing.add(login)
+                out.append(Change("!", f"account {login}: email differs from directory; not added"))
                 continue
             if login in cfg.bots:
                 if folded in owner_set:

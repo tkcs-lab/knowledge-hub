@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- `kh setup` and the admin commands build Forgejo teams from the effective membership (static plus directory snapshot); directory people without a Forgejo account or with a different account email are left out and reported, and a missing or stale snapshot prints `! directory: ...`.
 - Google directory provider (`directory/google.py`): Directory API with domain-wide delegation, two read-only scopes, no Google client library.
 - Hub keys for workflows: `kh key create|list|revoke` (`auth/keys.py`, `auth/keys_cli.py`), keys `khk_<id>.<secret>` bound to one group and a tool list, and a tool allowlist in `tool_guard` that refuses a tool outside `Caller.tools` with `this credential may not call this tool`. The request path that accepts these keys arrives with the caller middleware.
 - `directory/store.py`: the directory snapshot store, `MembershipCache` (fails closed to the static membership when the snapshot is missing, of another provider or older than `max_stale_seconds`) and `load_membership`; the gauge `kh_directory_snapshot_age_seconds`.

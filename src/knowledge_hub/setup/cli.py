@@ -73,6 +73,7 @@ def build_steps(
         return TechStep(config, settings.dsn("migrator"))
 
     def forgejo() -> Step:
+        from knowledge_hub.directory.store import load_membership
         from knowledge_hub.forgejo.admin import ForgejoAdmin
         from knowledge_hub.setup.forgejo import ForgejoStep
 
@@ -98,6 +99,7 @@ def build_steps(
             ),
             tech_admin=tech_admin,
             slack_urls=_slack_urls(settings.setup_slack_webhooks_file),
+            membership_loader=lambda: load_membership(config, settings),
         )
 
     def ollama() -> Step:

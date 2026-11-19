@@ -35,6 +35,7 @@ class FakeForgejoAdmin:
         self.tokens: dict[str, str] = {token: admin_login}  # token -> login
         self.site_admins: set[str] = {admin_login}
         self.users: set[str] = {admin_login}
+        self.emails: dict[str, str] = {}  # login -> email; default <login>@example.com
         self.teams: dict[int, dict[str, Any]] = {}
         self.team_members: dict[int, list[str]] = {}
         self.team_repos: dict[int, list[str]] = {}
@@ -52,8 +53,12 @@ class FakeForgejoAdmin:
 
     # -- test setup ------------------------------------------------------------------------------
 
-    def add_user(self, login: str, token: str | None = None, *, site_admin: bool = False) -> None:
+    def add_user(
+        self, login: str, token: str | None = None, *, site_admin: bool = False, email: str | None = None
+    ) -> None:
         self.users.add(login)
+        if email is not None:
+            self.emails[login] = email
         if token is not None:
             self.tokens[token] = login
         if site_admin:
@@ -111,7 +116,8 @@ class FakeForgejoAdmin:
         return best
 
     def _user(self, login: str) -> dict[str, Any]:
-        return {"login": login, "id": abs(hash(login)) % 10**6, "is_admin": login in self.site_admins}
+        return {"login": login, "id": abs(hash(login)) % 10**6, "is_admin": login in self.site_admins,
+                "email": self.emails.get(login, f"{login}@example.com")}
 
     # -- request handling ------------------------------------------------------------------------
 
