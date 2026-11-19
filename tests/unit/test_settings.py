@@ -263,3 +263,25 @@ def test_public_url_shapes(monkeypatch, url, env, ok):
     else:
         with pytest.raises(ValidationError, match="KH_PUBLIC_URL must be an https URL without a path"):
             Settings()
+
+
+@pytest.mark.parametrize("value", ["0", "3600"])
+def test_config_watch_seconds_bounds(monkeypatch, value):
+    monkeypatch.setenv("KH_CONFIG_WATCH_SECONDS", value)
+    assert load_settings().config_watch_seconds == int(value)
+
+
+def test_config_watch_seconds_default_and_limit(monkeypatch):
+    assert load_settings().config_watch_seconds == 10
+    monkeypatch.setenv("KH_CONFIG_WATCH_SECONDS", "3601")
+    with pytest.raises(ValidationError):
+        load_settings()
+
+
+def test_public_url_http_still_refused(monkeypatch):
+    monkeypatch.setenv("KH_PUBLIC_URL", "http://x.test")
+    monkeypatch.setenv("KH_OIDC_ISSUER", "https://i.test")
+    monkeypatch.setenv("KH_OIDC_CLIENT_ID", "c")
+    monkeypatch.setenv("KH_OIDC_CLIENT_SECRET_FILE", "/s")
+    with pytest.raises(ValidationError, match="KH_PUBLIC_URL must be an https URL without a path"):
+        load_settings()

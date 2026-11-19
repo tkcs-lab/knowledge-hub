@@ -33,6 +33,7 @@ MAX_LABELS = 500
 MAX_TECH_DIRS = 20
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
+MAX_ADMINS = 50
 
 
 def _check_logins(logins: list[str], where: str) -> None:
@@ -152,6 +153,7 @@ class KhConfig(BaseModel):
     forgejo_web_url: str | None = None
     hub_url: str | None = None
     people: dict[str, str] = Field(default_factory=dict)
+    admins: list[str] = Field(default_factory=list)
     groups: dict[str, GroupConfig] = Field(default_factory=dict)
     labels: dict[str, str] = Field(default_factory=dict)
     archived_labels: list[str] = Field(default_factory=list)
@@ -205,6 +207,18 @@ class KhConfig(BaseModel):
             emails[low] = login
             normalised[login] = low
         self.people = normalised
+
+        if len(self.admins) > MAX_ADMINS:
+            raise ValueError(f"admins has more than {MAX_ADMINS} entries")
+        admin_seen: list[str] = []
+        for email in self.admins:
+            if email.count("@") != 1 or len(email) > MAX_EMAIL or not all(email.split("@")):
+                raise ValueError(f"admins entry {email!r} is not a valid email")
+            low = email.lower()
+            if low in admin_seen:
+                raise ValueError(f"admins lists {low} twice")
+            admin_seen.append(low)
+        self.admins = admin_seen
 
         names = set(self.groups)
         repos: dict[str, str] = {}
