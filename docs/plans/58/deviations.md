@@ -65,7 +65,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p15-oauth-routes
 
-- pending
+- None.
 
 ## p16-caller-wiring
 
