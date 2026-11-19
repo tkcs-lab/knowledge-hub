@@ -25,8 +25,15 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - Migration `0006_identity.sql`, applied by `kh migrate` or the postgres step of `kh setup apply`. `deploy/rollback-0006.sql` undoes it; run it before an older image is started.
 - `docs/runbook-identity.md`: sign-in, directory, hub keys and the move off PrivacyFence.
 
+- Admin panel: `kh panel serve [--port 8081]`, a separate process of the same image with sign-in through the panel's own OIDC client (`KH_PANEL_*`), five tabs (Groups, Labels, Repos, Pipeline, Health), Preview and Apply for every change of labels, groups, people and technical repos through the existing admin commands, per-group figures, and health checks. See the runbook, "Admin panel".
+- `admins` key in `kh.yaml`: lower-case emails of the panel's administrators (at most 50); not editable through the panel and ignored by the restart check.
+- `kh rebuild --repo R --queue`: queue the sync of one repo for the hub's worker instead of running it in the process.
+- `--if-sha256 HEX` on the admin commands (`kh label|group|person|repo`): refuse when `kh.yaml` changed since a preview; every command also checks the file again before it commits.
+- The `knowledge-hub-panel` service and its secrets in `deploy/compose.example.yaml`.
+
 ### Changed
 
+- `kh serve` and `kh directory sync --every` exit with code 75 when `kh.yaml` changes validly (a restart policy starts them again; set `KH_CONFIG_WATCH_SECONDS=0` to switch it off, default 10), so a change no longer needs a restart by hand. `/healthz` still answers `ok` and gains the header `X-KH-Config-Digest`. The drain on shutdown is 60 s.
 - `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
 - `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The replay table `kh.claim_jti` and function `kh.claim_seen` are dropped by migration 0006. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
 - `groups.<g>.approvers` may be empty when the group has directory approvers; `kh setup` reads the effective membership (static plus directory snapshot) and prints new `i account` and `! directory` lines; `kh daily` purges identity rows instead of claims; the metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`.

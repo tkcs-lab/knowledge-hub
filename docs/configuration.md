@@ -67,6 +67,7 @@ Read by `kh serve` (the view) and by `kh directory` and `kh setup`. The sync is 
 | Variable | Default | Meaning |
 |---|---|---|
 | `KH_CONFIG_FILE` | none | Path of `kh.yaml`. Without it the built-in defaults apply (no people, no groups). |
+| `KH_CONFIG_WATCH_SECONDS` | `10` | 0 to 3600. How often `kh serve` and `kh directory sync --every` read `kh.yaml` again; 0 switches the watch off. A valid change of anything but `admins` makes the process exit with code 75 after two polls in a row saw it (see "Commands"). An invalid file is logged once and the loaded config stays. |
 | `KH_FORGEJO_URL` | none | Forgejo base URL. The worker exists only when it is set. The Forgejo organisation is `org` in `kh.yaml`. |
 | `KH_FORGEJO_BOT_TOKEN_FILE` | none | Token of the `bot_login` account, used only to open `propose_doc` pull requests. |
 | `KH_FORGEJO_INDEXER_TOKEN_FILE` | none | Read-only token of the `indexer_login` account. Required when `KH_FORGEJO_URL` is set. |
@@ -82,6 +83,26 @@ Read by `kh serve` (the view) and by `kh directory` and `kh setup`. The sync is 
 | `KH_SETUP_SLACK_WEBHOOKS_FILE` | none | YAML file mapping group name to its Slack incoming-webhook URL (`https://`). Needed only for groups with `slack_channel`. |
 
 The `kh serve` service never mounts these files. The hub never holds admin credentials; `kh setup` does. The directory sync is a separate process with its own secret files (see "Directory").
+
+### Admin panel (`kh panel serve` only)
+
+`kh panel serve` reads `PanelSettings` (prefix `KH_PANEL_`; `KH_ENV` and `KH_CONFIG_FILE` are shared with the hub) and also the ordinary `KH_*` database and setup variables of the other commands. It never needs `KH_PUBLIC_URL` or `KH_OIDC_*`: those belong to the hub's own sign-in, and the panel has a client of its own. Secrets are files. A mistake exits 2 with one line; the first missing variable is named, in the order of the table, `KH_CONFIG_FILE` first.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KH_CONFIG_FILE` | none | Required. The `kh.yaml` the panel reads for `admins` and edits through the admin commands. |
+| `KH_PANEL_PUBLIC_URL` | none | `https://host` with no path; the panel's address and the base of the redirect URI `<url>/auth/callback`. `http://` only when `KH_ENV` is `dev` or `test` and the host is local. Required (`KH_PANEL_PUBLIC_URL must be an https URL without a path` for a bad value). The `Host` header of every request except `/healthz` must equal its host. |
+| `KH_PANEL_OIDC_ISSUER` | none | Issuer of the upstream OIDC provider (Google or Keycloak). Required. |
+| `KH_PANEL_OIDC_CLIENT_ID` | none | The panel's client id at that provider. Required. |
+| `KH_PANEL_OIDC_CLIENT_SECRET_FILE` | none | File with the client secret. Required. |
+| `KH_PANEL_OIDC_ALLOWED_DOMAINS` | empty | Comma list of lower-case email domains. Required. |
+| `KH_PANEL_OIDC_HOSTED_DOMAINS` | empty | Comma list; the ID token's `hd` must be in it. Required for the issuer host `accounts.google.com` (`KH_PANEL_OIDC_HOSTED_DOMAINS is required for a Google issuer`). |
+| `KH_PANEL_SESSION_KEY_FILE` | none | File with the key that signs the sign-in and session cookies; at least 32 bytes after stripping. Required. Not the OIDC client secret. |
+| `KH_PANEL_SESSION_HOURS` | `8` | 1 to 24: lifetime of the session cookie. |
+| `KH_PANEL_HUB_URL` | `http://knowledge-hub:8080` | Where the Health tab calls `/healthz` of the hub. |
+| `KH_PANEL_DEV_ADMIN` | none | An email that is always the administrator, with no sign-in; the other `KH_PANEL_*` sign-in variables become optional. Only with `KH_ENV` `dev` or `test` (`KH_PANEL_DEV_ADMIN is only allowed when KH_ENV is dev or test`). |
+
+The subprocesses of the panel get every `KH_*` variable except `KH_PANEL_*`, so the panel container also carries the credentials `kh check` and `kh setup plan` need; `deploy/compose.example.yaml` lists them.
 
 ### Embeddings
 
@@ -142,7 +163,8 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 
 | Command | Use |
 |---|---|
-| `kh serve [--port 8080]` | Run the HTTP app and the job worker. |
+| `kh serve [--port 8080]` | Run the HTTP app and the job worker. Exits with code 75 after finishing running requests and jobs (up to 60 s) when `kh.yaml` changes validly and `KH_CONFIG_WATCH_SECONDS` is above 0; the restart policy of the container starts it again. `/healthz` answers `ok` with the header `X-KH-Config-Digest`. |
+| `kh panel serve [--port 8081]` | Run the admin panel: sign-in, the five tabs and the write path through the admin commands. One process; see "Admin panel" in the runbook. Exit 2 on a settings error. |
 | `kh migrate` | Apply the pending migrations as `kh_migrator`. Refuses a database that predates the baseline. |
 | `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
 | `kh label add\|rename\|archive\|unarchive\|remove\|list` | Edit the labels of `kh.yaml` and apply the change; see `kh admin commands`. |
@@ -152,17 +174,17 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | `kh key create --group G [--tools t1,t2] --name N [--expires-days D] [--out FILE]` | Create a hub key (`khk_<id>.<secret>`) for one active group. Default tools `search,ingest_record`; `move_item` cannot be given. The key is shown once (or written to FILE, mode 0600). Errors, exit 1: `key: group <G> is not an active group`, `key: unknown tool <t>`, `key: tool <t> cannot be given to a key`, `key: name <N> is not valid`. |
 | `kh key list [--json]` | Tab-separated `id name group tools expires last_used status` (`active`, `expired` or `revoked`); never a secret. |
 | `kh key revoke ID` | Revoke a key; `key: <id> not found` exits 1. |
-| `kh directory sync [--once \| --every N] [--accept-change]` | Fetch the groups of the provider and store the snapshot. Exit 0, 1 (`directory: <provider>: <reason>`) or 3 (refused change: rerun with `--accept-change`). `--every` loops and logs errors; the previous snapshot stays. Run it as a separate service with its own secret files. |
+| `kh directory sync [--once \| --every N] [--accept-change]` | Fetch the groups of the provider and store the snapshot. Exit 0, 1 (`directory: <provider>: <reason>`) or 3 (refused change: rerun with `--accept-change`). `--every` loops and logs errors; the previous snapshot stays; it also reads `kh.yaml` after each sleep and exits with code 75 on a valid change (see `KH_CONFIG_WATCH_SECONDS`). Run it as a separate service with its own secret files. |
 | `kh directory plan` | Print group, person and skip counts and one `skip <group> <role> <who>: <reason>` line per skip; exit 1 when the snapshot is missing or stale. |
 | `kh directory people [--json]` | The effective people with `login`, `email`, `source` (`static` or `directory`), `groups` and `approver_of`. |
 | `kh directory show` | The provider and the snapshot's age and size, or `snapshot: none`. |
-| `kh rebuild [--repo R]` | Forget the indexed head and sync again. Idempotent. |
+| `kh rebuild [--repo R] [--queue]` | Forget the indexed head and sync again. Idempotent. With `--repo R --queue` (without `--repo` it exits 2) it only deletes the head and queues one `git_push` job, which the hub's own worker runs; it prints `queued rebuild of R`, or `rebuild of R is already queued` when a queued job, or a running one younger than an hour, exists. Needs neither Ollama nor the Forgejo token. |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>`). |
 | `kh daily` | Recompute `stale` flags, purge expired OAuth rows and stale flags and delete usage events past `KH_USAGE_RETENTION_DAYS`. |
 | `kh requeue-embeddings` | Queue an `embed_record` job for every record without chunks. |
 | `kh lint FILE...` | Offline frontmatter check, no settings or config needed; exit 1 on a problem. |
 
-Exit 2 means a settings or config error.
+Exit 2 means a settings or config error. Exit 75 of `kh serve` and `kh directory sync --every` is not an error: `kh.yaml` changed validly and the process leaves so that the container restarts it with the new file. The comparison ignores comments, formatting and `admins`, and a change must be seen on two polls in a row. Without a restart policy (`restart: unless-stopped` in the compose example) the process stays down.
 
 ## kh.yaml
 
@@ -184,6 +206,7 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `directory.refresh_seconds` | `300` | 60 to 3600: how often `kh directory sync --every` fetches. |
 | `directory.max_stale_seconds` | `21600` | At most 604800 and at least twice `refresh_seconds` (`config: directory.max_stale_seconds must be at least twice refresh_seconds`). A snapshot older than this is ignored: directory-derived groups disappear and static entries stay. |
 | `directory.shrink_guard_percent` | `50` | 1 to 99: `kh directory sync` refuses a snapshot with fewer than `100 - n` percent of the stored user count, or more than double it (from 10 users), unless `--accept-change`. |
+| `admins` | `[]` | Lower-cased emails of the people who may sign in to the admin panel: each has one `@` and at most 254 characters, no duplicates, at most 50 (`admins has more than 50 entries`, `admins entry '<x>' is not a valid email`, `admins lists <x> twice`). Not editable through the panel or the admin commands: edit the file by hand. Ignored by the restart check, so an edit of `admins` alone never restarts `kh serve`. An image without this key refuses the file, so every kh container needs the same image tag. |
 | `groups.<g>.repo` | `kb-<g>` | Repo name, `^[a-z0-9][a-z0-9._-]{0,99}$`, unique. Immutable once applied. |
 | `groups.<g>.members` | `[]` | Logins; each must be in `people` (`config: group <g> member <login> is not in people`). Members read and write. |
 | `groups.<g>.approvers` | required | Non-empty subset of `members` (`config: group <g> approver <login> is not a member`); may be empty only when some `directory.<p>.approvers` of the group is non-empty (otherwise `config: group <g> needs at least one approver`). With a `directory.<p>.members` list the check is made on the effective membership instead. Approvers merge. |
@@ -197,9 +220,9 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `tech_repos.<r>.labels` | `[]` | Labels put on every document of the repo; each must be a key of `labels`, none twice. A label archived later stays on the documents and is hidden. |
 | `tech_repos.<r>.dirs` | `[docs]` | Directories of the repo whose `.md` files are indexed, besides the root `CLAUDE.md` (always indexed). Each is a path relative to the repo root (`docs`, `docs/adr`): no leading or trailing `/`, no empty, `.` or dot-prefixed segment, letters, digits, `_`, `.`, `-`; 1 to 20 entries, none twice. A directory matches whole segments (`adr` covers `adr/a.md`, not `adr.md` or `notes/adr/a.md`). A directory removed from `dirs` loses its documents at the next sync. |
 
-Tech repo errors: `config: tech_repos needs tech_org`, `tech_org '<x>' is not a valid login`, `tech_org must differ from org`, `tech repo '<r>' is not a valid repository name`, `tech repo <r> is also the repo of group <g>`, `tech_repos needs the group all`, `tech_repos needs the group all to be active`, `tech repo <r> label '<x>' is not in labels`, `tech repo <r> lists label '<x>' twice`, `tech repo <r> needs at least one dir`, `tech repo <r> has more than 20 dirs`, `tech repo <r> dir '<x>' is not a valid directory`, `tech repo <r> lists dir '<x>' twice`. A change needs a `kh serve` restart.
+Tech repo errors: `config: tech_repos needs tech_org`, `tech_org '<x>' is not a valid login`, `tech_org must differ from org`, `tech repo '<r>' is not a valid repository name`, `tech repo <r> is also the repo of group <g>`, `tech_repos needs the group all`, `tech_repos needs the group all to be active`, `tech repo <r> label '<x>' is not in labels`, `tech repo <r> lists label '<x>' twice`, `tech repo <r> needs at least one dir`, `tech repo <r> has more than 20 dirs`, `tech repo <r> dir '<x>' is not a valid directory`, `tech repo <r> lists dir '<x>' twice`. A change restarts `kh serve` by itself (see `KH_CONFIG_WATCH_SECONDS`).
 
-The hub reads `archived` and `archived_labels` when `kh serve` starts, so changing either needs a restart.
+The hub reads `archived` and `archived_labels` when `kh serve` starts; changing either restarts it within `KH_CONFIG_WATCH_SECONDS` plus the debounce (a second poll), when the restart policy allows it.
 
 Group names match `^[a-z0-9][a-z0-9_-]{0,62}$`, are not `owners` in any case, and `<name>-approve` may not itself be a group name. Forgejo teams are derived: `<group>` (write on its repo) and `<group>-approve` (read on its repo, in the merge whitelist).
 
@@ -227,7 +250,7 @@ tech_repos:
     dirs: [docs, adr]
 ```
 
-The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart; directory changes do not (the snapshot is re-read every `KH_DIRECTORY_VIEW_SECONDS`). `deploy/kh.example.yaml` is the maintained example.
+The hub reads `kh.yaml` when `kh serve` starts, and `kh serve` exits with code 75 within `KH_CONFIG_WATCH_SECONDS` plus the debounce after a valid change to `people` or a group so that the container restarts it (set `KH_CONFIG_WATCH_SECONDS=0` to restart by hand instead); directory changes need no restart (the snapshot is re-read every `KH_DIRECTORY_VIEW_SECONDS`). `deploy/kh.example.yaml` is the maintained example.
 
 ## kh setup
 
@@ -271,7 +294,7 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 |---|---|---|
 | `kh label add NAME [-d TEXT]` | `labels[NAME] = TEXT` (default empty); error if it exists | runs the labels step |
 | `kh label rename NAME TEXT` | new description; the key never changes | runs the labels step |
-| `kh label archive NAME` / `unarchive NAME` | add to / remove from `archived_labels` | none (restart `kh serve`) |
+| `kh label archive NAME` / `unarchive NAME` | add to / remove from `archived_labels` | none (`kh serve` restarts itself) |
 | `kh label remove NAME` | delete from `labels` and `archived_labels`; refused while a tech repo lists the label | runs the labels step, then removes the label |
 | `kh label list [--json]` | none | none |
 | `kh group add NAME --members A,B --approvers A [--repo R] [--slack-channel #C]` | new group | runs the postgres and forgejo steps for that group |
@@ -285,8 +308,8 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 | `kh person list [--json]` | none | none |
 | `kh repo list [--json]` | none | none; prints `NAME  DIRS  LABELS` |
 | `kh repo add NAME [--dirs D1,D2] [--labels A,B]` | new entry under `tech_repos`; an omitted flag writes no key (default `dirs: [docs]`); needs `tech_org`; refused when the repo is not in the tech org (`! tech repo NAME: not in org <tech_org>; create the clone or fork there`, file unchanged) | runs the forgejo step for that repo (indexer read access, collaborators, tech webhook); needs `KH_FORGEJO_URL` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, or `--no-apply` followed by `kh setup apply` |
-| `kh repo set NAME [--dirs D1,D2] [--labels A,B]` | change `dirs` and/or `labels`; `--labels ""` clears the labels; at least one flag | none: restart `kh serve` first (its worker keeps the old config), then its first poll applies it, or run `kh rebuild --repo NAME` |
-| `kh repo remove NAME [--yes]` | delete the entry | deletes its T0a documents and indexed head (`- tech documents of NAME`); with documents it needs `--yes` and otherwise exits 2 with the count; `--no-apply` needs no `--yes` (`kh setup apply --prune` deletes later). The Forgejo repo is kept; restart `kh serve` at once |
+| `kh repo set NAME [--dirs D1,D2] [--labels A,B]` | change `dirs` and/or `labels`; `--labels ""` clears the labels; at least one flag | none: `kh serve` restarts itself (its worker keeps the old config until then), then its first poll applies it, or run `kh rebuild --repo NAME` |
+| `kh repo remove NAME [--yes]` | delete the entry | deletes its T0a documents and indexed head (`- tech documents of NAME`); with documents it needs `--yes` and otherwise exits 2 with the count; `--no-apply` needs no `--yes` (`kh setup apply --prune` deletes later). The Forgejo repo is kept; `kh serve` must restart at once (it does itself when the watch is on) |
 
 The commands do not edit `tech_org` or a group's `slack_channel` after creation: edit the file by hand, then run `kh setup apply`. There is no `group rename` and no email change for a person.
 
@@ -294,6 +317,8 @@ The commands do not edit `tech_org` or a group's `slack_channel` after creation:
 
 **Exit codes.** 0 done, 2 error, refusal or a remaining `!` line.
 
+**`--if-sha256 HEX`** (mutating commands; 64 lower-case hex digits, the SHA-256 of the file text). The command refuses with exit 2 and `admin: kh.yaml changed since the preview; preview again` when the file no longer has that hash. Whatever the flag, the file is read again right before the commit, and a command whose file changed in between stops with `admin: kh.yaml changed while the command ran; run it again`. The panel sends the hash it showed with Preview.
+
 **Stage, apply, commit.** A command stages the new text, validates it as `kh.yaml` and prints the diff. It then applies the change to the database and Forgejo while the old file is still in place, so a refusal at apply time (for example a group that still has records) leaves `kh.yaml` unchanged. Only then is the file replaced; if a later step fails, the file is already changed and `kh setup apply` repairs the rest.
 
-The commands run where `kh setup` runs, with the `KH_SETUP_*` credential files set, and `kh.yaml` must sit in a writable directory (the file is replaced atomically, so the directory must be writable, not only the file). Restart `kh serve` afterwards: the hub reads `kh.yaml` at start.
+The commands run where `kh setup` runs, with the `KH_SETUP_*` credential files set, and `kh.yaml` must sit in a writable directory (the file is replaced atomically, so the directory must be writable, not only the file). `kh serve` restarts itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce when the restart policy allows it; with the watch off, restart it by hand, because the hub reads `kh.yaml` at start.
