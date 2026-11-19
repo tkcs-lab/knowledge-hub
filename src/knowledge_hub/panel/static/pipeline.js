@@ -4,6 +4,19 @@ import { opForm, setConfigSha } from "/static/ops.js";
 const REFRESH_MS = 15000;
 let timer = null;
 let busy = 0;
+// Lives in the tab root, outside the body that every reload clears, so the last result survives.
+let notice = null;
+
+function setNotice(label, job) {
+  if (!notice) {
+    return;
+  }
+  clear(notice);
+  notice.appendChild(h("p", { class: "ok" }, `${label}: done`));
+  if (job && job.output) {
+    notice.appendChild(h("pre", { class: "op-output" }, job.output));
+  }
+}
 
 function age(seconds) {
   if (seconds === null || seconds === undefined) {
@@ -31,9 +44,15 @@ function action(op, fixed, label, reload, confirmText) {
     previewless: true,
     submitLabel: label,
     confirmText,
-    onApplied: reload,
+    onApplied: (job) => {
+      setNotice(label, job);
+      reload();
+    },
     onBusy: (on) => {
       busy += on ? 1 : -1;
+      if (on && notice) {
+        clear(notice);
+      }
     },
   }).form;
 }
@@ -144,7 +163,9 @@ window.panelTabs.pipeline = (root) => {
     clearInterval(timer);
     timer = null;
   }
+  notice = h("div", { class: "op-status", "aria-live": "polite" });
   const body = h("div", {});
+  root.appendChild(notice);
   root.appendChild(body);
   const load = async (initial) => {
     try {

@@ -163,3 +163,16 @@ def test_repo_set_omits_empty_dirs():
     text = _text("repos.js")
     assert re.search(r'name: "dirs"[^}]*omitEmpty: true', text)
     assert "splitList(dirs" not in text
+
+
+def test_pipeline_notice_survives_reload():
+    text = _text("pipeline.js")
+    # the notice is created in the tab root, next to (not inside) the body that render() clears
+    assert re.search(r"root\.appendChild\(notice\);\s*root\.appendChild\(body\)", text)
+    render = text[text.index("function render("):text.index("window.panelTabs")]
+    assert "notice" not in render
+    assert "clear(body)" in render and "clear(root)" not in render
+    # Apply copies the result into the notice before reloading; the next action clears it
+    assert re.search(r"onApplied: \(job\) => \{\s*setNotice\(label, job\);\s*reload\(\);", text)
+    assert re.search(r"if \(on && notice\) \{\s*clear\(notice\)", text)
+    assert "innerHTML" not in text
