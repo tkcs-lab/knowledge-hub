@@ -22,7 +22,7 @@ groups:
   all:
     repo: kb-all              # default: kb-<group>
     members: [alice, bob]
-    approvers: [alice]        # non-empty subset of members
+    approvers: [alice]        # subset of members; may be empty only when the group has directory approvers
 #     directory:              # references per provider; switching is `directory.provider` only
 #       google:   {members: [kh-all@example.com], approvers: [kh-all-approvers@example.com]}
 #       keycloak: {members: [kh-all], approvers: [kh-all-approvers]}

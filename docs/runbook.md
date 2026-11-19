@@ -1,29 +1,12 @@
 # Knowledge hub runbook
 
-For the operator. Names of variables and keys are in [configuration](configuration.md); the reasons behind the rules are in [design](design.md). Commands run as the `kh` user inside the container (or from the installed wheel), with the `KH_*` environment of the service (see `deploy/compose.example.yaml`). Identity (sign-in, directory, keys) has its own [runbook](runbook-identity.md). Secrets are files, never variables, and nothing in this document is a real secret or host.
-
-This is a breaking release for a fresh install only: a database that holds an older migration is refused (`database predates the baseline; a fresh install is required`).
+For the operator. Names of variables and keys are in [configuration](configuration.md); the reasons behind the rules are in [design](design.md). Commands run as the `kh` user inside the container (or from the installed wheel), with the `KH_*` environment of the service (see `deploy/compose.example.yaml`). Which container runs which command, and with which secrets, is in the [deployment guide](deployment.md), section "Where each command runs". Identity (sign-in, directory, keys) has its own [runbook](runbook-identity.md). Secrets are files, never variables, and nothing in this document is a real secret or host.
 
 Not run in the cloud, so yours to do and check by hand: the backup script's `pg_dump` (`deploy/backup-kh.sh`) and the first `kh setup` against a real Forgejo. Check both on the first deploy.
 
-## Install order
+## Install
 
-1. **Accounts.** In Forgejo create the organisation named by `org` in `kh.yaml` and two ordinary accounts, `bot_login` (default `kh-bot`) and `indexer_login` (default `kh-indexer`), neither an org owner nor a site admin. `kh setup` never creates users or tokens.
-2. **Secrets.** One file per secret under the secrets directory, named by the matching `*_FILE` variable: the three database passwords, the bot token, the indexer token (read only), the webhook secret `KH_WEBHOOK_HMAC_FILE`, the S3 access and secret key, `kh_cursor_key` and, for metrics, `kh_metrics_token`. For `kh setup` only: `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` (a site administrator's token) when setup should create the roles, `KH_SETUP_PG_ADMIN_DSN_FILE`, and, only when groups set `slack_channel`, `KH_SETUP_SLACK_WEBHOOKS_FILE`. The `kh serve` service never mounts those.
-3. **Write `kh.yaml`.** Start from `deploy/kh.example.yaml`: `people`, `groups`, `labels`, `hub_url`. Place the file in `./config/` next to the compose file (the compose file mounts that directory at `/etc/kh`).
-4. **Plan.** `kh setup plan --config config/kh.yaml`. Expect `+` lines and exit 1. Read every `!` line: it is a change the script will not make.
-5. **Apply.** `kh setup apply --config config/kh.yaml`. It creates the Postgres roles, database, extension and tables, groups and labels, the Forgejo teams, repos, branch protection and org webhook, and pulls the Ollama model. Run `kh setup plan` again and expect only `i` lines and exit 0. Without an admin DSN the `postgres` step only checks: create the roles and database yourself, then run `kh migrate`. The S3 bucket is only checked unless you pass `--create-bucket`.
-6. **Serve.** `kh serve` (the image does this). The worker starts only when `KH_FORGEJO_URL` is set. `/healthz` answers `ok`.
-7. **Ollama.** If `kh setup` cannot reach the model server (the `kh` network has no internet), pull the model once with a short-lived container on the default bridge network, writing to the same volume `kh-ollama-models`:
-
-   ```bash
-   docker run --rm -v kh-ollama-models:/root/.ollama --entrypoint sh ollama/ollama:0.40.16 \
-     -c 'ollama serve >/dev/null 2>&1 & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull bge-m3'
-   ```
-
-   Until the model is available embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. To measure speed: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second.
-8. **Index.** Put the first documents in each repo through pull requests (see "Changing T0"), or run `kh rebuild` once, then `kh check` and expect exit 0.
-9. **Identity.** Set up sign-in, the directory and hub keys as [runbook-identity](runbook-identity.md) says; Claude connects with OAuth and n8n workflows use hub keys.
+The install is in the [deployment guide](deployment.md), section "First deploy"; day-two work starts here.
 
 ## Sign-in, directory and keys
 
@@ -51,7 +34,7 @@ The admin panel is `kh panel serve`, a separate service of the same image (`know
 | Pipeline | The job counts, failed jobs and alerts. Rebuild a repo, Retry a failed job or every dead job, reclaim jobs stuck in `running`, requeue missing embeddings. |
 | Health | Checks for `config`, `database`, `migrations`, `hub`, `queue`, `alerts`, `indexed`, `embeddings` and `directory`, plus the buttons `setup plan` and `kh check`. |
 
-**How a change reaches the hub.** Every change has Preview (a dry run that shows the diff of `kh.yaml` and writes nothing) and Apply, which stays disabled until a Preview of the same values succeeded. The panel runs the same `kh label|group|person|repo` commands as the command line, one at a time. After a successful Apply the file has changed; within `KH_CONFIG_WATCH_SECONDS` plus the debounce (about 20 seconds with the default 10) `kh serve` finishes its running jobs and exits with code 75, the container restarts it, and the Health `hub` check turns ok again. While it shows `the hub runs an older kh.yaml than the one on disk` the restart is still pending. A change made only to `admins`, to comments or to formatting restarts nothing.
+**How a change reaches the hub.** Every change has Preview (a dry run that shows the diff of `kh.yaml` and writes nothing) and Apply, which stays disabled until a Preview of the same values succeeded. The panel runs the same `kh label|group|person|repo` commands as the command line, one at a time. After a successful Apply the file has changed; within `KH_CONFIG_WATCH_SECONDS` plus the debounce (about 20 seconds with the default 10) `kh serve` finishes its running jobs and exits with code 75, the container restarts it, and the Health `hub` check turns ok again. While it shows `the hub runs an older kh.yaml than the one on disk` the restart is still pending. A change made only to `admins`, to comments or to formatting restarts nothing. The directory sync service restarts itself the same way, but later: it polls the file once per sync interval and waits two polls, so one to two intervals (5 to 10 minutes at `--every 300`) after a valid change. The panel container does not mount `KH_SETUP_SLACK_WEBHOOKS_FILE` in the example: a change on a group that has `slack_channel` then ends with `! slack hook <repo>: no URL for group <g> in KH_SETUP_SLACK_WEBHOOKS_FILE` and exit 2 until you mount the file. The host directory of `./config` must be writable by the container user, because the panel writes a lock file and a temporary file next to `kh.yaml`.
 
 **When `kh.yaml` is invalid.** The panel fails closed: nobody counts as an administrator while the file is invalid, so requests answer 401 and the sign-in ends with 403 `panel unavailable: kh.yaml is invalid`. `kh serve` keeps serving the config it loaded and does not restart. Fix the file by hand, or with `kh label|group|person|repo` on the command line, then sign in again. Do not hand-edit `kh.yaml` while an operation runs: the command checks the file again before it writes and refuses with `admin: kh.yaml changed while the command ran; run it again` (the panel shows the text; run the operation again). Another change that runs at the same moment gives `Another change is running; try again in a minute`.
 
@@ -117,7 +100,7 @@ Nothing is deleted. To unarchive, remove the flag or the `archived_labels` entry
 
 ### Joiners and leavers
 
-Static people and groups live in `kh.yaml`; with `directory.provider` set, group membership comes from Google or Keycloak as well. For a joiner or leaver, change the group in the directory: directory access follows within about six minutes (the next sync plus the 30 second view reload; `kh directory sync --once` forces it) and Forgejo teams within about twenty-one (the next `kh setup apply --only forgejo`, normally a 15-minute timer), and no restart is needed. `kh person add LOGIN EMAIL`, `kh group member add GROUP LOGIN`, `kh group member remove GROUP LOGIN` and `kh person remove LOGIN --from-groups` still edit the static entries only; keep them for break-glass people and groups that have no directory reference, and expect `kh serve` to restart itself after such an edit (by hand when the watch is off). A person who was a static member stays one until the entry is removed. Also disable the Forgejo account if they leave the company, and see [runbook-identity](runbook-identity.md) for the directory.
+Static people and groups live in `kh.yaml`; with `directory.provider` set, group membership comes from Google or Keycloak as well. For a joiner or leaver, change the group in the directory: directory access follows within about six minutes (the next sync plus the 30 second view reload; `kh directory sync --once` forces it) and Forgejo teams within about twenty-one (the next `kh setup apply --only forgejo`, an operator-provided timer, see the [deployment guide](deployment.md), section "Scheduled jobs"), and no restart is needed. `kh person add LOGIN EMAIL`, `kh group member add GROUP LOGIN`, `kh group member remove GROUP LOGIN` and `kh person remove LOGIN --from-groups` still edit the static entries only; keep them for break-glass people and groups that have no directory reference, and expect `kh serve` to restart itself after such an edit (by hand when the watch is off). A person who was a static member stays one until the entry is removed. A directory person needs a Forgejo account whose login is the lower-case local part of their email and whose email equals the directory email; until then `kh setup plan` prints an `account` line (see [runbook-identity](runbook-identity.md)). Also disable the Forgejo account if they leave the company, and see [runbook-identity](runbook-identity.md) for the directory.
 
 ### When a person reads nothing
 
@@ -149,10 +132,6 @@ An n8n agent reads the usage log to find T3 records worth promoting to T0 and qu
 - Sensitive text can appear in queries. `KH_USAGE_LOG=false` switches logging off.
 - Usage events are not in the backup (`deploy/backup-kh.sh` dumps records only) and are rebuilt by waiting.
 - The metric `kh_usage_events_dropped_total` counts events dropped before they were stored (no pooled connection within 0.25 s, or a failed insert). A rising value means lost signal, never a failed tool call.
-
-### Live probe of ma1
-
-After the first deploy run the sandbox probe once: `kh setup plan` (expect `+` lines, exit 1), `kh setup apply`, `kh setup plan` again (only `i` lines, exit 0), then in Forgejo check Settings, Branches of a repo (direct push off, the merge whitelist is exactly `<group>-approve`, admins bound). Merge a `propose_doc` pull request as an approver and confirm the document appears in `search`; as a listed person confirm you read only your groups; a person whose sign-in email is not in `people` or in the directory must read nothing. Add a third group, run `apply` and confirm its team, repo and protection appear without changing the first two. Any `+`, `~` or `!` line after `apply` is a bug to report.
 
 ### Calibrating the search similarity floor
 
@@ -204,27 +183,16 @@ Refusals and what to do:
 
 A move is not a purge: the old repo's history, past usage queries and backups keep the old copy.
 
-### Rollout of move_item
-
-1. Deploy the new image and run `kh migrate` (prints `applied 0005_move_record.sql`).
-2. Restart `kh serve`. Workflows never call this tool, and a hub key cannot be given it.
-
-### Rollout of supersede and outdated
-
-1. Deploy the new image and run `kh migrate` (prints `applied 0003_supersede.sql`; it also applies `0002_usage_events.sql` when that is pending). It blanks every `blob_sha`.
-2. Run `kh rebuild` so every file is read again (chunks are matched by content, so nothing is embedded again), then `kh check`.
-3. Create hub keys again for workflows that should call `mark_record_outdated`.
-
-Between steps 1 and 2 `propose_doc` with a `base_blob` waits for the rebuild. Afterwards every document has a new `commit_sha`, `indexed_at` and `source_link`, once.
-
 ## Backup and restore
 
-Documents and chunks are rebuilt from Forgejo, groups and labels from `kh.yaml`, so only `kh.records` and the blob bucket need a backup. `deploy/backup-kh.sh` writes `kh-t2t3-<date>.dump` (custom format, INSERT statements) and mirrors the blob bucket into `<BACKUP_DIR>/blobs/`. Back both up off the box (restic).
+Documents and chunks are rebuilt from Forgejo, groups and labels from `kh.yaml`, the directory snapshot by the next sync. `deploy/backup-kh.sh` writes `kh-t2t3-<date>.dump` (custom format, INSERT statements) of `kh.records` and mirrors the blob bucket into `<BACKUP_DIR>/blobs/`; back both up off the box (restic).
 
-1. Start with an empty database: run `kh setup apply` (or create the roles and run `kh migrate`), so the schema, groups and labels exist.
+**Not in the backup and not rebuildable.** `kh.api_keys`: every hub key is lost; create the keys again with `kh key create` and switch every n8n credential. `kh.oauth_*`: every Claude connector signs in again. `kh.record_moves`: do not re-send a record that was moved, because a re-sent record is accepted again. `kh.usage_events`: lost.
+
+1. Start with an empty database: run `kh setup apply --only postgres --config kh.yaml` when `directory.provider` is set (a plain apply ends with `! directory: snapshot missing` and exit 2), which creates the roles, the database, the schema and the groups; otherwise `kh setup apply --config kh.yaml` (or create the roles and run `kh migrate`), which also creates the labels.
 2. As the Postgres superuser restore the records: `pg_restore --no-owner -d kh kh-t2t3-<date>.dump` (INSERT format, so RLS does not block it).
 3. Copy the blobs back: `aws s3 sync "<BACKUP_DIR>/blobs/" s3://<bucket> --endpoint-url <endpoint>`.
-4. Run `kh setup apply`, then `kh rebuild` for the git-derived tables.
+4. If `directory.provider` is set run `kh directory sync --once`, then `kh setup apply --config kh.yaml`, then `kh rebuild` for the git-derived tables.
 5. Run `kh requeue-embeddings`: chunks are not in the dump, so this is required after every restore.
 6. Run `kh check` and expect exit 0, then `search` for a restored record.
 
@@ -255,7 +223,7 @@ Releases follow the `/tld:release` skill. The version lives only in `src/knowled
 3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes the image to GHCR by digest only.
 4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The release carries the wheel `knowledge_hub-X.Y.Z-py3-none-any.whl`, `SHA256SUMS` and `deploy/kh.example.yaml`.
 5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.
-6. To roll out, update the image in the compose repo, pin the digest and deploy as usual. Without Docker: `pip install knowledge_hub-X.Y.Z-py3-none-any.whl`, then `kh setup plan --config kh.yaml`.
+6. To roll out, follow [deployment guide](deployment.md), section "Upgrade".
 
 The change to `.github/workflows/release.yml` that builds and attaches the wheel is a protected path: it reaches `main` as a protected-change pull request, reviewed and merged by a person.
 
@@ -266,3 +234,4 @@ The change to `.github/workflows/release.yml` that builds and attaches the wheel
 - **Zero required approvals.** The approver must review the final diff.
 - **Scan timing.** Exact vector scans take time in proportion to the number of hidden rows.
 - **Per-process limits.** The rate limiter is not shared between processes.
+- **Backups omit hub keys, OAuth state and move tombstones.** See "Backup and restore"; the dump holds `kh.records` only.

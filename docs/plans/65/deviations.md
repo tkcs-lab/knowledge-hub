@@ -1,0 +1,31 @@
+# Deviations: docs-refresh
+
+Written by the implement orchestrator after each phase merge; workers never edit this file.
+Every deviation from the plan is listed under its phase. "None." means the phase followed the plan.
+
+## p1-deployment-guide
+
+- None.
+- review: Final review found kh group, person and repo wrongly listed with the migrator-only commands in the command table; fix-1 moved them next to kh setup (setup Forgejo admin token required) and fixed four smaller wording and --config issues in the deployment guide and runbook restore steps.
+
+## p1b-example-files
+
+- None.
+- gate: Release 0.6.0 was cut on main after the plan was written; by the owner's decision (board ask) a revision worker set the compose image tags and the inspect comment to 0.6.0 and removed the 'first release after 0.5.1' warning comment.
+
+## p2-runbooks
+
+- worker: Kept a short '## Install' heading above the pointer paragraph that replaces the install order section (the brief did not say).
+
+## p3-reference-retire
+
+- gate: Release 0.6.0 was cut on main after the plan was written: [Unreleased] was empty, so the owner chose to adapt. Steps 15 and 17 (move the second Added block, 33 bullets) were dropped; the 0.6.0 section is untouched and only the Documentation bullet is added under a new ### Changed in [Unreleased] (1 bullet, not 33).
+
+## Final review
+
+- final: The command table of docs/deployment.md grouped kh group, person and repo with kh migrate (migrator only); they build the setup forgejo step and need the setup Forgejo admin token, so they belong with kh setup. Fixed by fix-1.
+- scope: docs/runbook.md: fix-1 also edited the runbook restore steps (wording and --config) for non-blocking review findings 4 and 5; accepted.
+
+## Finishing
+
+- review: Scope disposition: the only drift is docs/runbook.md in fix-1 (a runbook restore-step fix the first final review asked for), accepted as merged. The full pytest run fails here (15 failed, 699 errors) because the container's Postgres lacks the pgvector extension; the diff changes no code, test or workflow, so the result equals main's.
