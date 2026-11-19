@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     forgejo_indexer_token_file: Path | None = None
     tech_poll_minutes: int = Field(60, ge=0, le=10080)
     webhook_hmac_file: Path | None = None
+    config_watch_seconds: int = Field(10, ge=0, le=3600)
 
     embed_provider: Literal["ollama", "http", "fake"] = "ollama"
     ollama_url: str | None = None
@@ -143,23 +144,7 @@ class Settings(BaseSettings):
         return self
 
     def _check_public_url(self, url: str) -> None:
-        msg = "KH_PUBLIC_URL must be an https URL without a path"
-        try:
-            parts = urlsplit(url)
-            host = parts.hostname
-            parts.port  # noqa: B018 - raises on a bad port
-        except ValueError as exc:
-            raise ValueError(msg) from exc
-        if not host or parts.username is not None or parts.password is not None or "@" in parts.netloc:
-            raise ValueError(msg)
-        if parts.path or parts.query or parts.fragment or url.endswith(("/", "?", "#")):
-            raise ValueError(msg)
-        if parts.scheme == "https":
-            return
-        loopback = host in ("localhost", "127.0.0.1", "::1")
-        if parts.scheme == "http" and loopback and self.env in ("dev", "test"):
-            return
-        raise ValueError(msg)
+        check_public_url(url, self.env, "KH_PUBLIC_URL")
 
     @property
     def oauth_enabled(self) -> bool:
@@ -200,6 +185,26 @@ class Settings(BaseSettings):
         if password_file is not None:
             parts["password"] = password_file.read_text().strip()
         return " ".join(f"{k}={_quote(v)}" for k, v in parts.items())
+
+
+def check_public_url(url: str, env: str, name: str) -> None:
+    msg = f"{name} must be an https URL without a path"
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        parts.port  # noqa: B018 - raises on a bad port
+    except ValueError as exc:
+        raise ValueError(msg) from exc
+    if not host or parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise ValueError(msg)
+    if parts.path or parts.query or parts.fragment or url.endswith(("/", "?", "#")):
+        raise ValueError(msg)
+    if parts.scheme == "https":
+        return
+    loopback = host in ("localhost", "127.0.0.1", "::1")
+    if parts.scheme == "http" and loopback and env in ("dev", "test"):
+        return
+    raise ValueError(msg)
 
 
 def _csv(value: str) -> tuple[str, ...]:

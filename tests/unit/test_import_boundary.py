@@ -34,3 +34,28 @@ def test_app_import_leaves_directory_sync_code_out():
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_app_import_leaves_panel_out():
+    code = (
+        "import sys, knowledge_hub.app\n"
+        "bad = [m for m in sys.modules if m == 'knowledge_hub.panel' "
+        "or m.startswith('knowledge_hub.panel.')]\n"
+        "print(','.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_panel_app_import_leaves_hub_code_out():
+    code = (
+        "import sys, knowledge_hub.panel.app\n"
+        "bad = [m for m in sys.modules if m == 'knowledge_hub.app' or m == 'knowledge_hub.mcp' "
+        "or m.startswith('knowledge_hub.mcp.') or m == 'knowledge_hub.admin' "
+        "or m.startswith('knowledge_hub.admin.') or m == 'ruamel' or m.startswith('ruamel.')]\n"
+        "print(','.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr

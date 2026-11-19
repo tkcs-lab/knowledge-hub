@@ -35,7 +35,7 @@ version = {attr = "knowledge_hub.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-knowledge_hub = ["migrations/*.sql"]
+knowledge_hub = ["migrations/*.sql", "panel/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

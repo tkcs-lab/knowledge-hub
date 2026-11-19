@@ -408,3 +408,15 @@ def test_tech_dirs_rejections():
     for bad in ["", "/docs", "docs/", "../x", ".github", "docs//x"]:
         dirs_refused([bad], f"config: tech repo r dir {bad!r} is not a valid directory")
     dirs_refused(["docs", "docs"], "config: tech repo r lists dir 'docs' twice")
+
+
+def test_admins_lowercased_and_optional():
+    assert cfg(admins=["Ann@Example.com", "b@x.io"]).admins == ["ann@example.com", "b@x.io"]
+    assert cfg().admins == []
+
+
+def test_admins_refused():
+    refused({"admins": ["a@x.io", "A@X.io"]}, "admins lists a@x.io twice")
+    refused({"admins": ["nope"]}, "admins entry 'nope' is not a valid email")
+    refused({"admins": ["a@"]}, "is not a valid email")
+    refused({"admins": [f"a{i}@x.io" for i in range(51)]}, "admins has more than 50 entries")

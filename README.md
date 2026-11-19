@@ -46,12 +46,13 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | Command | Use |
 |---|---|
 | `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
+| `kh panel serve` | Run the admin panel (sign-in with `admins` in `kh.yaml`; labels, groups, repos, pipeline and health). |
 | `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
 | `kh label`, `kh group`, `kh person`, `kh repo` | Manage `kh.yaml` and apply the change. |
 | `kh key` | Create, list and revoke hub keys for workflows (`create`, `list`, `revoke`). |
 | `kh directory` | Sync the directory snapshot and inspect it (`sync`, `plan`, `people`, `show`). |
-| `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo). |
+| `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo; `--repo R --queue` only queues the sync job for the hub's worker). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
 | `kh daily` | Recompute stale flags, purge expired OAuth rows and delete usage events past the retention. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
@@ -62,4 +63,5 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 - [Design](docs/design.md): tiers, trust, the access model, schema, search and rejected alternatives.
 - [Configuration](docs/configuration.md): every `KH_*` variable, every `kh.yaml` key, `kh setup`.
 - [Runbook](docs/runbook.md): install order, routine tasks, alerts, restore, rotation and releasing.
+- [Admin panel](docs/runbook.md#admin-panel): first start, the five tabs, how a change reaches the hub and what to do when something fails.
 - [Identity runbook](docs/runbook-identity.md): sign-in, the directory, hub keys and the move to them.

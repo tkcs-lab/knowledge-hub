@@ -186,6 +186,24 @@ async def test_run_every_waits_and_logs_refusal(caplog):
     assert len(refused) == 2 and all(r.levelno == logging.ERROR for r in refused)
 
 
+async def test_run_every_returns_restart_code_when_watcher_fires():
+    waits = []
+    polls = iter([False, False, True])
+
+    class Watcher:
+        def poll(self):
+            return next(polls)
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    code = await sync.run_every(
+        cfg(), None, FakeProvider(fetch_of(1)), FakePool(), interval=5, accept_change=False,
+        sleep=sleep, watcher=Watcher(),
+    )  # fmt: skip
+    assert code == 75 and waits == [5, 5, 5]
+
+
 async def test_run_every_survives_provider_error(caplog):
     pool = FakePool()
     calls = []
@@ -360,3 +378,41 @@ def test_every_out_of_range_is_a_usage_error(env):
     with pytest.raises(SystemExit) as exc:
         cli.main(["directory", "sync", "--every", "5"])
     assert exc.value.code == 2
+
+
+class _FakePool:
+    async def open(self):
+        pass
+
+    async def close(self):
+        pass
+
+
+class _FakeProvider:
+    name = "fake"
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.parametrize(("seconds", "watched"), [(0, False), (10, True)])
+def test_every_builds_a_watcher_only_when_config_watch_is_on(env, monkeypatch, seconds, watched):
+    config = cfg("keycloak")
+    monkeypatch.setattr(
+        dcli,
+        "load_settings",
+        lambda: type("S", (), {"config_file": "x", "config_watch_seconds": seconds})(),
+    )
+    monkeypatch.setattr(dcli, "load_config", lambda path: config)
+    monkeypatch.setattr("knowledge_hub.db.pool.make_indexer_pool", lambda settings: _FakePool())
+    monkeypatch.setattr("knowledge_hub.directory.provider.build_provider", lambda n, s, **k: _FakeProvider())
+    monkeypatch.setattr("knowledge_hub.config_watch.ConfigWatcher", lambda path, c: "watcher")
+    seen = {}
+
+    async def fake_run_every(*args, **kwargs):
+        seen["watcher"] = kwargs["watcher"]
+        return 0
+
+    monkeypatch.setattr("knowledge_hub.directory.sync.run_every", fake_run_every)
+    assert cli.main(["directory", "sync", "--every", "60"]) == 0
+    assert seen["watcher"] == ("watcher" if watched else None)

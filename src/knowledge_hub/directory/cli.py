@@ -38,6 +38,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _sync(settings: Settings, config: KhConfig, args: argparse.Namespace) -> int:
+    from knowledge_hub.config_watch import ConfigWatcher
     from knowledge_hub.db.pool import make_indexer_pool
     from knowledge_hub.directory.provider import ProviderError, build_provider
     from knowledge_hub.directory.sync import ChangeRefused, run_every, sync_once
@@ -55,15 +56,18 @@ async def _sync(settings: Settings, config: KhConfig, args: argparse.Namespace) 
     await pool.open()
     try:
         if args.every is not None:
-            await run_every(
+            watcher = None
+            if settings.config_file is not None and settings.config_watch_seconds > 0:
+                watcher = ConfigWatcher(settings.config_file, config)
+            return await run_every(
                 config,
                 settings,
                 provider,
                 pool,
                 interval=args.every,
                 accept_change=args.accept_change,
+                watcher=watcher,
             )
-            return 0
         try:
             await sync_once(config, settings, provider, pool, accept_change=args.accept_change)
         except ChangeRefused as exc:

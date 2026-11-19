@@ -1,4 +1,6 @@
 # Secrets are files under /run/secrets; this file holds no secret value.
+# Every kh container (knowledge-hub, -directory, -panel) must run the same image tag.
+# `kh serve` exits with code 75 when kh.yaml changes; `restart: unless-stopped` brings it back.
 services:
   knowledge-hub:
     # The release image (linux/arm64). Pin the digest in the stack:
@@ -89,6 +91,74 @@ services:
     volumes:
       - ./config:/etc/kh:ro
 
+  # The admin panel. Publish it only to a private network or behind an access proxy: there is no
+  # `ports:` entry on purpose. Only the emails in `admins:` of kh.yaml may sign in.
+  knowledge-hub-panel:
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0   # the same image and tag as knowledge-hub
+    restart: unless-stopped
+    command: ["panel", "serve", "--port", "8081"]
+    networks: [db, kh, egress]   # egress only for the sign-in issuer: restrict it to the issuer's hosts by name
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      KH_ENV: prod
+      # The variables `kh check` and `kh setup plan` need (run by the panel as subprocesses):
+      # KH_DB_*, KH_CONFIG_FILE, KH_FORGEJO_*, KH_WEBHOOK_HMAC_FILE, KH_EMBED_PROVIDER, KH_OLLAMA_URL,
+      # KH_S3_*, KH_CURSOR_KEY_FILE and KH_SETUP_*.
+      KH_DB_HOST: postgres
+      KH_DB_NAME: kh
+      KH_DB_MIGRATOR_PASSWORD_FILE: /run/secrets/pg_kh_migrator
+      KH_DB_APP_PASSWORD_FILE: /run/secrets/pg_kh_app
+      KH_DB_INDEXER_PASSWORD_FILE: /run/secrets/pg_kh_indexer
+      KH_CONFIG_FILE: /etc/kh/kh.yaml
+      KH_FORGEJO_URL: "http://forgejo:3000"
+      KH_FORGEJO_BOT_TOKEN_FILE: /run/secrets/kh_hub_bot_token
+      KH_FORGEJO_INDEXER_TOKEN_FILE: /run/secrets/kh_indexer_token
+      KH_WEBHOOK_HMAC_FILE: /run/secrets/kh_webhook_hmac
+      KH_EMBED_PROVIDER: ollama
+      KH_OLLAMA_URL: "http://ollama:11434"
+      KH_S3_ENDPOINT: "http://garage:3900"
+      KH_S3_BUCKET: kh-blobs
+      KH_S3_ACCESS_KEY_FILE: /run/secrets/kh_s3_access_key
+      KH_S3_SECRET_KEY_FILE: /run/secrets/kh_s3_secret_key
+      KH_CURSOR_KEY_FILE: /run/secrets/kh_cursor_key
+      KH_SETUP_PG_ADMIN_DSN_FILE: /run/secrets/kh_setup_pg_admin_dsn
+      KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE: /run/secrets/kh_setup_forgejo_admin_token
+      # The panel's own sign-in (not KH_PUBLIC_URL or KH_OIDC_*, which belong to the hub).
+      KH_PANEL_PUBLIC_URL: "https://kh-admin.example.com"
+      KH_PANEL_OIDC_ISSUER: "https://accounts.google.com"
+      KH_PANEL_OIDC_CLIENT_ID: "example-panel-client-id.apps.example.com"
+      KH_PANEL_OIDC_CLIENT_SECRET_FILE: /run/secrets/kh_panel_oidc_client_secret
+      KH_PANEL_OIDC_ALLOWED_DOMAINS: "example.com"
+      KH_PANEL_OIDC_HOSTED_DOMAINS: "example.com"
+      KH_PANEL_SESSION_KEY_FILE: /run/secrets/kh_panel_session_key
+      KH_PANEL_HUB_URL: "http://knowledge-hub:8080"
+    secrets:
+      - pg_kh_migrator
+      - pg_kh_app
+      - pg_kh_indexer
+      - kh_hub_bot_token
+      - kh_indexer_token
+      - kh_webhook_hmac
+      - kh_s3_access_key
+      - kh_s3_secret_key
+      - kh_cursor_key
+      - kh_setup_pg_admin_dsn
+      - kh_setup_forgejo_admin_token
+      - kh_panel_oidc_client_secret
+      - kh_panel_session_key
+    volumes:
+      # Read-write and a directory: the commit renames a file and keeps a lock file next to it.
+      - ./config:/etc/kh
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=3).read().strip()==b'ok' else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   # Embeddings for bge-m3 on CPU. The `kh` network has no internet access, so `ollama pull` cannot run
   # here: pull the model once with a short-lived container (docs/runbook.md, install step 5).
   ollama:
@@ -128,3 +198,7 @@ secrets:
   kh_oidc_client_secret: {file: /etc/stack-secrets/kh_oidc_client_secret}
   kh_directory_google_key: {file: /etc/stack-secrets/kh_directory_google_key}
   kh_directory_keycloak_secret: {file: /etc/stack-secrets/kh_directory_keycloak_secret}
+  kh_setup_pg_admin_dsn: {file: /etc/stack-secrets/kh_setup_pg_admin_dsn}
+  kh_setup_forgejo_admin_token: {file: /etc/stack-secrets/kh_setup_forgejo_admin_token}
+  kh_panel_oidc_client_secret: {file: /etc/stack-secrets/kh_panel_oidc_client_secret}
+  kh_panel_session_key: {file: /etc/stack-secrets/kh_panel_session_key}

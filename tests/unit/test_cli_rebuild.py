@@ -119,3 +119,39 @@ def test_unknown_command_exits_2():
     with pytest.raises(SystemExit) as exc:
         cli.main(["frobnicate"])
     assert exc.value.code == 2
+
+
+def _queue_config(stubs):
+    from knowledge_hub.config import parse_config
+
+    stubs.deps.config = parse_config(
+        {"groups": {"all": {"members": ["a"], "approvers": ["a"]}}, "people": {"a": "a@x.test"}}
+    )
+
+
+def test_rebuild_queue_needs_repo(stubs, capsys):
+    assert cli.main(["rebuild", "--queue"]) == 2
+    assert "kh rebuild --queue needs --repo" in capsys.readouterr().out
+
+
+def test_rebuild_queue_queues_job(monkeypatch, stubs, capsys):
+    from knowledge_hub.jobs import rebuild_queue as queue_mod
+
+    _queue_config(stubs)
+    results = iter([True, False])
+
+    async def queue_rebuild(pool, repo):
+        stubs.calls.append((pool, repo))
+        return next(results)
+
+    monkeypatch.setattr(queue_mod, "queue_rebuild", queue_rebuild)
+    assert cli.main(["rebuild", "--queue", "--repo", "kb-all"]) == 0
+    assert cli.main(["rebuild", "--queue", "--repo", "kb-all"]) == 0
+    assert stubs.calls == [("pool", "kb-all")] * 2
+    assert capsys.readouterr().out == "queued rebuild of kb-all\nrebuild of kb-all is already queued\n"
+
+
+def test_rebuild_queue_unknown_repo_exits_2(stubs, capsys):
+    _queue_config(stubs)
+    assert cli.main(["rebuild", "--queue", "--repo", "kb-x"]) == 2
+    assert "repo kb-x is in no group" in capsys.readouterr().err
