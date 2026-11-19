@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from knowledge_hub.auth.claims import Caller, resolve_audiences
+from knowledge_hub.auth.claims import Caller
 from knowledge_hub.config import GroupConfig, KhConfig
 
 KH_CONFIG = KhConfig(
@@ -23,7 +23,7 @@ KH_CONFIG = KhConfig(
 
 def _person(login: str) -> Caller:
     email = KH_CONFIG.people[login]
-    audiences = resolve_audiences(KH_CONFIG, "claude_client", email, [])
+    audiences = KH_CONFIG.audiences_for_email(email)
     return Caller(sub=login, principal_type="claude_client", email=email, audiences=audiences, token_id=None)
 
 
@@ -36,7 +36,7 @@ wf_token = Caller(
     sub="n8n-token:t1",
     principal_type="n8n_workflow",
     email=None,
-    audiences=resolve_audiences(KH_CONFIG, "n8n_workflow", None, ["all"]),
+    audiences=frozenset({"all"}),
     token_id=None,
 )
 

@@ -11,11 +11,8 @@ import threading
 TOOL_OUTCOMES = frozenset({"ok", "error", "internal", "rate_limited"})
 REJECTION_CODES = frozenset(
     {
-        "bad_body", "batch_not_allowed", "malformed", "unknown_key", "bad_algorithm", "bad_type",
-        "bad_signature", "bad_audience", "bad_issuer", "expired", "not_yet_valid", "bad_lifetime",
-        "bad_version", "bad_principal_type", "request_required", "request_mismatch",
-        "request_unexpected", "replayed", "bad_audience_name", "bad_content_length", "disconnected",
-        "human_refused", "missing_header", "service_tool_call", "too_large",
+        "bearer_unknown", "bearer_resource", "missing_credentials", "bad_body", "bad_content_length",
+        "too_large", "disconnected",
     }
 )  # fmt: skip
 WEBHOOK_RESULTS = frozenset({"queued", "ignored", "bad_signature", "bad_request", "too_large"})
@@ -49,7 +46,7 @@ class Metrics:
             acc[0] += seconds
             acc[1] += 1
 
-    def claim_rejection(self, code: str) -> None:
+    def auth_rejection(self, code: str) -> None:
         code = code if code in REJECTION_CODES else "other"
         with self._lock:
             self._rejections[code] = self._rejections.get(code, 0) + 1
@@ -90,10 +87,10 @@ class Metrics:
             [(f'kh_tool_calls_total{{tool="{_escape(t)}",outcome="{o}"}}', n) for (t, o), n in calls],
         )
         block(
-            "kh_claim_rejections_total",
+            "kh_auth_rejections_total",
             "counter",
-            "Rejected identity claims by reason code.",
-            [(f'kh_claim_rejections_total{{code="{c}"}}', n) for c, n in rejections],
+            "Refused requests by reason.",
+            [(f'kh_auth_rejections_total{{code="{c}"}}', n) for c, n in rejections],
         )
         block(
             "kh_webhook_events_total",

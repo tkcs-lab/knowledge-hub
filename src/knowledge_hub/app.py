@@ -1,4 +1,4 @@
-"""The HTTP application: ``/mcp`` behind the claim middleware, ``/healthz``, the webhook, ``/metrics``."""
+"""The HTTP application: ``/mcp`` behind the caller middleware, ``/healthz``, the webhook, ``/metrics``."""
 
 import asyncio
 import contextlib
@@ -13,9 +13,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
-from knowledge_hub.auth.claims import ClaimMiddleware
-from knowledge_hub.auth.pf_claim_verify import ClaimVerifier
-from knowledge_hub.auth.replay import PgReplayCache
+from knowledge_hub.auth.middleware import CallerMiddleware
 from knowledge_hub.indexer.webhook import make_webhook_endpoint
 from knowledge_hub.mcp.server import Deps, build_mcp
 from knowledge_hub.metrics import JOB_STATES, METRICS
@@ -57,7 +55,7 @@ def make_metrics_endpoint(settings: Settings, deps: Deps):
     return metrics
 
 
-def build_app(settings: Settings, deps: Deps, verifier: ClaimVerifier) -> Starlette:
+def build_app(settings: Settings, deps: Deps) -> Starlette:
     """Root app. The caller opens ``deps.app_pool`` before the first request."""
     mcp = build_mcp(deps)
     sdk_app = mcp.streamable_http_app(
@@ -80,8 +78,8 @@ def build_app(settings: Settings, deps: Deps, verifier: ClaimVerifier) -> Starle
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        holder["middleware"] = ClaimMiddleware(
-            mcp_handler, verifier, settings, PgReplayCache(deps.app_pool), config=deps.config
+        holder["middleware"] = CallerMiddleware(
+            mcp_handler, deps.bearer, settings, config=deps.config
         )
         task = asyncio.create_task(deps.worker.run_forever()) if deps.worker is not None else None
         try:

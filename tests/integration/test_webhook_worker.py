@@ -20,7 +20,6 @@ from knowledge_hub.indexer.worker import MAX_ATTEMPTS, Worker
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.metrics import METRICS
 from tests.support.blobs import MemoryBlobStore
-from tests.support.claims import verifier_for_tests
 from tests.support.forgejo_fake import FakeForgejo, md
 from tests.support.principals import KH_CONFIG
 
@@ -64,7 +63,7 @@ def deps(hook_settings, kh_config, app_pool, indexer_pool):
 
 @pytest.fixture
 async def http(hook_settings, deps):
-    app = build_app(hook_settings, deps, verifier_for_tests())
+    app = build_app(hook_settings, deps)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as client:
         yield client
 
@@ -110,7 +109,7 @@ async def test_missing_signature_header_is_refused(world, http):
 async def test_no_secret_file_refuses_everything(world, hook_settings, deps):
     settings = hook_settings.model_copy(update={"webhook_hmac_file": None})
     deps = replace(deps, settings=settings)
-    app = build_app(settings, deps, verifier_for_tests())
+    app = build_app(settings, deps)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as c:
         assert (await post(c, push())).status_code == 401
 
@@ -400,7 +399,7 @@ def tech_push(repo=TECH_REPO, ref="refs/heads/trunk", default="trunk", org="kh-t
 @pytest.fixture
 async def tech_http(hook_settings, app_pool, indexer_pool):
     tech = Deps(settings=hook_settings, config=TECH_CONFIG, app_pool=app_pool, indexer_pool=indexer_pool)
-    app = build_app(hook_settings, tech, verifier_for_tests())
+    app = build_app(hook_settings, tech)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as client:
         yield client
 
