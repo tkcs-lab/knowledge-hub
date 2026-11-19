@@ -100,14 +100,15 @@ A mounted secret file must exist, or compose fails to start the service. For the
 | Command | Container | Database role | Extra secrets |
 |---|---|---|---|
 | `kh serve`, `kh rebuild` (also `--queue`), `kh check`, `kh daily`, `kh requeue-embeddings` | `knowledge-hub` | app and indexer | none; needs `KH_OLLAMA_URL` (with `KH_EMBED_PROVIDER=ollama`) and, with `KH_FORGEJO_URL`, the indexer token; `--queue` needs no answering server |
-| `kh migrate`, `kh label\|group\|person\|repo` | one with the migrator password | migrator | none |
+| `kh migrate`, `kh label` | one with the migrator password | migrator | none |
+| `kh group\|person\|repo` | one-off container or the panel container (like `kh setup`) | migrator | setup Forgejo admin token (required: they run the setup forgejo step); setup Postgres admin DSN not needed; Slack webhooks file (when a group has `slack_channel`) |
 | `kh setup` | one-off container or the panel container | migrator | setup Forgejo admin token (required), setup Postgres admin DSN (optional), Slack webhooks file (when a group has `slack_channel`) |
 | `kh key create\|list\|revoke`, `kh directory plan\|people\|show` | `knowledge-hub` (it has the migrator password) | migrator | none |
 | `kh directory sync` | `knowledge-hub-directory` | indexer | the directory credential; needs migration 0006 and the role `kh_indexer` |
 | `kh panel serve` | `knowledge-hub-panel` | indexer (statistics, health reads, pipeline operations) and migrator (the `migrations` health check); its subprocesses use migrator plus the Forgejo admin token (admin commands, `setup plan`) and app plus indexer (`kh check`) | the example mounts both setup secrets, not the Slack file |
 | `kh lint` | anywhere | none | none |
 
-`kh setup` needs secrets the `knowledge-hub` service never mounts (the setup Postgres admin DSN and the setup Forgejo admin token), so it runs in a one-off container or in the panel container.
+`kh setup` and `kh group|person|repo` need the setup Forgejo admin token (and `kh setup` the setup Postgres admin DSN), which the `knowledge-hub` service never mounts, so they run in a one-off container or in the panel container.
 
 ## Scheduled jobs
 
@@ -151,10 +152,10 @@ On an empty database `kh directory sync --once` cannot run first: the role `kh_i
    ```
 
    This runs before the first setup because Ollama sits on the internal `kh` network and cannot download the model. Otherwise the setup `ollama` step fails, the later steps are skipped and `kh setup apply` exits 2. Until the model is available embedding fails; run `kh rebuild` and `kh requeue-embeddings` afterwards. To measure speed: `docker compose exec -T knowledge-hub python - --count 200 < scripts/bench_embed.py` prints chunks per second.
-2. **Plan the database.** `kh setup plan --only postgres --config config/kh.yaml`. Expect `+` lines for the roles and the database, exit 1. A full `kh setup plan` on an empty server exits 2 and prints `setup: labels: <error>`, because the labels step cannot connect to the missing database.
-3. **Apply.** With a directory provider: `kh setup apply --only postgres`, then `kh directory sync --once`, then `kh setup apply`. Without a provider: `kh setup apply`. A plain `kh setup apply` with a provider set and no snapshot still runs every later step, but ends with `! directory: snapshot missing` and exit 2, and directory-only members stay out of the Forgejo teams until the next apply.
-4. **Plan again.** `kh setup plan`: only `i` lines, exit 0.
-5. **Start the services.** `kh serve` (the image does it; the worker starts only when `KH_FORGEJO_URL` is set and `/healthz` answers `ok`), the sync service when a provider is set, and the panel when you want it (first start: [runbook](runbook.md), "Admin panel").
+2. **Plan the database.** `kh setup plan --only postgres --config config/kh.yaml`. This step assumes the setup Postgres admin DSN (`KH_SETUP_PG_ADMIN_DSN_FILE`), which a first deploy needs unless the roles and the database already exist. With it, expect `+` lines for the roles and the database, exit 1; without it the step prints `!` lines and exits 2. A full `kh setup plan` on an empty server exits 2 and prints `setup: labels: <error>`, because the labels step cannot connect to the missing database.
+3. **Apply.** With a directory provider: `kh setup apply --only postgres --config config/kh.yaml`, then `kh directory sync --once`, then `kh setup apply --config config/kh.yaml`. Without a provider: `kh setup apply --config config/kh.yaml`. A plain `kh setup apply` with a provider set and no snapshot still runs every later step, but ends with `! directory: snapshot missing` and exit 2, and directory-only members stay out of the Forgejo teams until the next apply.
+4. **Plan again.** `kh setup plan --config config/kh.yaml`: only `i` lines, exit 0.
+5. **Start the services.** `kh serve` (the image does it; the worker starts only when `KH_FORGEJO_URL` is set. `/healthz` answers `ok` once the server is up), the sync service when a provider is set, and the panel when you want it (first start: [runbook](runbook.md), "Admin panel").
 6. **Index.** Run `kh rebuild`, then `kh check` and expect exit 0.
 7. **Identity.** Set up sign-in, the directory and hub keys as the [identity runbook](runbook-identity.md) says.
 
