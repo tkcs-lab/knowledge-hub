@@ -42,7 +42,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-panel-health
 
-- pending
+- worker: tld was unavailable in the worker, so the orchestrator ran the roles step (none required). The new integration test file could not run here (no pgvector); CI has to run it.
 
 ## p11-panel-ops-run
 
