@@ -19,10 +19,17 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 - `kh directory sync [--once | --every N] [--accept-change]`, `plan`, `people [--json]` and `show` (`directory/sync.py`, `directory/cli.py`): the separate sync process that fetches directory groups, refuses a snapshot whose user count shrinks or grows too much (exit 3) and stores it as `kh_indexer`. `kh daily` also purges expired OAuth state and prints `identity rows purged`.
 
+- The hub is its own OAuth authorization server with a consent page, and signs people in at an upstream OIDC provider through `KH_PUBLIC_URL` and `KH_OIDC_*`. Claude connects with OAuth; see `docs/runbook-identity.md`.
+- Directory groups from Google or Keycloak: providers `google` and `keycloak`, `kh directory sync|plan|people|show` and the `directory` keys of `kh.yaml` (`directory` and `groups.<g>.directory`). The sync runs as a separate service, `knowledge-hub-directory`, in `deploy/compose.example.yaml`.
+- Hub keys for workflows: `kh key create|list|revoke`.
+- Migration `0006_identity.sql`, applied by `kh migrate` or the postgres step of `kh setup apply`. `deploy/rollback-0006.sql` undoes it; run it before an older image is started.
+- `docs/runbook-identity.md`: sign-in, directory, hub keys and the move off PrivacyFence.
+
 ### Changed
 
 - `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
 - `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The replay table `kh.claim_jti` and function `kh.claim_seen` are dropped by migration 0006. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
+- `groups.<g>.approvers` may be empty when the group has directory approvers; `kh setup` reads the effective membership (static plus directory snapshot) and prints new `i account` and `! directory` lines; `kh daily` purges identity rows instead of claims; the metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`.
 
 ### Added
 
@@ -31,6 +38,13 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 ### Removed
 
 - The PrivacyFence integration: the claim verifier and replay cache modules, the `KH_PF_ISSUER`, `KH_PF_AUDIENCE` and `KH_PF_JWKS_URL` settings (a leftover `KH_PF_*` variable is ignored), the audience-count limits in `kh.yaml` validation, the `pf-kh` network and `KH_PF_*` variables of `deploy/compose.example.yaml`, and `deploy/privacyfence-upstream.example.yaml`. `kh daily` no longer purges claim rows.
+- Operators: move n8n workflows to hub keys and Claude to the hub connector before or right after the deploy; PrivacyFence-minted tokens and its connector stop working at the deploy.
+- PrivacyFence: the claim header and verifier, the tool `list_audiences`, `KH_PF_ISSUER`, `KH_PF_AUDIENCE`, `KH_PF_JWKS_URL`, `deploy/privacyfence-upstream.example.yaml`, the `pf-kh` network of the compose example, PrivacyFence's audience-table limits and the replay table dropped by migration `0006`.
+
+### Security
+
+- The hub now serves a public OAuth surface (`/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, the two `.well-known` documents, `/oauth/callback`, `/oauth/consent`); other paths answer 404 on the public name. The directory sync uses a service account with two read-only Google scopes (`admin.directory.group.member.readonly`, `admin.directory.user.readonly`).
+
 
 ## [0.5.1] - 2026-11-18
 
