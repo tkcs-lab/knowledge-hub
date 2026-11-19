@@ -130,7 +130,7 @@ async def _sync_tech(
     head = await reader.head_sha(repo, await reader.default_branch(repo))
     tree = await reader.list_tree(repo, head)
     texts: dict[str, str | None] = {}
-    for path in changed_tech_paths(tree, stored):
+    for path in changed_tech_paths(tree, stored, config.tech_dirs(repo)):
         try:
             texts[path] = await reader.get_raw(repo, path, head)
         except ForgejoError as exc:

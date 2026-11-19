@@ -19,13 +19,15 @@ _HEADING_RE = re.compile(r"^# +(\S.*?)[ #]*$")
 _FENCES = ("```", "~~~")
 
 
-def is_tech_included(entry: Mapping[str, Any]) -> bool:
+def is_tech_included(entry: Mapping[str, Any], dirs: Collection[str] = ("docs",)) -> bool:
     path = entry["path"]
     if entry.get("type", "blob") != "blob" or int(entry.get("size", 0)) > MAX_FILE_BYTES:
         return False
     if any(seg.startswith(".") for seg in path.split("/")):
         return False
-    return path == "CLAUDE.md" or (path.startswith("docs/") and path.endswith(".md"))
+    if path == "CLAUDE.md":
+        return True
+    return path.endswith(".md") and any(path.startswith(f"{d}/") for d in dirs)
 
 
 def tech_doc_key(path: str) -> str:
@@ -52,10 +54,12 @@ def tech_review_by(today: dt.date) -> dt.date:
 
 
 def changed_tech_paths(
-    tree: Iterable[Mapping[str, Any]], stored: Iterable[tuple[str, str, str]]
+    tree: Iterable[Mapping[str, Any]],
+    stored: Iterable[tuple[str, str, str]],
+    dirs: Collection[str] = ("docs",),
 ) -> list[str]:
     have = {path: blob for path, blob, _ in stored}
-    return [e["path"] for e in tree if is_tech_included(e) and have.get(e["path"]) != e["sha"]]
+    return [e["path"] for e in tree if is_tech_included(e, dirs) and have.get(e["path"]) != e["sha"]]
 
 
 def build_tech_plan(
@@ -79,8 +83,9 @@ def build_tech_plan(
     have = {path: blob for path, blob, _ in stored}
     present: set[str] = set()
     unreadable: set[str] = set()
+    dirs = config.tech_dirs(repo)
     for entry in tree:
-        if not is_tech_included(entry):
+        if not is_tech_included(entry, dirs):
             continue
         path, sha = entry["path"], entry["sha"]
         if have.get(path) == sha:
