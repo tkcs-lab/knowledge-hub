@@ -1,6 +1,6 @@
-import { h, clear, fmt } from "/static/dom.js";
-import { confirmButton, setConfigSha } from "/static/ops.js";
-import { runOp, argsForm, splitList, when } from "/static/groups.js";
+import { h, clear, fmt, when } from "/static/dom.js";
+import { confirmButton, opForm, setConfigSha } from "/static/ops.js";
+import { stage } from "/static/groups.js";
 
 function row(repo, ctx, notice) {
   const slot = h("div", { class: "inline-form" });
@@ -12,25 +12,21 @@ function row(repo, ctx, notice) {
         clear(slot);
         return;
       }
-      const dirs = h("input", { type: "text", value: (repo.dirs || []).join(", ") });
-      const labels = h("input", { type: "text", value: (repo.labels || []).join(", ") });
-      const save = h("button", { type: "submit" }, "Save");
-      const form = h(
-        "form",
-        { class: "op-form" },
-        h("label", { class: "field" }, h("span", {}, "Dirs (comma separated)"), dirs),
-        h("label", { class: "field" }, h("span", {}, "Labels (comma separated)"), labels),
-        h("div", { class: "actions" }, save)
+      slot.appendChild(
+        opForm({
+          op: "repo.set",
+          fields: [
+            { name: "name", label: "Name", value: repo.name, readonly: true },
+            { name: "dirs", label: "Dirs (comma separated)", value: (repo.dirs || []).join(", "), list: true, omitEmpty: true, required: false },
+            { name: "labels", label: "Labels (comma separated)", value: (repo.labels || []).join(", "), list: true, required: false },
+          ],
+          onApplied: ctx.onApplied,
+        }).form
       );
-      form.addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        runOp(notice, "repo.set", { name: repo.name, dirs: splitList(dirs.value), labels: splitList(labels.value) }, ctx);
-      });
-      slot.appendChild(form);
     });
     actions.appendChild(edit);
     actions.appendChild(
-      confirmButton(`Remove repo ${repo.name}`, () => runOp(notice, "repo.remove", { name: repo.name, confirm: true }, ctx))
+      confirmButton(`Remove repo ${repo.name}`, () => stage(notice, ctx, "repo.remove", { name: repo.name, confirm: true }, `Remove repo ${repo.name}`))
     );
   }
   return h(
@@ -74,7 +70,7 @@ async function load(notice, body) {
   );
   body.appendChild(h("h3", {}, "Add a repo"));
   body.appendChild(
-    argsForm({
+    opForm({
       op: "repo.add",
       summary: "Dirs and labels are comma separated.",
       fields: [
@@ -82,8 +78,8 @@ async function load(notice, body) {
         { name: "dirs", label: "Dirs", list: true, omitEmpty: true, required: false },
         { name: "labels", label: "Labels", list: true, omitEmpty: true, required: false },
       ],
-      ctx,
-    })
+      onApplied: ctx.onApplied,
+    }).form
   );
 }
 

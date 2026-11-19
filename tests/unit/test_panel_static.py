@@ -121,3 +121,45 @@ def test_pipeline_and_health_scripts_use_existing_ops(script):
     used = set(re.findall(r"""["'`]([a-z]+\.[a-z_]+)["'`]""", text))
     assert used
     assert used <= set(ops.OPS)
+
+
+def _text(name):
+    return resources.files("knowledge_hub.panel").joinpath(f"static/{name}").read_text(encoding="utf-8")
+
+
+def test_only_ops_js_posts_ops_and_sets_dry_run_false():
+    for f in _files():
+        if f.name.endswith(".js") and f.name != "ops.js":
+            text = f.read_text(encoding="utf-8")
+            assert "dry_run" not in text, f.name
+            assert "/api/ops" not in text, f.name
+    assert "dry_run: dryRun" in _text("ops.js")
+
+
+def test_scripts_share_the_ops_flow_without_copies():
+    assert "groups.js" not in _text("pipeline.js")
+    assert "/static/ops.js" in _text("pipeline.js")
+    for name in ("groups.js", "repos.js", "pipeline.js"):
+        text = _text(name)
+        assert "setTimeout" not in text, f"{name} has its own poll loop"
+        assert "runOp" not in text and "argsForm" not in text, name
+    for name in ("groups.js", "repos.js"):
+        assert "/api/ops" not in _text(name)
+
+
+def test_pipeline_ops_without_dry_run_are_previewless():
+    text = _text("pipeline.js")
+    assert "previewless: true" in text
+    for op in ("jobs.retry", "repo.rebuild", "jobs.reclaim", "embeddings.requeue"):
+        assert op in text
+
+
+def test_busy_answer_maps_to_busy_message():
+    text = _text("app.js")
+    assert "409" in text and "BUSY_MESSAGE" in text
+
+
+def test_repo_set_omits_empty_dirs():
+    text = _text("repos.js")
+    assert re.search(r'name: "dirs"[^}]*omitEmpty: true', text)
+    assert "splitList(dirs" not in text

@@ -11,29 +11,7 @@ export function setConfigSha(sha) {
 }
 
 async function post(body) {
-  const resp = await fetch("/api/ops", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify(body),
-  });
-  if (resp.status === 401) {
-    window.location.href = "/auth/login";
-    throw new Error("unauthorized");
-  }
-  let data = null;
-  try {
-    data = await resp.json();
-  } catch (err) {
-    data = null;
-  }
-  if (resp.status === 409) {
-    throw new Error(BUSY_MESSAGE);
-  }
-  if (!resp.ok) {
-    throw new Error((data && (data.detail || data.error)) || "request failed (" + resp.status + ")");
-  }
-  return data;
+  return window.api("POST", "/api/ops", body);
 }
 
 async function poll(id) {
@@ -56,11 +34,31 @@ export function confirmButton(label, onConfirm, attrs) {
   return button;
 }
 
+export function splitList(text) {
+  return String(text || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s);
+}
+
 /**
- * fields: [{name, label, value, readonly, required}]
- * Returns {form, status}; onApplied() runs after a successful Apply.
+ * fields: [{name, label, value, readonly, required, list, omitEmpty}]
+ *   list: true sends a comma list as an array; omitEmpty leaves an empty value out.
+ * fixed: extra arguments sent as given (booleans, ids) without an input.
+ * submitLabel renames Apply; confirmText asks window.confirm before Apply; onBusy(bool) reports a running request.
+ * Preview posts dry_run: true; Apply waits for a successful Preview of the same arguments.
  */
-export function opForm({ op, fields, summary, previewless = false, onApplied = null }) {
+export function opForm({
+  op,
+  fields,
+  fixed = null,
+  summary,
+  previewless = false,
+  onApplied = null,
+  submitLabel = "Apply",
+  confirmText = null,
+  onBusy = null,
+}) {
   const inputs = {};
   const rows = [];
   for (const field of fields) {
@@ -76,7 +74,7 @@ export function opForm({ op, fields, summary, previewless = false, onApplied = n
   }
   const status = h("div", { class: "op-status", "aria-live": "polite" });
   const preview = h("button", { type: "button" }, "Preview");
-  const apply = h("button", { type: "submit", disabled: !previewless }, "Apply");
+  const apply = h("button", { type: "submit", disabled: !previewless }, submitLabel);
   const form = h(
     "form",
     { class: "op-form" },
@@ -91,10 +89,18 @@ export function opForm({ op, fields, summary, previewless = false, onApplied = n
 
   const args = () => {
     const out = {};
-    for (const name of Object.keys(inputs)) {
-      out[name] = inputs[name].value;
+    for (const field of fields) {
+      const value = inputs[field.name].value;
+      if (field.list) {
+        const items = splitList(value);
+        if (items.length || !field.omitEmpty) {
+          out[field.name] = items;
+        }
+      } else if (value.trim() !== "" || !field.omitEmpty) {
+        out[field.name] = value;
+      }
     }
-    return out;
+    return Object.assign(out, fixed || {});
   };
   const key = () => JSON.stringify(args());
   const sync = () => {
@@ -115,7 +121,13 @@ export function opForm({ op, fields, summary, previewless = false, onApplied = n
     if (sha) {
       body.config_sha256 = sha;
     }
+    if (!dryRun && confirmText && !window.confirm(confirmText)) {
+      return;
+    }
     busy = true;
+    if (onBusy) {
+      onBusy(true);
+    }
     sync();
     show(dryRun ? "Previewing..." : "Applying...", "muted");
     try {
@@ -154,6 +166,9 @@ export function opForm({ op, fields, summary, previewless = false, onApplied = n
       show(err.message, "error");
     } finally {
       busy = false;
+      if (onBusy) {
+        onBusy(false);
+      }
       sync();
     }
   }

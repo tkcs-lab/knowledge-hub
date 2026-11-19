@@ -1,6 +1,5 @@
-import { h, clear } from "/static/dom.js";
+import { h, clear, when } from "/static/dom.js";
 import { opForm } from "/static/ops.js";
-import { when } from "/static/groups.js";
 
 const REFRESH_MS = 15000;
 const FAST_MS = 3000;

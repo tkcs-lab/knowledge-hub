@@ -1,6 +1,5 @@
-import { h, clear, fmt } from "/static/dom.js";
-import { confirmButton, opForm, setConfigSha } from "/static/ops.js";
-import { when, runOp } from "/static/groups.js";
+import { h, clear, fmt, when } from "/static/dom.js";
+import { opForm, setConfigSha } from "/static/ops.js";
 
 const REFRESH_MS = 15000;
 let timer = null;
@@ -23,25 +22,26 @@ function counter(label, value, cls) {
   return h("div", { class: "counter " + (cls || "") }, h("span", { class: "counter-value" }, fmt(value)), h("span", { class: "counter-label" }, label));
 }
 
-function actionButton(label, notice, op, args, reload, ask) {
-  const run = () => {
-    busy += 1;
-    runOp(notice, op, args, { sha: null, onApplied: reload }).finally(() => {
-      busy -= 1;
-    });
-  };
-  if (ask) {
-    return confirmButton(label, run);
-  }
-  const button = h("button", { type: "button" }, label);
-  button.addEventListener("click", run);
-  return button;
+// These ops have no dry run, so each is a one-click form (previewless); confirmText asks first.
+function action(op, fixed, label, reload, confirmText) {
+  return opForm({
+    op,
+    fields: [],
+    fixed,
+    previewless: true,
+    submitLabel: label,
+    confirmText,
+    onApplied: reload,
+    onBusy: (on) => {
+      busy += on ? 1 : -1;
+    },
+  }).form;
 }
 
-function failedRow(job, notice, reload) {
+function failedRow(job, reload) {
   const actions = h("div", { class: "actions" });
   if (job.dead) {
-    actions.appendChild(actionButton("Retry", notice, "jobs.retry", { ids: [job.id] }, reload, false));
+    actions.appendChild(action("jobs.retry", { ids: [job.id] }, "Retry", reload, null));
   }
   return h(
     "tr",
@@ -65,7 +65,7 @@ function table(head, rows, empty) {
   return h("table", {}, h("thead", {}, h("tr", {}, head.map((t) => h("th", {}, t)))), h("tbody", {}, rows));
 }
 
-function render(body, notice, data, reload) {
+function render(body, data, reload) {
   clear(body);
   const jobs = data.jobs || {};
   body.appendChild(h("h2", {}, "Pipeline"));
@@ -90,23 +90,19 @@ function render(body, notice, data, reload) {
 
   const toolbar = h("div", { class: "actions" });
   if (data.stuck_running > 0) {
-    const reclaim = opForm({ op: "jobs.reclaim", fields: [], previewless: true, onApplied: reload });
-    reclaim.form.querySelector("button[type=submit]").textContent = "Reclaim stuck jobs";
-    toolbar.appendChild(reclaim.form);
+    toolbar.appendChild(action("jobs.reclaim", null, "Reclaim stuck jobs", reload, null));
   }
-  const requeue = opForm({ op: "embeddings.requeue", fields: [], previewless: true, onApplied: reload });
-  requeue.form.querySelector("button[type=submit]").textContent = "Queue embeddings";
-  toolbar.appendChild(requeue.form);
+  toolbar.appendChild(action("embeddings.requeue", null, "Queue embeddings", reload, null));
   body.appendChild(toolbar);
 
   body.appendChild(h("h3", {}, "Failed jobs"));
   if ((jobs.failed_dead || 0) > 0) {
-    body.appendChild(actionButton("Retry dead jobs", notice, "jobs.retry", {}, reload, false));
+    body.appendChild(action("jobs.retry", {}, "Retry dead jobs", reload, null));
   }
   body.appendChild(
     table(
       ["Id", "Kind", "Repo", "Attempts", "State", "Error", "Created", "Run after", "Actions"],
-      (data.failed || []).map((j) => failedRow(j, notice, reload)),
+      (data.failed || []).map((j) => failedRow(j, reload)),
       "No failed jobs."
     )
   );
@@ -122,7 +118,7 @@ function render(body, notice, data, reload) {
           h("td", {}, r.repo),
           h("td", {}, r.last_indexed_sha ? r.last_indexed_sha.slice(0, 8) : ""),
           h("td", {}, r.indexed_at ? when(r.indexed_at) : ""),
-          h("td", {}, actionButton(`Rebuild ${r.repo}`, notice, "repo.rebuild", { repo: r.repo }, reload, true))
+          h("td", {}, action("repo.rebuild", { repo: r.repo }, `Rebuild ${r.repo}`, reload, `Rebuild ${r.repo}?`))
         );
       }),
       "No repos indexed yet."
@@ -148,9 +144,7 @@ window.panelTabs.pipeline = (root) => {
     clearInterval(timer);
     timer = null;
   }
-  const notice = h("div", { class: "op-status", "aria-live": "polite" });
   const body = h("div", {});
-  root.appendChild(notice);
   root.appendChild(body);
   const load = async (initial) => {
     try {
@@ -158,7 +152,7 @@ window.panelTabs.pipeline = (root) => {
       if (data && data.config_sha256) {
         setConfigSha(data.config_sha256);
       }
-      render(body, notice, data, () => load(false));
+      render(body, data, () => load(false));
     } catch (err) {
       if (initial) {
         clear(body);

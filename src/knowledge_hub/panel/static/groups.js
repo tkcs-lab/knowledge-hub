@@ -1,145 +1,14 @@
-import { h, clear, fmt } from "/static/dom.js";
-import { confirmButton, setConfigSha, BUSY_MESSAGE, RESTART_MESSAGE } from "/static/ops.js";
-
-const POLL_MS = 1000;
-
-export function when(value) {
-  if (!value) {
-    return "never";
-  }
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
-}
-
-export function splitList(text) {
-  return String(text || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s);
-}
-
-async function submit(op, args, dryRun, sha) {
-  const body = { op, args, dry_run: dryRun };
-  if (sha) {
-    body.config_sha256 = sha;
-  }
-  let started;
-  try {
-    started = await window.api("POST", "/api/ops", body);
-  } catch (err) {
-    throw new Error(/busy/i.test(err.message) ? BUSY_MESSAGE : err.message);
-  }
-  for (;;) {
-    const job = await window.api("GET", `/api/ops/${started.id}`);
-    if (job.state === "done") {
-      return job;
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
-}
-
-function show(status, text, cls, output) {
-  clear(status);
-  status.appendChild(h("p", { class: cls || "" }, text));
-  if (output) {
-    status.appendChild(h("pre", { class: "op-output" }, output));
-  }
-}
+import { h, clear, fmt, when } from "/static/dom.js";
+import { confirmButton, opForm, setConfigSha } from "/static/ops.js";
 
 /**
- * Runs one op and reports into `status`; calls onApplied after a successful apply.
- * Returns true when the op succeeded.
+ * Mounts a Preview-then-Apply form for one fixed change into `slot`.
+ * `fixed` carries the arguments; nothing is applied before a successful Preview.
  */
-export async function runOp(status, op, args, ctx, dryRun = false) {
-  show(status, dryRun ? "Previewing..." : "Applying...", "muted");
-  try {
-    const job = await submit(op, args, dryRun, ctx.sha);
-    const output = job.output || "";
-    if (output.includes("admin: cannot lock")) {
-      show(status, BUSY_MESSAGE, "warn", output);
-      return false;
-    }
-    if (job.ok === false || (job.exit_code !== null && job.exit_code !== undefined && job.exit_code !== 0)) {
-      show(status, dryRun ? "Preview failed" : "Apply failed", "fail", output);
-      return false;
-    }
-    show(status, dryRun ? "Preview succeeded" : "Applied", "ok", output);
-    if (!dryRun && job.restart_expected) {
-      status.appendChild(h("p", { class: "warn" }, RESTART_MESSAGE));
-    }
-    if (!dryRun && ctx.onApplied) {
-      ctx.onApplied();
-    }
-    return true;
-  } catch (err) {
-    show(status, err.message, "error");
-    return false;
-  }
-}
-
-/**
- * Form with text fields; `list: true` fields are comma lists sent as arrays.
- * Apply stays disabled until a Preview of the same values succeeded.
- */
-export function argsForm({ op, fields, summary, ctx }) {
-  const inputs = {};
-  const rows = [];
-  for (const field of fields) {
-    const input = h("input", { type: "text", name: field.name, required: field.required !== false });
-    inputs[field.name] = input;
-    rows.push(h("label", { class: "field" }, h("span", {}, field.label), input));
-  }
-  const status = h("div", { class: "op-status", "aria-live": "polite" });
-  const preview = h("button", { type: "button" }, "Preview");
-  const apply = h("button", { type: "submit", disabled: true }, "Apply");
-  const form = h(
-    "form",
-    { class: "op-form" },
-    summary ? h("p", { class: "muted" }, summary) : null,
-    rows,
-    h("div", { class: "actions" }, preview, apply),
-    status
-  );
-  let previewed = null;
-  let busy = false;
-  const args = () => {
-    const out = {};
-    for (const field of fields) {
-      const value = inputs[field.name].value;
-      if (field.list) {
-        const items = splitList(value);
-        if (items.length || !field.omitEmpty) {
-          out[field.name] = items;
-        }
-      } else if (value.trim() !== "" || field.required !== false) {
-        out[field.name] = value.trim();
-      }
-    }
-    return out;
-  };
-  const sync = () => {
-    apply.disabled = busy || previewed !== JSON.stringify(args());
-    preview.disabled = busy;
-  };
-  const go = async (dryRun) => {
-    const snapshot = JSON.stringify(args());
-    busy = true;
-    sync();
-    const ok = await runOp(status, op, JSON.parse(snapshot), ctx, dryRun);
-    busy = false;
-    previewed = dryRun && ok ? snapshot : null;
-    sync();
-  };
-  preview.addEventListener("click", () => go(true));
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    if (!apply.disabled) {
-      go(false);
-    }
-  });
-  form.addEventListener("input", sync);
-  sync();
-  return form;
+export function stage(slot, ctx, op, fixed, summary) {
+  clear(slot);
+  slot.appendChild(opForm({ op, fields: [], fixed, summary, onApplied: ctx.onApplied }).form);
+  slot.scrollIntoView({ block: "nearest" });
 }
 
 function chipButton(title, onClick) {
@@ -193,7 +62,7 @@ function figures(stats) {
 }
 
 function card(group, data, ctx, notice) {
-  const run = (op, args) => runOp(notice, op, args, ctx);
+  const run = (op, args, summary) => stage(notice, ctx, op, args, summary);
   const approvers = new Set(group.approvers);
   const memberChips = group.members.map((login) => {
     const isApprover = approvers.has(login);
@@ -201,21 +70,21 @@ function card(group, data, ctx, notice) {
     const button = isApprover
       ? confirmButton(
           "\u00d7",
-          () => run("member.remove", { group: group.name, login, with_approver: true }),
+          () => run("member.remove", { group: group.name, login, with_approver: true }, title),
           { class: "chip-remove", title, "aria-label": title }
         )
-      : chipButton(title, () => run("member.remove", { group: group.name, login, with_approver: false }));
+      : chipButton(title, () => run("member.remove", { group: group.name, login, with_approver: false }, title));
     return chip(isApprover ? `${login} (approver)` : login, button);
   });
   const approverChips = group.approvers.map((login) => {
     const title = `Remove ${login} as approver of ${group.name}`;
-    return chip(login, chipButton(title, () => run("approver.remove", { group: group.name, login })));
+    return chip(login, chipButton(title, () => run("approver.remove", { group: group.name, login }, title)));
   });
   const people = data.people.map((p) => p.login).filter((l) => !group.members.includes(l));
   const directory = Object.entries(group.directory || {});
   const toggle = group.archived ? "group.unarchive" : "group.archive";
   const toggleButton = h("button", { type: "button" }, group.archived ? "Unarchive" : "Archive");
-  toggleButton.addEventListener("click", () => run(toggle, { name: group.name }));
+  toggleButton.addEventListener("click", () => run(toggle, { name: group.name }, `${group.archived ? "Unarchive" : "Archive"} group ${group.name}`));
   return h(
     "article",
     { class: "card" },
@@ -230,11 +99,11 @@ function card(group, data, ctx, notice) {
     figures(group.stats),
     h("h4", {}, "Members"),
     h("ul", { class: "chips" }, memberChips),
-    selectAdd("Add member...", people, (login) => run("member.add", { group: group.name, login })),
+    selectAdd("Add member...", people, (login) => run("member.add", { group: group.name, login }, `Add ${login} to ${group.name}`)),
     h("h4", {}, "Approvers"),
     h("ul", { class: "chips" }, approverChips),
     selectAdd("Add approver...", group.members.filter((l) => !approvers.has(l)), (login) =>
-      run("approver.add", { group: group.name, login })
+      run("approver.add", { group: group.name, login }, `Make ${login} an approver of ${group.name}`)
     ),
     h("h4", {}, "From the directory (read only)"),
     directory.length
@@ -250,7 +119,7 @@ function card(group, data, ctx, notice) {
       "div",
       { class: "actions" },
       toggleButton,
-      confirmButton(`Remove group ${group.name}`, () => run("group.remove", { name: group.name, confirm: true }))
+      confirmButton(`Remove group ${group.name}`, () => run("group.remove", { name: group.name, confirm: true }, `Remove group ${group.name}`))
     )
   );
 }
@@ -266,7 +135,7 @@ function peopleSection(data, ctx, notice) {
         "td",
         {},
         confirmButton(`Remove person ${p.login}`, () =>
-          runOp(notice, "person.remove", { login: p.login, from_groups: true }, ctx)
+          stage(notice, ctx, "person.remove", { login: p.login, from_groups: true }, `Remove person ${p.login} from all groups`)
         )
       )
     )
@@ -282,14 +151,14 @@ function peopleSection(data, ctx, notice) {
       h("tbody", {}, rows)
     ),
     h("h4", {}, "Add a person"),
-    argsForm({
+    opForm({
       op: "person.add",
       fields: [
         { name: "login", label: "Login" },
         { name: "email", label: "Email" },
       ],
-      ctx,
-    })
+      onApplied: ctx.onApplied,
+    }).form
   );
 }
 
@@ -309,7 +178,7 @@ async function load(root, notice, body) {
   body.appendChild(h("div", { class: "cards" }, data.groups.map((g) => card(g, data, ctx, notice))));
   body.appendChild(h("h3", {}, "Add a group"));
   body.appendChild(
-    argsForm({
+    opForm({
       op: "group.add",
       summary: "Members and approvers are comma separated logins.",
       fields: [
@@ -317,8 +186,8 @@ async function load(root, notice, body) {
         { name: "members", label: "Members", list: true, required: false },
         { name: "approvers", label: "Approvers", list: true, required: false },
       ],
-      ctx,
-    })
+      onApplied: ctx.onApplied,
+    }).form
   );
   body.appendChild(peopleSection(data, ctx, notice));
 }
