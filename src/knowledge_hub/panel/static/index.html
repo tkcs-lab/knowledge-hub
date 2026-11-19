@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kh admin</title>
+<link rel="stylesheet" href="/static/panel.css">
+</head>
+<body>
+<header>
+  <h1>kh admin</h1>
+  <span class="spacer"></span>
+  <span id="me" aria-live="polite"></span>
+  <button type="button" id="signout">Sign out</button>
+</header>
+<nav aria-label="Sections">
+  <button type="button" data-tab="groups">Groups</button>
+  <button type="button" data-tab="labels">Labels</button>
+  <button type="button" data-tab="repos">Repos</button>
+  <button type="button" data-tab="pipeline">Pipeline</button>
+  <button type="button" data-tab="health">Health</button>
+</nav>
+<main></main>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
