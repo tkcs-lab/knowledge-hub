@@ -14,7 +14,7 @@ from knowledge_hub.admin import apply
 from knowledge_hub.admin.ops import OpError
 from knowledge_hub.admin.yamledit import Doc
 
-COMMAND_MODULES = ("labels_cmd", "persons_cmd", "groups_cmd")
+COMMAND_MODULES = ("labels_cmd", "persons_cmd", "groups_cmd", "repos_cmd")
 
 
 def add_common(parser: argparse.ArgumentParser, *, mutating: bool) -> None:

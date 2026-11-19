@@ -4,6 +4,11 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- `kh repo list|add|set|remove`: edit the technical repos (`tech_repos`) of `kh.yaml` and apply the change; `remove` deletes the repo's indexed documents.
+- `tech_repos.<r>.dirs`: the directories whose `.md` files are indexed (default `[docs]`); the root `CLAUDE.md` is always indexed.
+
 ## [0.5.1] - 2026-11-18
 
 ### Added
