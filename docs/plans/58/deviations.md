@@ -100,8 +100,14 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: Review 1, blocking: public-host guard compared the raw Host header (ports, trailing dot, missing Host); fixed by fix-1.
+- final: Review 1, blocking: Forgejo team members with a mismatching directory email were not removed; fixed by fix-2.
+- final: Review 1, blocking: Google users outside the subject's domain were enabled unchecked; fixed by fix-3.
+- final: Review 1, blocking: test_wiring asserted deps.bearer is None after p16 always builds a resolver; fixed by fix-1.
+- final: Review 1, blocking: deviations of p3, p7, p8, p9, p11 and p14 were missing from this file; recorded by the orchestrator. Review 2 approved.
 
 ## Finishing
 
 - final: Main was merged into the feature branch before the final review; test_config.py conflict resolved by dropping main's two PrivacyFence audience-table size tests (their limits were removed in p2) and keeping its tech-repo dirs tests.
+- final: Scope disposition: the one recorded out-of-scope path (src/knowledge_hub/mcp/errors.py, p1) is accepted; no other phase drifted. The three fix branches were not scope-checked (each touched only the files its brief named).
+- final: Verification gap: no integration test or SQL ran in any session (no PostgreSQL with pgvector; owner decision to rely on CI). Only ruff and the unit tests ran: 1009 passed.
