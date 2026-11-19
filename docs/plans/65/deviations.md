@@ -6,6 +6,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p1-deployment-guide
 
 - None.
+- review: Final review found kh group, person and repo wrongly listed with the migrator-only commands in the command table; fix-1 moved them next to kh setup (setup Forgejo admin token required) and fixed four smaller wording and --config issues in the deployment guide and runbook restore steps.
 
 ## p1b-example-files
 
