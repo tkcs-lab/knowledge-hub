@@ -62,7 +62,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p14-ui-pipeline-health
 
-- pending
+- worker: tld was unavailable in the worker, so the orchestrator ran the roles step (none required); no other deviation. The UI was not exercised in a browser by the orchestrator; ma2-click-through covers it.
 
 ## p15-deploy-example
 
