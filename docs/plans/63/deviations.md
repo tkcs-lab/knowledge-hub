@@ -83,4 +83,6 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- scope: Scope disposition: the one out-of-scope path (tests/unit/test_panel_app.py, p8) is accepted and still in the final diff.
+- worker: The fix branches fix-1, fix-2 and fix-3 were not scope-checked: each spans files of several phases and their diffs were reviewed by hand and by the second final review.
+- worker: The integration tests added by p5, p8, p10, p11b and fix-2 could not run in the session environment (no pgvector); only unit tests and ruff ran. CI has to run them. The UI was not exercised in a real browser by the orchestrator; manual step ma2-click-through covers it.
