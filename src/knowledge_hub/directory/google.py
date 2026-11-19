@@ -66,7 +66,6 @@ class GoogleProvider:
         if token_uri != TOKEN_URI:
             raise ProviderError("google: token_uri must be " + TOKEN_URI)
         self._subject = subject
-        self._domain = subject.rsplit("@", 1)[-1].lower() if "@" in subject else ""
         self._owns_http = http is None
         self._http = http or httpx.AsyncClient(timeout=30)
         self._now = now
@@ -206,10 +205,9 @@ class GoogleProvider:
         return enabled
 
     def _user(self, entry: str, users: Mapping[str, bool]) -> DirectoryUser:
-        active = not entry.startswith("!")
         email = entry.lstrip("!")
-        if email.rsplit("@", 1)[-1] == self._domain:
-            active = active and users.get(email, False)
+        # users() lists the whole customer, so every domain is covered; absent means not enabled
+        active = not entry.startswith("!") and users.get(email, False)
         return DirectoryUser(email=email, enabled=active, email_verified=True)
 
     async def fetch(self, refs: Mapping[str, GroupRefs]) -> dict[str, GroupFetch]:
