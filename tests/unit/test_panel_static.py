@@ -101,3 +101,13 @@ def test_labels_js_uses_existing_label_ops():
     used = set(re.findall(r"""["'`](label\.[a-z_]+)["'`]""", text))
     assert used
     assert used <= set(ops.OPS)
+
+
+@pytest.mark.parametrize("script", ["groups.js", "repos.js"])
+def test_group_and_repo_scripts_use_existing_ops(script):
+    from knowledge_hub.panel import ops
+
+    text = resources.files("knowledge_hub.panel").joinpath(f"static/{script}").read_text(encoding="utf-8")
+    used = set(re.findall(r"""(?:runOp\([^,]+,|op:)\s*["'`]([a-z_]+\.[a-z_]+)["'`]""", text))
+    assert used
+    assert used <= set(ops.OPS)

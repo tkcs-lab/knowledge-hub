@@ -1,4 +1,6 @@
 import "/static/labels.js";
+import "/static/groups.js";
+import "/static/repos.js";
 
 export async function api(method, path, body) {
   const init = { method, headers: {}, credentials: "same-origin" };
