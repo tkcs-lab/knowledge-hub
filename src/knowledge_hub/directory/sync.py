@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from knowledge_hub.config import KhConfig
+from knowledge_hub.config_watch import EXIT_RESTART
 from knowledge_hub.directory import store
 from knowledge_hub.directory.model import GroupFetch
 from knowledge_hub.directory.provider import DirectoryProvider, ProviderError, refs_from_config
@@ -112,7 +113,8 @@ async def run_every(
     interval: float,
     accept_change: bool,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
-) -> None:
+    watcher: Any = None,
+) -> int:
     while True:
         try:
             await sync_once(config, settings, provider, pool, accept_change=accept_change)
@@ -123,3 +125,9 @@ async def run_every(
         except Exception:
             log.exception("directory: sync run failed; keeping the previous snapshot")
         await sleep(interval)
+        if watcher is not None and watcher.poll():
+            log.info(
+                "directory: config changed on disk; exiting with code %d so the container restarts",
+                EXIT_RESTART,
+            )
+            return EXIT_RESTART
