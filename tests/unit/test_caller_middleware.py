@@ -86,7 +86,8 @@ async def test_caller_valid_bearer_reaches_the_app():
     "header", ["Bearer nope", "Basic x", "Bearer", "Bearer ", "Bearer a b", "garbage", "bearer"]
 )
 async def test_caller_bad_authorization_is_bearer_unknown_never_dev(header):
-    mw, app = make(dev_identity={"sub": "dev", "principal_type": "claude_client", "email": "alice@example.test"})
+    dev = {"sub": "dev", "principal_type": "claude_client", "email": "alice@example.test"}
+    mw, app = make(dev_identity=dev)
     status, headers, _ = await request(mw, headers=[("authorization", header)])
     assert status == 401 and app.scope is None
     assert "www-authenticate" in headers
