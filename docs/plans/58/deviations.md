@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-caller-middleware
 
-- pending
+- worker: Worker deleted two PrivacyFence-claim tests (claim audiences in test_http_e2e, jwks-url settings error in test_wiring) besides the files the brief names; integration tests were converted but not run (no pgvector here).
+- retry: Sent back once: tip commit lacked the Plan-Phase trailer; owner chose unit-only verification (integration tests left to CI).
 
 ## p2-remove-privacyfence
 
