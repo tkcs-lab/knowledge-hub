@@ -394,7 +394,7 @@ class ForgejoStep:
             await self._admin.edit_team(tid, **want)
         have = _fold([str(u.get("login")) for u in await self._admin.team_members(tid)])
         add = [v for k, v in wanted.items() if k not in have]
-        remove = [v for k, v in have.items() if k not in _fold(members)]
+        remove = [v for k, v in have.items() if k not in wanted]
         if add or remove:
             detail = " ".join([f"+{x}" for x in add] + [f"-{x}" for x in remove])
             out.append(Change("~", f"team {name}: members {detail}"))

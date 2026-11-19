@@ -107,6 +107,16 @@ async def test_directory_person_with_other_email(fake, admin):
     assert members_of(fake, "all") == ["alice"]
 
 
+async def test_existing_member_whose_email_changed_is_removed(fake, admin):
+    fake.add_user("carol")
+    await make(admin, WITH_PROVIDER, loader(effective(), 10)).apply(prune=False)
+    assert members_of(fake, "all") == ["alice", "carol"]
+    fake.add_user("carol", email="someone.else@example.com")
+    await make(admin, WITH_PROVIDER, loader(effective(), 10)).apply(prune=False)
+    assert members_of(fake, "all") == ["alice"]
+    assert members_of(fake, "all-approve") == ["alice"]
+
+
 async def test_directory_email_compare_is_case_insensitive(fake, admin):
     fake.add_user("carol", email="Carol@Example.com")
     await make(admin, WITH_PROVIDER, loader(effective(), 10)).apply(prune=False)
