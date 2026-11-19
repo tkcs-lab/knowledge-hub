@@ -5,7 +5,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-settings-admins
 
-- pending
+- worker: Created the local venv to run checks; tld was unavailable in the worker so the orchestrator ran the roles step (none required).
 
 ## p2-config-watch
 
