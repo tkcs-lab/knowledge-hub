@@ -13,6 +13,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
 - `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The replay table `kh.claim_jti` and function `kh.claim_seen` are dropped by migration 0006. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
 
+### Added
+
+- `knowledge_hub.oauth.upstream`: the OIDC relying party for the upstream identity provider (discovery, PKCE, code exchange, strict ID-token validation: signature algorithm and key binding, issuer, audience, nonce, verified email, allowed and hosted domains). It is not wired into the app yet.
+
 ### Removed
 
 - The PrivacyFence integration: the claim verifier and replay cache modules, the `KH_PF_ISSUER`, `KH_PF_AUDIENCE` and `KH_PF_JWKS_URL` settings (a leftover `KH_PF_*` variable is ignored), the audience-count limits in `kh.yaml` validation, the `pf-kh` network and `KH_PF_*` variables of `deploy/compose.example.yaml`, and `deploy/privacyfence-upstream.example.yaml`. `kh daily` no longer purges claim rows.
