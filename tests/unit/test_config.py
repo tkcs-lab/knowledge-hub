@@ -335,3 +335,55 @@ def test_slack_channel_optional_and_validated():
         assert str(exc.value) == (
             f"config: slack_channel {value!r} is not a valid Slack channel (#name, lower case)"
         )
+
+
+def _grp(**over):
+    g = {"members": ["alice"], "approvers": ["alice"]}
+    g.update(over)
+    return {"people": PEOPLE, "groups": {"g": g}}
+
+
+def test_group_directory_shape():
+    c = parse_config(_grp(directory={"google": {"members": ["a@x.io"], "approvers": ["b@x.io"]}}))
+    assert c.groups["g"].directory["google"].members == ["a@x.io"]
+    refused(_grp(directory={"Bad": {}}), "directory provider name Bad is not valid")
+    refused(_grp(directory={"google": {"members": ["a", "a"]}}), "directory reference a is listed twice")
+    refused(_grp(directory={"google": {"approvers": [""]}}), "directory reference")
+    refused(_grp(directory={"google": {"members": ["a" * 255]}}), "directory reference")
+    refused(_grp(directory={"google": {"extra": 1}}), "config:")
+
+
+def test_approvers_may_come_from_the_directory():
+    c = parse_config(_grp(approvers=[], directory={"google": {"approvers": ["b@x.io"]}}))
+    assert c.groups["g"].approvers == []
+    only_members = _grp(approvers=[], directory={"google": {"members": ["a@x.io"]}})
+    refused(only_members, "group g needs at least one approver")
+    refused(_grp(approvers=[]), "group g needs at least one approver")
+
+
+def test_static_approver_need_not_be_static_member_with_directory_members():
+    data = _grp(members=[], approvers=["alice"], directory={"google": {"members": ["a@x.io"]}})
+    assert parse_config(data).groups["g"].approvers == ["alice"]
+    refused(_grp(members=[], approvers=["alice"]), "approver alice is not a member")
+
+
+def test_directory_section():
+    c = parse_config({"directory": {"provider": "google", "domains": ["Tkcs.Name"]}})
+    assert c.directory.domains == ["tkcs.name"] and c.directory.refresh_seconds == 300
+    assert KhConfig().directory.provider == "none"
+    refused({"directory": {"provider": "google"}}, "directory.domains is required when")
+    refused({"directory": {"provider": "Bad"}}, "config:")
+    refused({"directory": {"domains": ["a", "a"]}}, "config:")
+    refused({"directory": {"domains": ["-a"]}}, "config:")
+    refused({"directory": {"unknown": 1}}, "config:")
+    for key, bad in (("refresh_seconds", 59), ("refresh_seconds", 3601), ("shrink_guard_percent", 0),
+                     ("shrink_guard_percent", 100), ("max_stale_seconds", 604801)):
+        refused({"directory": {key: bad}}, "config:")
+    refused({"directory": {"refresh_seconds": 600, "max_stale_seconds": 1000}},
+            "directory.max_stale_seconds must be at least twice refresh_seconds")
+
+
+def test_example_config_still_loads():
+    from pathlib import Path
+
+    load_config(Path(__file__).resolve().parents[2] / "deploy" / "kh.example.yaml")
