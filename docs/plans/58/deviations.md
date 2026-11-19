@@ -57,6 +57,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p13-oauth-provider
 
 - retry: Sent back once: worker had reformatted about 50 files outside its touches; asked to restore them and keep only its own files.
+- None.
 
 ## p14-oauth-flow
 
