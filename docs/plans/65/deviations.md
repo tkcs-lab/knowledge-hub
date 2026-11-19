@@ -13,7 +13,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-runbooks
 
-- pending
+- worker: Kept a short '## Install' heading above the pointer paragraph that replaces the install order section (the brief did not say).
 
 ## p3-reference-retire
 
