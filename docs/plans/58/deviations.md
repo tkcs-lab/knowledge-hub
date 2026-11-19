@@ -48,7 +48,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11-directory-sync
 
-- pending
+- None.
 
 ## p12-oauth-store
 
