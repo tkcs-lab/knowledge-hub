@@ -3,9 +3,10 @@
 # `kh serve` exits with code 75 when kh.yaml changes; `restart: unless-stopped` brings it back.
 services:
   knowledge-hub:
+    # The directory sync, the panel, OAuth and the admins and directory keys of kh.yaml need the first release after 0.5.1 (CHANGELOG [Unreleased]); 0.5.1 refuses this example's kh.yaml.
     # The release image (linux/arm64). Pin the digest in the stack:
-    #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.1.0
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0
+    #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.5.1
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1
     restart: unless-stopped
     networks: [db, kh, egress]   # egress only for the sign-in: restrict it to the issuer's hosts by name
     read_only: true
@@ -66,8 +67,9 @@ services:
 
   # The directory sync: the only container that holds a directory credential and the only one that
   # reaches the provider (docs/runbook-identity.md). Start it only when `directory.provider` is set.
+  # With directory.provider: none the command exits 0 and restart: unless-stopped restarts it in a loop, so start it only when a provider is set.
   knowledge-hub-directory:
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0   # the same image and tag as knowledge-hub
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1   # the same image and tag as knowledge-hub
     restart: unless-stopped
     command: ["directory", "sync", "--every", "300"]
     networks: [db, egress]   # egress: outbound to the provider's hosts only (for Keycloak use its internal admin network instead)
@@ -82,8 +84,11 @@ services:
       KH_DB_INDEXER_PASSWORD_FILE: /run/secrets/pg_kh_indexer
       KH_CONFIG_FILE: /etc/kh/kh.yaml
       KH_DIRECTORY_GOOGLE_CREDENTIALS_FILE: /run/secrets/kh_directory_google_key
-      # KH_DIRECTORY_GOOGLE_SUBJECT: "kh-directory-reader@example.com"
+      # KH_DIRECTORY_GOOGLE_SUBJECT: "kh-directory-reader@example.com"   # required for the google provider
       KH_DIRECTORY_KEYCLOAK_CLIENT_SECRET_FILE: /run/secrets/kh_directory_keycloak_secret
+      # KH_DIRECTORY_KEYCLOAK_URL: "http://keycloak:8080"
+      # KH_DIRECTORY_KEYCLOAK_REALM: "example"
+      # KH_DIRECTORY_KEYCLOAK_CLIENT_ID: "kh-directory"
     secrets:
       - pg_kh_indexer
       - kh_directory_google_key
@@ -94,7 +99,7 @@ services:
   # The admin panel. Publish it only to a private network or behind an access proxy: there is no
   # `ports:` entry on purpose. Only the emails in `admins:` of kh.yaml may sign in.
   knowledge-hub-panel:
-    image: ghcr.io/tkcs-lab/knowledge-hub:0.1.0   # the same image and tag as knowledge-hub
+    image: ghcr.io/tkcs-lab/knowledge-hub:0.5.1   # the same image and tag as knowledge-hub
     restart: unless-stopped
     command: ["panel", "serve", "--port", "8081"]
     networks: [db, kh, egress]   # egress only for the sign-in issuer: restrict it to the issuer's hosts by name
@@ -124,6 +129,7 @@ services:
       KH_S3_ACCESS_KEY_FILE: /run/secrets/kh_s3_access_key
       KH_S3_SECRET_KEY_FILE: /run/secrets/kh_s3_secret_key
       KH_CURSOR_KEY_FILE: /run/secrets/kh_cursor_key
+      # Set KH_SETUP_SLACK_WEBHOOKS_FILE and mount it here too when a group has slack_channel; without it a panel change on such a group ends with a ! slack hook line and exit 2.
       KH_SETUP_PG_ADMIN_DSN_FILE: /run/secrets/kh_setup_pg_admin_dsn
       KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE: /run/secrets/kh_setup_forgejo_admin_token
       # The panel's own sign-in (not KH_PUBLIC_URL or KH_OIDC_*, which belong to the hub).
@@ -150,7 +156,7 @@ services:
       - kh_panel_oidc_client_secret
       - kh_panel_session_key
     volumes:
-      # Read-write and a directory: the commit renames a file and keeps a lock file next to it.
+      # Read-write and a directory (the panel writes a lock file and a temporary file next to kh.yaml): the host directory must be writable by the container user, uid 10001.
       - ./config:/etc/kh
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=3).read().strip()==b'ok' else 1)"]
@@ -160,7 +166,7 @@ services:
       start_period: 20s
 
   # Embeddings for bge-m3 on CPU. The `kh` network has no internet access, so `ollama pull` cannot run
-  # here: pull the model once with a short-lived container (docs/runbook.md, install step 5).
+  # here: pull the model once with a short-lived container (docs/deployment.md, section "First deploy").
   ollama:
     image: ollama/ollama:0.40.16   # multi-arch, includes linux/arm64
     restart: unless-stopped
