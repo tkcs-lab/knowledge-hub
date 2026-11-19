@@ -9,7 +9,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1b-example-files
 
-- pending
+- None.
 
 ## p2-runbooks
 
