@@ -79,6 +79,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 - final: Non-blocking findings 4, 5, 7, 8 and 9 (directory watch switch, reclaim attempts, health reads, config error text, plural job output) were fixed in fix-2; its integration test change could not run here (no pgvector).
 - final: Blocking findings 1 and 2 and non-blocking findings 3 and 6 (Preview-then-Apply for every Groups and Repos action, one shared op flow in ops.js, busy message on 409, no empty dirs on repo save) were fixed in fix-1. The UI was not exercised in a browser by the orchestrator; ma2-click-through covers it.
 - final: Second review approved; its one non-blocking finding (Pipeline action output cleared by the tab reload) is fixed in fix-3.
+- final: fix-3 merged: the Pipeline tab keeps the output of the last action after the reload.
 
 ## Finishing
 
