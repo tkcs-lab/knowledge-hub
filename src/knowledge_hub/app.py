@@ -147,5 +147,5 @@ def build_app(
         routes = [*build_oauth_routes(settings, deps.oauth["provider"], deps.oauth["flow"]), *routes]
     app = Starlette(routes=routes, lifespan=lifespan)
     if settings.public_url:
-        return PublicHostGuard(app, urlsplit(settings.public_url).netloc, PUBLIC_PATHS)
+        return PublicHostGuard(app, urlsplit(settings.public_url).hostname or "", PUBLIC_PATHS)
     return app

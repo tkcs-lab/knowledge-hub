@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 import psycopg
 import pytest
 
 from knowledge_hub.app import build_app
+from knowledge_hub.auth.bearer import BearerResolver
 from knowledge_hub.cli import main
 from knowledge_hub.config import KhConfig
 from knowledge_hub.deps import build_deps, close_deps
@@ -39,8 +41,9 @@ def forgejo_settings(wiring_settings, tmp_path):
     )
 
 
-async def test_build_deps_returns_working_dependencies(wiring_settings):
-    deps = await build_deps(wiring_settings, KhConfig())
+async def test_build_deps_returns_working_dependencies(wiring_settings, caplog):
+    with caplog.at_level(logging.INFO, logger="knowledge_hub.deps"):
+        deps = await build_deps(wiring_settings, KhConfig())
     try:
         for pool in (deps.app_pool, deps.indexer_pool):
             async with pool.connection() as conn:
@@ -49,7 +52,13 @@ async def test_build_deps_returns_working_dependencies(wiring_settings):
         assert isinstance(deps.embedder, FakeEmbedder)
         assert deps.blobs is None
         assert deps.reader is None and deps.worker is None
-        assert deps.bearer is None
+        assert isinstance(deps.bearer, BearerResolver)
+        assert deps.oauth is None
+        assert deps.membership is not None
+        assert any(
+            r.getMessage().startswith("auth paths: oauth=") and "keys=on" in r.getMessage()
+            for r in caplog.records
+        )
     finally:
         await close_deps(deps)
 

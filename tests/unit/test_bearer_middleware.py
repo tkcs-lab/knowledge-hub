@@ -231,7 +231,8 @@ async def host_status(guard, host, path):
     async def send(m):
         seen.append(m)
 
-    scope = {"type": "http", "method": "GET", "path": path, "headers": [(b"host", host.encode())]}
+    headers = [] if host is None else [(b"host", host.encode())]
+    scope = {"type": "http", "method": "GET", "path": path, "headers": headers}
 
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
@@ -250,6 +251,22 @@ async def test_public_host_guard_hides_private_paths(path):
     guard = PublicHostGuard(inner, "hub.example.test", {"/mcp", "/token"})
     assert await host_status(guard, "hub.example.test", path) == (404, b"")
     assert (await host_status(guard, "internal:8080", path))[0] == 200
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["hub.example.test:443", "hub.example.test.", "Hub.Example.TEST", "HUB.example.test.:8443", None, ""],
+)
+@pytest.mark.parametrize("path", ["/healthz", "/metrics", "/webhooks/forgejo"])
+async def test_public_host_guard_ignores_port_dot_case_and_fails_closed(host, path):
+    guard = PublicHostGuard(inner, "hub.example.test", {"/mcp", "/token"})
+    assert await host_status(guard, host, path) == (404, b"")
+
+
+async def test_public_host_guard_handles_ipv6_literal_with_port():
+    guard = PublicHostGuard(inner, "::1", {"/mcp"})
+    assert (await host_status(guard, "[::1]:443", "/healthz"))[0] == 404
+    assert (await host_status(guard, "[::2]:443", "/healthz"))[0] == 200
 
 
 PUBLIC = ["/mcp", "/token", "/.well-known/oauth-authorization-server", "/oauth/callback"]
