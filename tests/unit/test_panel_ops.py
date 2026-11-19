@@ -1,0 +1,366 @@
+import argparse
+import importlib
+
+import pytest
+
+from knowledge_hub.admin.cli import COMMAND_MODULES
+from knowledge_hub.panel import ops
+from knowledge_hub.panel.ops import OPS, OpError, argv, validate
+
+pytestmark = pytest.mark.unit
+
+CFG = "--config=/etc/kh.yaml"
+SHA = "a" * 64
+IFSHA = f"--if-sha256={SHA}"
+
+# (op, args, dry_run, sha, expected argv)
+EXAMPLES = [
+    (
+        "label.add",
+        {"name": "ops", "description": "Operations"},
+        False,
+        None,
+        ["label", "add", CFG, "--description=Operations", "--", "ops"],
+    ),
+    (
+        "label.describe",
+        {"name": "ops", "description": "New text"},
+        True,
+        SHA,
+        ["label", "rename", CFG, "--dry-run", IFSHA, "--", "ops", "New text"],
+    ),
+    ("label.archive", {"name": "ops"}, False, None, ["label", "archive", CFG, "--", "ops"]),
+    ("label.unarchive", {"name": "ops"}, False, SHA, ["label", "unarchive", CFG, IFSHA, "--", "ops"]),
+    ("label.remove", {"name": "ops"}, True, None, ["label", "remove", CFG, "--dry-run", "--", "ops"]),
+    (
+        "person.add",
+        {"login": "alice", "email": "Alice@Example.com"},
+        False,
+        None,
+        ["person", "add", CFG, "--", "alice", "Alice@Example.com"],
+    ),
+    (
+        "person.remove",
+        {"login": "alice", "from_groups": True},
+        False,
+        None,
+        ["person", "remove", CFG, "--from-groups", "--", "alice"],
+    ),
+    (
+        "person.remove",
+        {"login": "alice", "from_groups": False},
+        False,
+        None,
+        ["person", "remove", CFG, "--", "alice"],
+    ),
+    (
+        "group.add",
+        {"name": "eng", "members": ["a", "b"], "approvers": ["a"]},
+        False,
+        None,
+        ["group", "add", CFG, "--members=a,b", "--approvers=a", "--", "eng"],
+    ),
+    ("group.archive", {"name": "eng"}, False, None, ["group", "archive", CFG, "--", "eng"]),
+    ("group.unarchive", {"name": "eng"}, False, None, ["group", "unarchive", CFG, "--", "eng"]),
+    (
+        "group.remove",
+        {"name": "eng", "confirm": True},
+        False,
+        None,
+        ["group", "remove", CFG, "--yes", "--", "eng"],
+    ),
+    (
+        "group.remove",
+        {"name": "eng", "confirm": False},
+        True,
+        None,
+        ["group", "remove", CFG, "--dry-run", "--", "eng"],
+    ),
+    (
+        "member.add",
+        {"group": "eng", "login": "bob"},
+        False,
+        None,
+        ["group", "member", "add", CFG, "--", "eng", "bob"],
+    ),
+    (
+        "member.remove",
+        {"group": "eng", "login": "bob", "with_approver": True},
+        False,
+        None,
+        ["group", "member", "remove", CFG, "--with-approver", "--", "eng", "bob"],
+    ),
+    (
+        "approver.add",
+        {"group": "eng", "login": "bob"},
+        False,
+        None,
+        ["group", "approver", "add", CFG, "--", "eng", "bob"],
+    ),
+    (
+        "approver.remove",
+        {"group": "eng", "login": "bob"},
+        False,
+        None,
+        ["group", "approver", "remove", CFG, "--", "eng", "bob"],
+    ),
+    ("repo.add", {"name": "tech-a"}, False, None, ["repo", "add", CFG, "--", "tech-a"]),
+    (
+        "repo.add",
+        {"name": "tech-a", "dirs": ["docs", "a/b"], "labels": ["x"]},
+        False,
+        None,
+        ["repo", "add", CFG, "--dirs=docs,a/b", "--labels=x", "--", "tech-a"],
+    ),
+    (
+        "repo.set",
+        {"name": "tech-a", "labels": []},
+        False,
+        None,
+        ["repo", "set", CFG, "--labels=", "--", "tech-a"],
+    ),
+    (
+        "repo.set",
+        {"name": "tech-a", "dirs": ["docs"]},
+        True,
+        SHA,
+        ["repo", "set", CFG, "--dry-run", IFSHA, "--dirs=docs", "--", "tech-a"],
+    ),
+    (
+        "repo.remove",
+        {"name": "tech-a", "confirm": True},
+        False,
+        None,
+        ["repo", "remove", CFG, "--yes", "--", "tech-a"],
+    ),
+    ("health.setup_plan", {}, False, None, ["setup", "plan", CFG]),
+    ("health.index_check", {}, False, None, ["check"]),
+]
+
+INPROC = [
+    ("repo.rebuild", {"repo": "kb-eng"}),
+    ("jobs.retry", {}),
+    ("jobs.retry", {"ids": [1, 2]}),
+    ("jobs.reclaim", {}),
+    ("embeddings.requeue", {}),
+]
+
+
+def test_ops_table_has_24_operations():
+    assert len(OPS) == 24
+
+
+def test_every_op_has_an_example():
+    covered = {e[0] for e in EXAMPLES} | {e[0] for e in INPROC}
+    assert covered == set(OPS)
+
+
+@pytest.mark.parametrize(("op", "args", "dry", "sha", "expected"), EXAMPLES)
+def test_valid_example_argv(op, args, dry, sha, expected):
+    valid = validate(op, args, dry, sha)
+    assert valid.name == op
+    assert valid.args == args
+    assert argv(valid, "/etc/kh.yaml") == expected
+
+
+@pytest.mark.parametrize(("op", "args"), INPROC)
+def test_inproc_ops_validate_and_have_no_argv(op, args):
+    valid = validate(op, args, False, None)
+    assert valid.kind == "inproc"
+    with pytest.raises(OpError):
+        argv(valid, "/etc/kh.yaml")
+
+
+GOOD = {"name": "ops", "description": "d"}
+REFUSALS = [
+    # unknown op
+    ("nope", {}, False, None),
+    ("", {}, False, None),
+    (None, {}, False, None),
+    (5, {}, False, None),
+    # args shape
+    ("label.archive", None, False, None),
+    ("label.archive", [], False, None),
+    ("label.archive", "ops", False, None),
+    ("label.archive", {}, False, None),
+    ("label.archive", {"name": "ops", "x": 1}, False, None),
+    ("label.add", {"name": "ops"}, False, None),
+    ("label.add", {"name": "ops", "description": "d", "dry_run": True}, False, None),
+    ("health.index_check", {"x": 1}, False, None),
+    ("jobs.reclaim", {"ids": [1]}, False, None),
+    ("repo.set", {"name": "tech-a"}, False, None),
+    # wrong types
+    ("label.archive", {"name": 5}, False, None),
+    ("label.archive", {"name": None}, False, None),
+    ("label.archive", {"name": ["ops"]}, False, None),
+    ("person.remove", {"login": "a", "from_groups": "yes"}, False, None),
+    ("person.remove", {"login": "a", "from_groups": 1}, False, None),
+    ("group.remove", {"name": "eng", "confirm": None}, False, None),
+    ("group.add", {"name": "eng", "members": "a,b", "approvers": []}, False, None),
+    ("group.add", {"name": "eng", "members": [1], "approvers": []}, False, None),
+    ("repo.add", {"name": "tech-a", "dirs": "docs"}, False, None),
+    ("jobs.retry", {"ids": "1"}, False, None),
+    ("jobs.retry", {"ids": [True]}, False, None),
+    ("jobs.retry", {"ids": ["1"]}, False, None),
+    ("label.add", {"name": "ops", "description": 5}, False, None),
+    # values failing their rules
+    ("label.archive", {"name": "-x"}, False, None),
+    ("label.archive", {"name": "--config=/x"}, False, None),
+    ("label.archive", {"name": "has space"}, False, None),
+    ("label.archive", {"name": "UPPER"}, False, None),
+    ("label.archive", {"name": "a\nb"}, False, None),
+    ("label.archive", {"name": "a" * 64}, False, None),
+    ("label.archive", {"name": ""}, False, None),
+    ("person.add", {"login": "-alice", "email": "a@b"}, False, None),
+    ("person.add", {"login": "alice", "email": "no-at"}, False, None),
+    ("person.add", {"login": "alice", "email": "a@b@c"}, False, None),
+    ("person.add", {"login": "alice", "email": "@b"}, False, None),
+    ("person.add", {"login": "alice", "email": "a@"}, False, None),
+    ("person.add", {"login": "alice", "email": "a b@c"}, False, None),
+    ("person.add", {"login": "alice", "email": "a" * 250 + "@b.com"}, False, None),
+    ("label.add", {"name": "ops", "description": "x" * 201}, False, None),
+    ("label.add", {"name": "ops", "description": "a\nb"}, False, None),
+    ("label.add", {"name": "ops", "description": "a\x00b"}, False, None),
+    ("label.describe", {"name": "ops", "description": "tab\there"}, False, None),
+    ("group.add", {"name": "owners", "members": [], "approvers": []}, False, None),
+    ("group.add", {"name": "eng-approve", "members": [], "approvers": []}, False, None),
+    ("group.add", {"name": "eng", "members": ["-a"], "approvers": []}, False, None),
+    ("group.add", {"name": "eng", "members": ["a"] * 51, "approvers": []}, False, None),
+    ("group.archive", {"name": "owners"}, False, None),
+    ("member.add", {"group": "-g", "login": "bob"}, False, None),
+    ("member.add", {"group": "eng", "login": "b ob"}, False, None),
+    ("repo.add", {"name": "tech-a", "dirs": ["-d"]}, False, None),
+    ("repo.add", {"name": "tech-a", "dirs": ["a,b"]}, False, None),
+    ("repo.add", {"name": "tech-a", "dirs": ["../x"]}, False, None),
+    ("repo.add", {"name": "tech-a", "labels": ["--x"]}, False, None),
+    ("repo.add", {"name": "tech-a", "labels": ["l"] * 51}, False, None),
+    ("repo.remove", {"name": "--yes", "confirm": True}, False, None),
+    ("repo.rebuild", {"repo": "-r"}, False, None),
+    ("jobs.retry", {"ids": [0]}, False, None),
+    ("jobs.retry", {"ids": [-1]}, False, None),
+    ("jobs.retry", {"ids": list(range(1, 102))}, False, None),
+    ("jobs.retry", {"ids": []}, False, None),
+    # dry_run
+    ("jobs.retry", {}, True, None),
+    ("jobs.retry", {"ids": [1]}, True, None),
+    ("jobs.reclaim", {}, True, None),
+    ("repo.rebuild", {"repo": "kb-eng"}, True, None),
+    ("embeddings.requeue", {}, True, None),
+    ("health.setup_plan", {}, True, None),
+    ("health.index_check", {}, True, None),
+    ("label.archive", {"name": "ops"}, "true", None),
+    ("label.archive", {"name": "ops"}, 1, None),
+    ("label.archive", {"name": "ops"}, None, None),
+    # config_sha256
+    ("label.archive", {"name": "ops"}, False, "A" * 64),
+    ("label.archive", {"name": "ops"}, False, "a" * 63),
+    ("label.archive", {"name": "ops"}, False, "a" * 65),
+    ("label.archive", {"name": "ops"}, False, "g" * 64),
+    ("label.archive", {"name": "ops"}, False, 5),
+    ("label.archive", {"name": "ops"}, False, ""),
+    ("jobs.reclaim", {}, False, SHA),
+    ("repo.rebuild", {"repo": "kb-eng"}, False, SHA),
+    ("health.setup_plan", {}, False, SHA),
+    ("health.index_check", {}, False, SHA),
+]
+
+
+def test_refusal_table_is_large_enough():
+    assert len(REFUSALS) >= 40
+
+
+@pytest.mark.parametrize(("op", "args", "dry", "sha"), REFUSALS)
+def test_refusals(op, args, dry, sha):
+    with pytest.raises(OpError) as exc:
+        validate(op, args, dry, sha)
+    assert exc.value.reason
+
+
+def test_boundaries_are_accepted():
+    validate("label.add", {"name": "ops", "description": "x" * 200}, False, None)
+    validate("label.add", {"name": "ops", "description": ""}, False, None)
+    validate("group.add", {"name": "eng", "members": ["a"] * 50, "approvers": []}, False, None)
+    validate("jobs.retry", {"ids": list(range(1, 101))}, False, None)
+    validate("person.add", {"login": "a", "email": "a@" + "b" * 250}, False, None)
+    assert OpError("why").reason == "why"
+
+
+# ---- round trip through the real admin parser ----
+
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="kh")
+    sub = p.add_subparsers(dest="command", required=True)
+    for name in COMMAND_MODULES:
+        importlib.import_module(f"knowledge_hub.admin.{name}").register(sub)
+    return p
+
+
+def split(text):
+    return [t for t in text.split(",") if t]
+
+
+def parsed(op, ns):
+    """The namespace as the validated args of ``op``."""
+    if op in ("label.add", "label.describe"):
+        return {"name": ns.name, "description": ns.description if op == "label.add" else ns.text}
+    if op.startswith("label."):
+        return {"name": ns.name}
+    if op == "person.add":
+        return {"login": ns.login, "email": ns.email}
+    if op == "person.remove":
+        return {"login": ns.login, "from_groups": ns.from_groups}
+    if op == "group.add":
+        return {"name": ns.name, "members": split(ns.members), "approvers": split(ns.approvers)}
+    if op == "group.remove":
+        return {"name": ns.name, "confirm": ns.yes}
+    if op.startswith("group."):
+        return {"name": ns.name}
+    if op == "member.remove":
+        return {"group": ns.group, "login": ns.login, "with_approver": ns.with_approver}
+    if op in ("member.add", "approver.add", "approver.remove"):
+        return {"group": ns.group, "login": ns.login}
+    if op == "repo.remove":
+        return {"name": ns.name, "confirm": ns.yes}
+    out = {"name": ns.name}
+    if ns.dirs is not None:
+        out["dirs"] = split(ns.dirs)
+    if ns.labels is not None:
+        out["labels"] = split(ns.labels)
+    return out
+
+
+HOSTILE = [
+    ("person.add", {"login": "alice", "email": "--config=/x@y"}),
+    ("person.add", {"login": "alice", "email": "-x@y"}),
+    ("label.add", {"name": "ops", "description": "-x"}),
+    ("label.add", {"name": "ops", "description": "--config=/x"}),
+    ("label.add", {"name": "ops", "description": "--"}),
+    ("label.describe", {"name": "ops", "description": "-x"}),
+    ("label.describe", {"name": "ops", "description": "--dry-run"}),
+]
+
+
+@pytest.mark.parametrize(
+    ("op", "args", "dry", "sha"),
+    [(e[0], e[1], e[2], e[3]) for e in EXAMPLES if not e[0].startswith("health.")]
+    + [(op, args, True, SHA) for op, args in HOSTILE]
+    + [(op, args, False, None) for op, args in HOSTILE],
+)
+def test_argv_round_trips_through_the_real_parser(op, args, dry, sha):
+    valid = validate(op, args, dry, sha)
+    ns = parser().parse_args(argv(valid, "/etc/kh.yaml"))
+    assert parsed(op, ns) == valid.args
+    assert str(ns.config) == "/etc/kh.yaml"
+    assert ns.dry_run is dry
+    assert ns.if_sha256 == sha
+    assert ns.no_apply is False
+
+
+def test_every_config_op_is_round_tripped():
+    cli_ops = {n for n, o in OPS.items() if o.is_config_op}
+    assert cli_ops == {e[0] for e in EXAMPLES if not e[0].startswith("health.")}
+
+
+def test_ops_module_exports():
+    assert ops.OPS is OPS
