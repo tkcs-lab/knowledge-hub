@@ -186,6 +186,24 @@ async def test_run_every_waits_and_logs_refusal(caplog):
     assert len(refused) == 2 and all(r.levelno == logging.ERROR for r in refused)
 
 
+async def test_run_every_returns_restart_code_when_watcher_fires():
+    waits = []
+    polls = iter([False, False, True])
+
+    class Watcher:
+        def poll(self):
+            return next(polls)
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    code = await sync.run_every(
+        cfg(), None, FakeProvider(fetch_of(1)), FakePool(), interval=5, accept_change=False,
+        sleep=sleep, watcher=Watcher(),
+    )  # fmt: skip
+    assert code == 75 and waits == [5, 5, 5]
+
+
 async def test_run_every_survives_provider_error(caplog):
     pool = FakePool()
     calls = []
