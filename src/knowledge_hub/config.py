@@ -26,11 +26,13 @@ GROUP_RE = AUDIENCE_RE
 LOGIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,38}")
 LABEL_RE = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,62}")
 REPO_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,99}")
+DIR_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})*")
 SLACK_CHANNEL_RE = re.compile(r"#[a-z0-9][a-z0-9_-]{0,79}")
 
 TECH_AUDIENCE = "all"
 
 MAX_LABELS = 500
+MAX_TECH_DIRS = 20
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
 MAX_AUDIENCES = 200
@@ -85,6 +87,7 @@ class GroupConfig(BaseModel):
 class TechRepoConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     labels: list[str] = []
+    dirs: list[str] = Field(default_factory=lambda: ["docs"])
 
 
 class KhConfig(BaseModel):
@@ -237,6 +240,17 @@ class KhConfig(BaseModel):
                     if label in seen_tech:
                         raise ValueError(f"tech repo {repo_name} lists label {label!r} twice")
                     seen_tech.add(label)
+                if not tech.dirs:
+                    raise ValueError(f"tech repo {repo_name} needs at least one dir")
+                if len(tech.dirs) > MAX_TECH_DIRS:
+                    raise ValueError(f"tech repo {repo_name} has more than {MAX_TECH_DIRS} dirs")
+                seen_dirs: set[str] = set()
+                for directory in tech.dirs:
+                    if not DIR_RE.fullmatch(directory):
+                        raise ValueError(f"tech repo {repo_name} dir {directory!r} is not a valid directory")
+                    if directory in seen_dirs:
+                        raise ValueError(f"tech repo {repo_name} lists dir {directory!r} twice")
+                    seen_dirs.add(directory)
         return self
 
     def is_tech_repo(self, repo: str) -> bool:
@@ -244,6 +258,9 @@ class KhConfig(BaseModel):
 
     def tech_labels(self, repo: str) -> list[str]:
         return list(self.tech_repos[repo].labels)
+
+    def tech_dirs(self, repo: str) -> list[str]:
+        return list(self.tech_repos[repo].dirs)
 
     @property
     def tech_repo_names(self) -> list[str]:
