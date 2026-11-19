@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from knowledge_hub.config import load_config
+from knowledge_hub.panel.settings import PanelSettings
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "deploy" / "backup-kh.sh"
@@ -52,7 +53,7 @@ def test_backup_script_content():
 def test_compose_example_has_no_secret_values():
     text = (ROOT / "deploy" / "compose.example.yaml").read_text()
     data = yaml.safe_load(text)
-    for name in ("knowledge-hub", "knowledge-hub-directory"):
+    for name in ("knowledge-hub", "knowledge-hub-directory", "knowledge-hub-panel"):
         env = data["services"][name]["environment"]
         for key, value in env.items():
             if re.search(r"(PASSWORD|TOKEN|KEY|HMAC|SECRET|CREDENTIALS)", key):
@@ -124,3 +125,40 @@ def test_compose_example_config_passes():
         pytest.skip("docker compose is not available")
     result = subprocess.run(["docker", "compose", "-f", str(COMPOSE), "config", "-q"], cwd=ROOT)
     assert result.returncode == 0
+
+
+def test_panel_service_is_wired(tmp_path, monkeypatch):
+    svc = _compose()["services"]["knowledge-hub-panel"]
+    assert svc["command"] == ["panel", "serve", "--port", "8081"]
+    assert "ports" not in svc
+    assert svc["restart"]
+    assert "./config:/etc/kh" in svc["volumes"]
+    assert not any(str(v).startswith("./config:/etc/kh") and str(v).endswith(":ro") for v in svc["volumes"])
+    env = svc["environment"]
+    assert not [k for k in env if k.startswith("KH_OIDC_") or k == "KH_PUBLIC_URL"]
+    for key in (
+        "KH_PANEL_PUBLIC_URL",
+        "KH_PANEL_OIDC_ISSUER",
+        "KH_PANEL_OIDC_CLIENT_ID",
+        "KH_PANEL_OIDC_CLIENT_SECRET_FILE",
+        "KH_PANEL_OIDC_ALLOWED_DOMAINS",
+        "KH_PANEL_OIDC_HOSTED_DOMAINS",
+        "KH_PANEL_SESSION_KEY_FILE",
+    ):
+        assert key in env, key
+    for key in list(env):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        if key.endswith("_FILE"):
+            f = tmp_path / key
+            f.write_text("x" * 40)
+            value = str(f)
+        monkeypatch.setenv(key, str(value))
+    settings = PanelSettings()
+    assert settings.allowed_domains_tuple == ("example.com",)
+    assert settings.read_session_key() == b"x" * 40
+
+
+def test_example_config_has_admins():
+    cfg = load_config(ROOT / "deploy" / "kh.example.yaml")
+    assert isinstance(cfg.admins, list) and cfg.admins

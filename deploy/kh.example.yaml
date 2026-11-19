@@ -12,6 +12,9 @@ hub_url: http://knowledge-hub:8080   # how Forgejo reaches the hub; only `kh set
 #   provider: google          # none | google | keycloak
 #   domains: [example.com]    # lower-case email domains a person may have
 #   refresh_seconds: 300
+# Only these lower-case emails may sign in to the admin panel; the panel does not edit this key.
+admins:
+  - admin@example.com
 people:
   alice: alice@example.com
   bob: bob@example.com
