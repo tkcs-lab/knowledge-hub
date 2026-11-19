@@ -37,7 +37,7 @@ async def _post(request: Request):
 
 def _builder(ctx: PanelContext) -> list[Route]:
     return [
-        Route("/api/me", _me, methods=["GET"]),
+        Route("/api/whoami", _me, methods=["GET"]),
         Route("/api/boom", _boom, methods=["GET"]),
         Route("/api/post", _post, methods=["POST"]),
     ]
@@ -87,7 +87,7 @@ def test_healthz_open_with_local_host(client):
 
 
 def test_api_requires_session(client):
-    r = client.get("/api/me")
+    r = client.get("/api/whoami")
     assert r.status_code == 401
     assert r.json()["error"] == "unauthorized"
     assert r.headers["cache-control"] == "no-store"
@@ -104,11 +104,11 @@ def test_root_serves_index_with_session(client, tmp_path):
     r = client.get("/")
     assert r.status_code == 200
     assert "<title>kh admin</title>" in r.text
-    assert client.get("/api/me").json() == {"email": "admin@example.test"}
+    assert client.get("/api/whoami").json() == {"email": "admin@example.test"}
 
 
 def test_wrong_host_is_400(client):
-    r = client.get("/api/me", headers={"Host": "evil.example"})
+    r = client.get("/api/whoami", headers={"Host": "evil.example"})
     assert r.status_code == 400
 
 
@@ -156,7 +156,7 @@ def test_dev_admin_opens_everything(tmp_path, monkeypatch):
     monkeypatch.setattr(app_mod, "ROUTE_BUILDERS", (*app_mod.ROUTE_BUILDERS, _builder))
     ctx = _ctx(tmp_path, dev_admin="dev@example.test", public=None)
     client = TestClient(build_panel_app(ctx), follow_redirects=False)
-    assert client.get("/api/me").json() == {"email": "dev@example.test"}
+    assert client.get("/api/whoami").json() == {"email": "dev@example.test"}
     assert client.get("/").status_code == 200
     headers = {"Origin": "http://testserver", "Content-Type": "application/json"}
     r = client.post("/api/post", headers=headers, content=b"{}")
