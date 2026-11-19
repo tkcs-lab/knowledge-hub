@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 import psycopg
 import pytest
 
-from knowledge_hub.jobs.daily import run_daily
+from knowledge_hub.jobs.daily import purge_identity, run_daily
 from knowledge_hub.jobs.requeue import requeue_embeddings
 from knowledge_hub.jobs.usage import purge_usage
 from tests.support.seed import add_chunk, add_doc, add_record, add_usage
@@ -96,3 +96,16 @@ async def test_daily_prints_the_usage_purge(world, deps, capsys):
         add_usage(conn, at=datetime.now(UTC) - timedelta(days=200))
     assert await _daily(deps) == 0
     assert capsys.readouterr().out.strip().endswith("usage events purged: 1")
+
+
+async def test_purge_identity_removes_expired_oauth_state(world, indexer_pool):
+    with conn_for(world) as conn:
+        conn.execute(
+            "INSERT INTO kh.oauth_codes (code_sha256, client_id, email, params, expires_at)"
+            " VALUES ('\\x01', 'c', 'a@x.org', '{}', now() - interval '1 minute'),"
+            "        ('\\x02', 'c', 'a@x.org', '{}', now() + interval '1 minute')"
+        )
+    assert await purge_identity(indexer_pool) == 1
+    with conn_for(world) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.oauth_codes").fetchone() == (1,)
+    assert await purge_identity(indexer_pool) == 0

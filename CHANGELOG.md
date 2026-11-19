@@ -4,9 +4,13 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- Migration `0006_identity.sql`: tables and `SECURITY DEFINER` functions for hub keys, the OAuth server state and the directory snapshot, and `deploy/rollback-0006.sql` to undo it. `kh daily` purges expired OAuth state through `jobs/daily.py` `purge_identity`.
+
 ### Changed
 
-- `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
+- `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The replay table `kh.claim_jti` and function `kh.claim_seen` are dropped by migration 0006. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
 
 ### Removed
 
