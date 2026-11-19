@@ -111,3 +111,13 @@ def test_group_and_repo_scripts_use_existing_ops(script):
     used = set(re.findall(r"""(?:runOp\([^,]+,|op:)\s*["'`]([a-z_]+\.[a-z_]+)["'`]""", text))
     assert used
     assert used <= set(ops.OPS)
+
+
+@pytest.mark.parametrize("script", ["pipeline.js", "health.js"])
+def test_pipeline_and_health_scripts_use_existing_ops(script):
+    from knowledge_hub.panel import ops
+
+    text = resources.files("knowledge_hub.panel").joinpath(f"static/{script}").read_text(encoding="utf-8")
+    used = set(re.findall(r"""["'`]([a-z]+\.[a-z_]+)["'`]""", text))
+    assert used
+    assert used <= set(ops.OPS)
