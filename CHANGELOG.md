@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation: new `docs/deployment.md` (components and dependencies, secrets, where each command runs, scheduled jobs, first deploy, verify and upgrade). The runbooks, the configuration reference, the design notes and the compose example are corrected against the code, and the one-off rollout notes of 0.4.0 and 0.5.0 are removed from the runbook.
+
 ## [0.6.0] - 2026-11-19
 
 ### Added
