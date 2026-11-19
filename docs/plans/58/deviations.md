@@ -78,7 +78,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p18-flow-tests
 
-- pending
+- None.
 
 ## p19-docs-design-config
 
