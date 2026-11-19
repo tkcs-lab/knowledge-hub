@@ -388,3 +388,75 @@ def test_ops_keep_untouched_comments(tmp_path):
     text = check(doc)
     for kept in ("# top comment", "# the org", "# alice", "# keep", "# first"):
         assert kept in text
+
+
+# tech repos
+
+NO_TECH = """\
+# keep me
+org: kh
+tech_org: kh-tech
+people:
+  alice: alice@example.com
+groups:
+  all:
+    members: [alice]
+    approvers: [alice]
+labels:
+  a: Alpha
+"""
+
+
+def test_repo_add_with_and_without_keys(tmp_path):
+    doc = load(tmp_path, NO_TECH)
+    assert ops.repo_add(doc, "plain", None, None)
+    assert ops.repo_add(doc, "full", ["docs", "adr"], ["a"])
+    text = check(doc)
+    assert "  plain: {}\n" in text
+    assert "  full:\n    labels: [a]\n    dirs: [docs, adr]\n" in text
+    assert "# keep me" in text
+
+
+def test_repo_add_refusals(tmp_path):
+    doc = load(tmp_path)
+    refuses(ops.repo_add, doc, "x", None, None, text="tech_org is not set; add it to kh.yaml first")
+    doc = load(tmp_path, TECH)
+    refuses(ops.repo_add, doc, "core", None, None, text="tech repo core already exists")
+    refuses(ops.repo_add, doc, "n", None, ["zz"], text="unknown label zz")
+
+
+def test_repo_set_changes_and_noops(tmp_path):
+    doc = load(tmp_path, TECH)
+    assert not ops.repo_set(doc, "core", None, None)
+    assert not ops.repo_set(doc, "core", ["docs"], ["a"])
+    assert ops.repo_set(doc, "core", ["docs", "adr"], ["b"])
+    text = check(doc)
+    assert "    labels: [b]\n    dirs: [docs, adr]\n" in text
+    assert ops.repo_set(doc, "core", None, [])
+    assert "labels: []" in check(doc)
+    assert not ops.repo_set(doc, "core", None, [])
+
+
+def test_repo_set_on_a_flow_entry_writes_block_style(tmp_path):
+    doc = load(tmp_path, TECH.replace("  core:\n    labels: [a]\n", "  core: {}\n"))
+    assert ops.repo_set(doc, "core", ["adr"], None)
+    assert "  core:\n    dirs: [adr]\n" in check(doc)
+
+
+def test_repo_set_refusals(tmp_path):
+    doc = load(tmp_path, TECH)
+    refuses(ops.repo_set, doc, "nope", None, None, text="unknown tech repo nope")
+    refuses(ops.repo_set, doc, "core", None, ["zz"], text="unknown label zz")
+
+
+def test_repo_remove(tmp_path):
+    doc = load(tmp_path, TECH)
+    refuses(ops.repo_remove, doc, "nope", text="unknown tech repo nope")
+    assert ops.repo_remove(doc, "core")
+    assert "core" not in check(doc).split("people:")[0]
+
+
+def test_repo_ops_keep_comments(tmp_path):
+    doc = load(tmp_path, NO_TECH)
+    ops.repo_add(doc, "r", None, None)
+    assert "# keep me" in check(doc)

@@ -45,6 +45,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 - The hub now serves a public OAuth surface (`/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, the two `.well-known` documents, `/oauth/callback`, `/oauth/consent`); other paths answer 404 on the public name. The directory sync uses a service account with two read-only Google scopes (`admin.directory.group.member.readonly`, `admin.directory.user.readonly`).
 
+- `kh repo list|add|set|remove`: edit the technical repos (`tech_repos`) of `kh.yaml` and apply the change; `remove` deletes the repo's indexed documents.
+- `tech_repos.<r>.dirs`: the directories whose `.md` files are indexed (default `[docs]`); the root `CLAUDE.md` is always indexed.
 
 ## [0.5.1] - 2026-11-18
 

@@ -147,6 +147,7 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
 | `kh label add\|rename\|archive\|unarchive\|remove\|list` | Edit the labels of `kh.yaml` and apply the change; see `kh admin commands`. |
 | `kh group add\|remove\|archive\|unarchive\|member\|approver\|list` | Edit the groups of `kh.yaml` and apply the change. |
+| `kh repo list\|add\|set\|remove` | Edit `tech_repos` of `kh.yaml` (the technical repos, T0a) and apply the change; see `kh admin commands`. |
 | `kh person add\|remove\|list` | Edit `people` (and with `--from-groups` the group lists) and apply the change. |
 | `kh key create --group G [--tools t1,t2] --name N [--expires-days D] [--out FILE]` | Create a hub key (`khk_<id>.<secret>`) for one active group. Default tools `search,ingest_record`; `move_item` cannot be given. The key is shown once (or written to FILE, mode 0600). Errors, exit 1: `key: group <G> is not an active group`, `key: unknown tool <t>`, `key: tool <t> cannot be given to a key`, `key: name <N> is not valid`. |
 | `kh key list [--json]` | Tab-separated `id name group tools expires last_used status` (`active`, `expired` or `revoked`); never a secret. |
@@ -192,10 +193,11 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `archived_labels` | `[]` | Label names, each a key of `labels` (`config: archived_labels entry '<x>' is not in labels`, `config: archived_labels lists '<x>' twice`). An archived label is hidden from `list_labels`, from the `labels` of results (`search`, `get_doc`, `list_stale`, `usage`) and from search filters; `ingest_record` and `propose_doc` using it fail with `unknown label`. The label and its rows stay. |
 
 | `tech_org` | null | Forgejo organisation that holds the clones or forks of the technical repos; a valid login that differs from `org` (case-insensitive). Required when `tech_repos` is not empty. |
-| `tech_repos` | `{}` | Map of bare repository name in `tech_org` to `{labels}`. Their `CLAUDE.md` and `docs/**/*.md` are indexed as tier T0a with audience `all`, no approval. Needs the group `all`, active. |
+| `tech_repos` | `{}` | Map of bare repository name in `tech_org` to `{labels, dirs}`. Their root `CLAUDE.md` and the `.md` files under their `dirs` are indexed as tier T0a with audience `all`, no approval. Needs the group `all`, active. |
 | `tech_repos.<r>.labels` | `[]` | Labels put on every document of the repo; each must be a key of `labels`, none twice. A label archived later stays on the documents and is hidden. |
+| `tech_repos.<r>.dirs` | `[docs]` | Directories of the repo whose `.md` files are indexed, besides the root `CLAUDE.md` (always indexed). Each is a path relative to the repo root (`docs`, `docs/adr`): no leading or trailing `/`, no empty, `.` or dot-prefixed segment, letters, digits, `_`, `.`, `-`; 1 to 20 entries, none twice. A directory matches whole segments (`adr` covers `adr/a.md`, not `adr.md` or `notes/adr/a.md`). A directory removed from `dirs` loses its documents at the next sync. |
 
-Tech repo errors: `config: tech_repos needs tech_org`, `tech_org '<x>' is not a valid login`, `tech_org must differ from org`, `tech repo '<r>' is not a valid repository name`, `tech repo <r> is also the repo of group <g>`, `tech_repos needs the group all`, `tech_repos needs the group all to be active`, `tech repo <r> label '<x>' is not in labels`, `tech repo <r> lists label '<x>' twice`. A change needs a `kh serve` restart.
+Tech repo errors: `config: tech_repos needs tech_org`, `tech_org '<x>' is not a valid login`, `tech_org must differ from org`, `tech repo '<r>' is not a valid repository name`, `tech repo <r> is also the repo of group <g>`, `tech_repos needs the group all`, `tech_repos needs the group all to be active`, `tech repo <r> label '<x>' is not in labels`, `tech repo <r> lists label '<x>' twice`, `tech repo <r> needs at least one dir`, `tech repo <r> has more than 20 dirs`, `tech repo <r> dir '<x>' is not a valid directory`, `tech repo <r> lists dir '<x>' twice`. A change needs a `kh serve` restart.
 
 The hub reads `archived` and `archived_labels` when `kh serve` starts, so changing either needs a restart.
 
@@ -222,6 +224,7 @@ tech_org: kh-tech
 tech_repos:
   ember-core:
     labels: [product:ember]
+    dirs: [docs, adr]
 ```
 
 The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart; directory changes do not (the snapshot is re-read every `KH_DIRECTORY_VIEW_SECONDS`). `deploy/kh.example.yaml` is the maintained example.
@@ -238,7 +241,7 @@ Steps run in this order: `postgres`, `labels`, `tech`, `forgejo`, `ollama`, `s3`
 |---|---|
 | `+` | create |
 | `~` | update |
-| `-` | remove (with `--prune`, or by `kh label remove` and `kh group remove`) |
+| `-` | remove (with `--prune`, or by `kh label remove`, `kh group remove` and `kh repo remove`) |
 | `!` | refused: a change the script will not make, for example `! group all: changed repo; remove the group and add a new one` |
 | `?` | unmanaged object (`? unmanaged`) |
 | `i` | information (`i webhook secret not verifiable`, `i owners: <logins> can bypass protection`, `i slack hook <repo>: url not verifiable`) |
@@ -262,7 +265,7 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 
 ## kh admin commands
 
-`kh label`, `kh group` and `kh person` edit `kh.yaml` (comments are kept) and then apply the change to the database and Forgejo. A group cannot be renamed: its name is the audience of every document and record.
+`kh label`, `kh group`, `kh person` and `kh repo` edit `kh.yaml` (comments are kept) and then apply the change to the database and Forgejo. A group cannot be renamed: its name is the audience of every document and record.
 
 | Command | Edit of `kh.yaml` | Effect applied |
 |---|---|---|
@@ -280,8 +283,12 @@ Drift is any `+`, `~`, `-` or `!` line. `?` and `i` lines never change an exit c
 | `kh person add LOGIN EMAIL` | `people[LOGIN] = EMAIL` (lower case) | none |
 | `kh person remove LOGIN [--from-groups]` | delete from `people`; with the flag also from every group's `members` and `approvers` | runs the forgejo step for each group the login was in |
 | `kh person list [--json]` | none | none |
+| `kh repo list [--json]` | none | none; prints `NAME  DIRS  LABELS` |
+| `kh repo add NAME [--dirs D1,D2] [--labels A,B]` | new entry under `tech_repos`; an omitted flag writes no key (default `dirs: [docs]`); needs `tech_org`; refused when the repo is not in the tech org (`! tech repo NAME: not in org <tech_org>; create the clone or fork there`, file unchanged) | runs the forgejo step for that repo (indexer read access, collaborators, tech webhook); needs `KH_FORGEJO_URL` and `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE`, or `--no-apply` followed by `kh setup apply` |
+| `kh repo set NAME [--dirs D1,D2] [--labels A,B]` | change `dirs` and/or `labels`; `--labels ""` clears the labels; at least one flag | none: restart `kh serve` first (its worker keeps the old config), then its first poll applies it, or run `kh rebuild --repo NAME` |
+| `kh repo remove NAME [--yes]` | delete the entry | deletes its T0a documents and indexed head (`- tech documents of NAME`); with documents it needs `--yes` and otherwise exits 2 with the count; `--no-apply` needs no `--yes` (`kh setup apply --prune` deletes later). The Forgejo repo is kept; restart `kh serve` at once |
 
-The commands do not edit `tech_org`, `tech_repos` or a group's `slack_channel` after creation: edit the file by hand, then run `kh setup apply`. There is no `group rename` and no email change for a person.
+The commands do not edit `tech_org` or a group's `slack_channel` after creation: edit the file by hand, then run `kh setup apply`. There is no `group rename` and no email change for a person.
 
 **Common flags.** `--config FILE` (default: the environment variable `KH_CONFIG_FILE`; with neither the command exits 2), `--dry-run` (print the diff and the planned lines, write nothing) and `--no-apply` (edit the file only; then run `kh setup apply`) on every mutating command. `list` commands take `--config` and `--json` and read only the file. A command whose edit changes nothing prints `nothing to change` and exits 0.
 

@@ -40,7 +40,7 @@ def entry(path: str, text: str = "x", size: int | None = None) -> dict:
 def plan(files: dict, stored=(), labels=("ember",), texts=None, cfg=CFG):
     tree = [entry(p, t or "") for p, t in files.items()]
     if texts is None:
-        texts = {p: files[p] for p in changed_tech_paths(tree, list(stored))}
+        texts = {p: files[p] for p in changed_tech_paths(tree, list(stored), cfg.tech_dirs(REPO))}
     return build_tech_plan(cfg, REPO, "h1", tree, list(stored), texts, labels, TODAY)
 
 
@@ -152,3 +152,30 @@ def test_unchanged_file_is_not_upserted():
 def test_changed_text_missing_raises():
     with pytest.raises(ValueError, match="no text for changed file docs/a.md"):
         plan({"docs/a.md": "# A"}, texts={})
+
+
+def cfg_dirs(dirs):
+    return CFG.model_copy(update={"tech_repos": {REPO: TechRepoConfig(labels=["ember"], dirs=dirs)}})
+
+
+def test_dirs_decide_the_included_paths():
+    assert is_tech_included(entry("adr/0001.md"), ["docs", "adr"])
+    assert is_tech_included(entry("docs/x.md"), ["docs", "adr"])
+    assert not is_tech_included(entry("docs/x.md"), ["adr"])
+    assert is_tech_included(entry("CLAUDE.md"), ["adr"])
+    for path in ("adr.md", "notes/adr/a.md", "adr/.h/a.md", "adr/a.txt"):
+        assert not is_tech_included(entry(path), ["adr"]), path
+    assert is_tech_included(entry("docs/adr/a.md"), ["docs/adr"])
+    assert not is_tech_included(entry("docs/a.md"), ["docs/adr"])
+
+
+def test_dropped_dir_is_deleted_by_the_plan():
+    stored = [("docs/a.md", "s", "docs/a.md")]
+    p = plan({"docs/a.md": "x", "adr/b.md": "y"}, stored=stored, cfg=cfg_dirs(["adr"]))
+    assert p.deletes == ["docs/a.md"]
+    assert [u.path for u in p.upserts] == ["adr/b.md"]
+
+
+def test_file_in_two_dirs_is_one_document():
+    p = plan({"docs/adr/a.md": "# A"}, cfg=cfg_dirs(["docs", "docs/adr"]))
+    assert [u.path for u in p.upserts] == ["docs/adr/a.md"]

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from knowledge_hub.setup.forgejo import ForgejoStep
     from knowledge_hub.setup.labels import LabelsStep
     from knowledge_hub.setup.postgres import PostgresStep
+    from knowledge_hub.setup.tech import TechStep
 
 Edit = Callable[[Doc], bool]
 Check = Callable[["Steps", KhConfig], Awaitable[str | None]]
@@ -54,6 +55,9 @@ class Steps:
 
     def forgejo(self) -> ForgejoStep:
         return cast("ForgejoStep", self._get("forgejo"))
+
+    def tech(self) -> TechStep:
+        return cast("TechStep", self._get("tech"))
 
 
 StepsFactory = Callable[[KhConfig], Steps]
@@ -204,3 +208,4 @@ def _not_set(name: str, dry_run: bool) -> int:
         return 0
     print(f"admin: {name} is not set")
     return 2
+

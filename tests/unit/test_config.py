@@ -387,3 +387,24 @@ def test_example_config_still_loads():
     from pathlib import Path
 
     load_config(Path(__file__).resolve().parents[2] / "deploy" / "kh.example.yaml")
+
+
+def test_tech_dirs_default_and_nested():
+    c = tech_cfg(tech_repos={"ember-core": {"labels": ["ember"]}, "r": {"dirs": ["docs/adr", "adr"]}})
+    assert c.tech_dirs("ember-core") == ["docs"]
+    assert c.tech_dirs("r") == ["docs/adr", "adr"]
+
+
+def dirs_refused(dirs, message):
+    refused(
+        {"people": PEOPLE, "groups": GROUPS, "tech_org": "t", "tech_repos": {"r": {"dirs": dirs}}},
+        message,
+    )
+
+
+def test_tech_dirs_rejections():
+    dirs_refused([], "config: tech repo r needs at least one dir")
+    dirs_refused([f"d{i}" for i in range(21)], "config: tech repo r has more than 20 dirs")
+    for bad in ["", "/docs", "docs/", "../x", ".github", "docs//x"]:
+        dirs_refused([bad], f"config: tech repo r dir {bad!r} is not a valid directory")
+    dirs_refused(["docs", "docs"], "config: tech repo r lists dir 'docs' twice")

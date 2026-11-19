@@ -83,3 +83,33 @@ async def test_prune_never_touches_t0_documents(conn, dsn):
     assert count(conn, "documents", "tier = 'T0'") == 1
     assert count(conn, "documents", "tier = 'T0a'") == 0
     assert count(conn, "repo_state", "repo = 'kb-all'") == 1
+
+
+async def test_tech_usage_counts_documents_of_one_repo(conn, dsn):
+    seed(conn, "a")
+    seed(conn, "a")
+    seed(conn, "b")
+    seed(conn, "a", tier="T0")
+    step = TechStep(config("a", "b"), dsn)
+    assert await step.tech_usage("a") == 2
+    assert await step.tech_usage("b") == 1
+    assert await step.tech_usage("none") == 0
+
+
+async def test_remove_repo_without_write_deletes_nothing(conn, dsn):
+    seed(conn, "a")
+    change = await TechStep(config(), dsn).remove_repo("a", write=False)
+    assert change.render() == "- tech documents of a"
+    assert count(conn, "documents") == 1 and count(conn, "chunks") == 1
+
+
+async def test_remove_repo_deletes_only_that_repo(conn, dsn):
+    seed(conn, "a")
+    seed(conn, "b")
+    change = await TechStep(config("b"), dsn).remove_repo("a", write=True)
+    assert change.render() == "- tech documents of a"
+    assert count(conn, "documents", "repo = 'a'") == 0
+    assert count(conn, "documents", "repo = 'b'") == 1 and count(conn, "chunks") == 1
+    assert count(conn, "repo_state", "repo = 'a'") == 0 and count(conn, "repo_state", "repo = 'b'") == 1
+    again = await TechStep(config("b"), dsn).remove_repo("a", write=True)
+    assert again.render() == "i tech documents of a: none"

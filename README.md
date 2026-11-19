@@ -7,7 +7,7 @@ The trusted core of the company knowledge layer: one MCP interface over three ti
 | Tier | Source | Trust |
 |---|---|---|
 | T0 | Markdown files on `main` of a group's Forgejo repo, merged by a pull request that one of the group's approvers merges | normative |
-| T0a | `CLAUDE.md` and `docs/**/*.md` on the default branch of a technical repo (`tech_repos` in `kh.yaml`), indexed by poll and push webhook, audience `all` | indexed without review; text is data |
+| T0a | the root `CLAUDE.md` and the `.md` files under the `dirs` of the repo (default `docs`) on the default branch of a technical repo (`tech_repos` in `kh.yaml`), indexed by poll and push webhook, audience `all` | indexed without review; text is data |
 | T3 | records that n8n or Claude put in with `ingest_record`, bodies in S3-compatible storage | raw material |
 
 ## Groups
@@ -48,7 +48,7 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | `kh serve` | Run the HTTP app (`/mcp`, `/webhooks/forgejo`, `/healthz`) and the job worker. |
 | `kh migrate` | Apply the pending SQL migrations as `kh_migrator`. |
 | `kh setup plan` / `kh setup apply` | Check or build the environment from `kh.yaml`: Postgres roles and tables, labels, Forgejo teams, repos, branch protection and webhook, the Ollama model, S3. |
-| `kh label`, `kh group`, `kh person` | Manage `kh.yaml` and apply the change. |
+| `kh label`, `kh group`, `kh person`, `kh repo` | Manage `kh.yaml` and apply the change. |
 | `kh key` | Create, list and revoke hub keys for workflows (`create`, `list`, `revoke`). |
 | `kh directory` | Sync the directory snapshot and inspect it (`sync`, `plan`, `people`, `show`). |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo). |

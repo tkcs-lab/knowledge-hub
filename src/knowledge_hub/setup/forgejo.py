@@ -272,22 +272,44 @@ class ForgejoStep:
         cfg = self._config
         have = {str(r.get("name")) for r in await admin.repos()}
         for repo in cfg.tech_repo_names:
-            if repo not in have:
-                out.append(Change(
-                    "!", f"tech repo {repo}: not in org {cfg.tech_org}; create the clone or fork there"
-                ))
-                continue
-            await self._collaborator(
-                out, repo, True, cfg.indexer_login, "read", cfg.indexer_login in missing, write,
-                admin=admin,
-            )
-            logins = sorted(
-                str(u.get("login")) for u in await admin.collaborators(repo)
-                if str(u.get("login")).casefold() != cfg.indexer_login.casefold()
-            )
-            out.append(Change("i", f"tech repo {repo}: collaborators {', '.join(logins) or 'none'}"))
+            await self._tech_repo(out, repo, have, write, missing, admin)
         for name in sorted(have - set(cfg.tech_repo_names)):
             out.append(Change("?", f"unmanaged tech repo {name}"))
+
+    async def _tech_repo(
+        self, out: list[Change], repo: str, have: set[str], write: bool, missing: set[str],
+        admin: ForgejoAdmin,
+    ) -> None:
+        cfg = self._config
+        if repo not in have:
+            out.append(Change(
+                "!", f"tech repo {repo}: not in org {cfg.tech_org}; create the clone or fork there"
+            ))
+            return
+        await self._collaborator(
+            out, repo, True, cfg.indexer_login, "read", cfg.indexer_login in missing, write,
+            admin=admin,
+        )
+        logins = sorted(
+            str(u.get("login")) for u in await admin.collaborators(repo)
+            if str(u.get("login")).casefold() != cfg.indexer_login.casefold()
+        )
+        out.append(Change("i", f"tech repo {repo}: collaborators {', '.join(logins) or 'none'}"))
+
+    async def sync_tech_repo(self, name: str, *, write: bool) -> list[Change]:
+        """One tech repo: it exists in the tech org, the indexer reads it, the tech webhook is there."""
+        out: list[Change] = []
+        admin = self._tech_admin
+        if admin is None:
+            return [Change("!", f"tech repo {name}: tech_org is not set")]
+        cfg = self._config
+        owners = sorted(str(u.get("login")) for u in await self._admin.org_owners())
+        missing = await self._check_accounts(out, [cfg.indexer_login], owners)
+        have = {str(r.get("name")) for r in await admin.repos()}
+        await self._tech_repo(out, name, have, write, missing, admin)
+        if name in have:
+            await self._webhook(out, write, admin=admin, label_prefix="tech ")
+        return out
 
     async def _accounts(self, out: list[Change], owners: list[str]) -> set[str]:
         """Every login the config names must exist; the bots must be neither org owner nor site admin."""

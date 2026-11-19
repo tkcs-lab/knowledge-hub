@@ -266,3 +266,57 @@ def person_remove(doc: Doc, login: str, from_groups: bool) -> bool:
                 del items[i]
     del doc.data["people"][stored]
     return True
+
+
+# tech repos
+
+
+def _tech_repos(doc: Doc) -> Any:
+    return doc.data.get("tech_repos") or {}
+
+
+def repo_add(doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None) -> bool:
+    if not doc.data.get("tech_org"):
+        raise OpError("tech_org is not set; add it to kh.yaml first")
+    if name in _tech_repos(doc):
+        raise OpError(f"tech repo {name} already exists")
+    for label in labels or []:
+        _check_label(doc, label)
+    entry = CommentedMap()
+    if labels is not None:
+        entry["labels"] = _flow(labels)
+    if dirs is not None:
+        entry["dirs"] = _flow(dirs)
+    _map(doc, "tech_repos")[name] = entry
+    return True
+
+
+def repo_set(doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None) -> bool:
+    repos = _tech_repos(doc)
+    if name not in repos:
+        raise OpError(f"unknown tech repo {name}")
+    for label in labels or []:
+        _check_label(doc, label)
+    entry = repos[name]
+    if entry is None:
+        entry = CommentedMap()
+        repos[name] = entry
+    changed = False
+    for key, value, current in (
+        ("dirs", dirs, list(entry.get("dirs", ["docs"]))),
+        ("labels", labels, list(entry.get("labels", []))),
+    ):
+        if value is None or value == current:
+            continue
+        if entry.fa.flow_style():
+            entry.fa.set_block_style()
+        entry[key] = _flow(value)
+        changed = True
+    return changed
+
+
+def repo_remove(doc: Doc, name: str) -> bool:
+    if name not in _tech_repos(doc):
+        raise OpError(f"unknown tech repo {name}")
+    del doc.data["tech_repos"][name]
+    return True

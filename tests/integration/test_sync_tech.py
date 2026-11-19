@@ -172,3 +172,18 @@ async def test_group_repo_sync_is_unchanged(world, fake, indexer_pool):
         await r.aclose()
     assert q(world, "SELECT tier, audience, title FROM kh.documents") == [("T0", "all", "A")]
     assert ("GET", "/api/v1/repos/kh/kb-all") not in group_fake.requests
+
+
+async def test_dirs_setting_selects_the_indexed_directories(world, fake, reader, indexer_pool):
+    from knowledge_hub.config import TechRepoConfig
+
+    def with_dirs(dirs):
+        return CFG.model_copy(
+            update={"tech_repos": {TECH_REPO: TechRepoConfig(labels=["ember"], dirs=dirs)}}
+        )
+
+    fake.commit(TECH_REPO, {"adr/a.md": "# A\n", "docs/b.md": "# B\n"})
+    await sync(indexer_pool, reader, config=with_dirs(["adr"]))
+    assert [r[0] for r in q(world, "SELECT path FROM kh.documents ORDER BY path")] == ["adr/a.md"]
+    await sync(indexer_pool, reader, config=with_dirs(["docs"]))
+    assert [r[0] for r in q(world, "SELECT path FROM kh.documents ORDER BY path")] == ["docs/b.md"]
