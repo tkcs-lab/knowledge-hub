@@ -78,6 +78,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - None.
 - final: Final review blocking: host guard compared the raw Host header; fix-1 compares hostnames only.
+- final: fix-1: a request with no or empty Host header is treated as the public name for the three non-public paths (fail closed); on a public_url deployment an internal probe without a Host header gets 404 for /healthz.
 
 ## p17-forgejo-membership
 
