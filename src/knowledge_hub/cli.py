@@ -119,6 +119,10 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.admin.cli import main as admin_main
 
         return admin_main(argv)
+    if argv and argv[0] == "key":
+        from knowledge_hub.auth.keys_cli import main as key_main
+
+        return key_main(argv[1:])
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in COMMANDS:
