@@ -51,6 +51,8 @@ def seeded(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
         for name in ("all", "mgmt", "empty"):
             conn.execute("INSERT INTO kh.groups (name, repo) VALUES (%s, %s)", (name, f"kb-{name}"))
+        for label in ("ember", "other", "unused"):
+            conn.execute("INSERT INTO kh.labels (name) VALUES (%s)", (label,))
         # group all: two T0 documents (one stale) and a T0a document of the tech repo
         add_chunked_doc(conn, "alpha", body="aaaa", stale=True, indexed_at=D1, labels=["ember"])
         add_chunked_doc(conn, "beta", embed=False, body="bb", indexed_at=D2, labels=["ember", "other"])

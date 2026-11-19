@@ -11,7 +11,8 @@ DB = "kh_fresh"
 
 def q(world, sql, *args):
     with psycopg.connect(world.admin_dsn(DB), autocommit=True) as conn:
-        return conn.execute(sql, args).fetchall()
+        cur = conn.execute(sql, args)
+        return cur.fetchall() if cur.description else []
 
 
 async def test_queue_rebuild_deletes_state_and_queues_once(fresh_db, indexer_pool):
