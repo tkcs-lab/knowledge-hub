@@ -36,6 +36,7 @@ class Metrics:
             self._webhooks: dict[str, int] = {}
             self._write_failures: dict[tuple[str, str], int] = {}
             self._usage_dropped = 0
+            self._directory_age: float | None = None
             self._seconds: dict[str, list[float]] = {}  # tool -> [sum, count]
 
     def tool_call(self, tool: str, outcome: str, seconds: float) -> None:
@@ -65,6 +66,10 @@ class Metrics:
         with self._lock:
             self._usage_dropped += n
 
+    def directory_snapshot_age(self, seconds: float) -> None:
+        with self._lock:
+            self._directory_age = max(0.0, float(seconds))
+
     def render(self, job_states: dict[str, int] | None = None) -> str:
         out: list[str] = []
 
@@ -80,6 +85,7 @@ class Metrics:
             seconds = sorted(self._seconds.items())
             failures = sorted(self._write_failures.items())
             dropped = self._usage_dropped
+            directory_age = self._directory_age
         block(
             "kh_tool_calls_total",
             "counter",
@@ -125,6 +131,13 @@ class Metrics:
             "Timed tool calls.",
             [(f'kh_tool_seconds_count{{tool="{_escape(t)}"}}', int(a[1])) for t, a in seconds],
         )
+        if directory_age is not None:
+            block(
+                "kh_directory_snapshot_age_seconds",
+                "gauge",
+                "Age of the adopted directory snapshot in seconds.",
+                [("kh_directory_snapshot_age_seconds", round(directory_age, 3))],
+            )
         if job_states is not None:
             block(
                 "kh_index_jobs",

@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- `directory/store.py`: the directory snapshot store, `MembershipCache` (fails closed to the static membership when the snapshot is missing, of another provider or older than `max_stale_seconds`) and `load_membership`; the gauge `kh_directory_snapshot_age_seconds`.
 - Migration `0006_identity.sql`: tables and `SECURITY DEFINER` functions for hub keys, the OAuth server state and the directory snapshot, and `deploy/rollback-0006.sql` to undo it. `kh daily` purges expired OAuth state through `jobs/daily.py` `purge_identity`.
 
 ### Changed
