@@ -11,6 +11,7 @@ import pytest
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.mcp.errors import BAD_ARG, NOT_FOUND
 from knowledge_hub.mcp.server import Deps
+from tests.support.bearer import TestBearerResolver
 from tests.support.pg import FRESH_DB
 from tests.support.principals import alice_all, bob_mgmt, multi, wf_token
 from tests.support.seed import add_chunked_record, add_doc, add_record
@@ -37,7 +38,7 @@ def app_settings(db_settings, cursor_key):
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
         settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(),
+        embedder=FakeEmbedder(), bearer=TestBearerResolver(kh_config),
     )
 
 

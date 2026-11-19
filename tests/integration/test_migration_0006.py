@@ -56,7 +56,11 @@ def world(fresh_db):
             "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'kh_nobody')"
             " THEN CREATE ROLE kh_nobody; END IF; END $$"
         )
-    return fresh_db
+    yield fresh_db
+    # Roles are cluster-wide: leave none behind for test_rls_policies' role census.
+    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
+        conn.execute("DROP OWNED BY kh_nobody")
+        conn.execute("DROP ROLE IF EXISTS kh_nobody")
 
 
 def connect(world, role):

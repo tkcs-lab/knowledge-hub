@@ -8,6 +8,7 @@ import pytest
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.mcp.errors import CURSOR_FOREIGN, NORMATIVE
 from knowledge_hub.mcp.server import Deps
+from tests.support.bearer import TestBearerResolver
 from tests.support.pg import FRESH_DB
 from tests.support.principals import alice_all, bob_mgmt
 from tests.support.seed import WHEN, add_chunked_doc, add_chunked_record
@@ -34,7 +35,7 @@ def app_settings(db_settings, cursor_key):
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
         settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(),
+        embedder=FakeEmbedder(), bearer=TestBearerResolver(kh_config),
     )
 
 
