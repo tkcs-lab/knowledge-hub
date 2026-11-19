@@ -36,7 +36,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p8-google-provider
 
-- pending
+- None.
 
 ## p9-keycloak-provider
 
