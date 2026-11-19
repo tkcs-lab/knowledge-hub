@@ -52,7 +52,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p12-oauth-store
 
-- pending
+- None.
 
 ## p13-oauth-provider
 
