@@ -1,4 +1,3 @@
-
 import pytest
 
 from knowledge_hub.config import (
@@ -376,11 +375,18 @@ def test_directory_section():
     refused({"directory": {"domains": ["a", "a"]}}, "config:")
     refused({"directory": {"domains": ["-a"]}}, "config:")
     refused({"directory": {"unknown": 1}}, "config:")
-    for key, bad in (("refresh_seconds", 59), ("refresh_seconds", 3601), ("shrink_guard_percent", 0),
-                     ("shrink_guard_percent", 100), ("max_stale_seconds", 604801)):
+    for key, bad in (
+        ("refresh_seconds", 59),
+        ("refresh_seconds", 3601),
+        ("shrink_guard_percent", 0),
+        ("shrink_guard_percent", 100),
+        ("max_stale_seconds", 604801),
+    ):
         refused({"directory": {key: bad}}, "config:")
-    refused({"directory": {"refresh_seconds": 600, "max_stale_seconds": 1000}},
-            "directory.max_stale_seconds must be at least twice refresh_seconds")
+    refused(
+        {"directory": {"refresh_seconds": 600, "max_stale_seconds": 1000}},
+        "directory.max_stale_seconds must be at least twice refresh_seconds",
+    )
 
 
 def test_example_config_still_loads():

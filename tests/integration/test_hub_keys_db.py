@@ -19,7 +19,7 @@ CFG = KhConfig(
     groups={
         "all": GroupConfig(members=["alice"], approvers=["alice"]),
         "old": GroupConfig(members=["alice"], approvers=["alice"], archived=True),
-    }
+    },
 )
 
 
@@ -117,9 +117,7 @@ async def test_last_used_moves_once_a_minute(fresh_db, app_pool, admin):
     assert first is not None
     assert await verify_key(app_pool, CFG, key) is not None
     assert last() == first
-    admin.execute(
-        "UPDATE kh.api_keys SET last_used_at = now() - interval '2 minutes' WHERE id = %s", (kid,)
-    )
+    admin.execute("UPDATE kh.api_keys SET last_used_at = now() - interval '2 minutes' WHERE id = %s", (kid,))
     assert await verify_key(app_pool, CFG, key) is not None
     assert admin.execute(
         "SELECT last_used_at > now() - interval '1 minute' FROM kh.api_keys WHERE id = %s", (kid,)

@@ -165,10 +165,15 @@ async def test_not_configured(mcp_client, seeded_db, deps):
 @pytest.mark.parametrize(
     ("args", "name"),
     [
-        ({"path": "../x.md"}, "path"), ({"path": "README.md"}, "path"), ({"path": "a.txt"}, "path"),
-        ({"id": "Bad Id"}, "id"), ({"id": ""}, "id"),
-        ({"review_by": "2027-02-30"}, "review_by"), ({"review_by": "tomorrow"}, "review_by"),
-        ({"title": ""}, "title"), ({"title": "two\nlines"}, "title"),
+        ({"path": "../x.md"}, "path"),
+        ({"path": "README.md"}, "path"),
+        ({"path": "a.txt"}, "path"),
+        ({"id": "Bad Id"}, "id"),
+        ({"id": ""}, "id"),
+        ({"review_by": "2027-02-30"}, "review_by"),
+        ({"review_by": "tomorrow"}, "review_by"),
+        ({"title": ""}, "title"),
+        ({"title": "two\nlines"}, "title"),
     ],
 )
 async def test_bad_args(mcp_client, seeded_db, forgejo, args, name):
@@ -179,8 +184,14 @@ async def test_bad_args(mcp_client, seeded_db, forgejo, args, name):
 
 @pytest.mark.parametrize(
     "args",
-    [{"body": "x <!-- hidden --> y"}, {"body": "<script>x</script>"}, {"body": "a\x00b"},
-     {"body": "a‮b"}, {"title": "T <b>"}, {"summary": "<img src=x>"}],
+    [
+        {"body": "x <!-- hidden --> y"},
+        {"body": "<script>x</script>"},
+        {"body": "a\x00b"},
+        {"body": "a‮b"},
+        {"title": "T <b>"},
+        {"summary": "<img src=x>"},
+    ],
 )
 async def test_bad_text(mcp_client, seeded_db, forgejo, args):
     res = await call(mcp_client, args)

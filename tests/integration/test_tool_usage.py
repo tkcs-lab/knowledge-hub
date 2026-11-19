@@ -95,7 +95,9 @@ async def test_related_docs_and_sample_queries_are_capped_and_sorted(mcp_client,
     for n in (1, 2):
         for q in ("Delta", "alpha", "charlie", "bravo"):
             add_usage(
-                db, who=who(n), query=q,
+                db,
+                who=who(n),
+                query=q,
                 owner_keys=[f"rec:{rec}", *[f"doc:{d}" for d in docs], f"doc:{hidden}", "doc:ghost"],
             )
     item = (await records(mcp_client))["items"][0]

@@ -145,9 +145,7 @@ async def test_non_utf8_file_is_skipped_with_an_alert(world, fake, reader, index
     monkeypatch.setattr(reader, "get_raw", get_raw)
     await sync(indexer_pool, reader)
     assert [r[0] for r in q(world, "SELECT path FROM kh.documents")] == ["docs/b.md"]
-    assert q(world, "SELECT path, message FROM kh.index_alerts") == [
-        ("docs/a.md", "file skipped: not UTF-8")
-    ]
+    assert q(world, "SELECT path, message FROM kh.index_alerts") == [("docs/a.md", "file skipped: not UTF-8")]
 
 
 async def test_label_missing_from_kh_labels_is_alerted_not_fatal(world, fake, reader, indexer_pool):

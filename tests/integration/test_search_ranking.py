@@ -35,7 +35,10 @@ def app_settings(db_settings, cursor_key):
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        settings=app_settings,
+        config=kh_config,
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
 
@@ -54,18 +57,38 @@ async def hits(mcp_client, caller, **args):
 
 
 async def test_hit_fields_and_snippet(mcp_client, db):
-    doc = add_chunked_doc(db, "quokka " + "x" * 600, title="Quokka", labels=["ember"], blob_sha="bl1",
-                          path="q.md", repo="kb-all")
+    doc = add_chunked_doc(
+        db,
+        "quokka " + "x" * 600,
+        title="Quokka",
+        labels=["ember"],
+        blob_sha="bl1",
+        path="q.md",
+        repo="kb-all",
+    )
     rec = add_chunked_record(db, "quokka record", title="QR", source_url="https://s/1")
     db.commit()
     got = {h["id"]: h for h in await hits(mcp_client, alice_all, query="quokka", min_tier="T3")}
     d, r = got[f"doc:{doc}"], got[f"rec:{rec}"]
     assert len(d["snippet"]) == 400 and d["snippet"].startswith("quokka")
     assert (d["tier"], d["title"], d["audience"], d["labels"], d["repo"], d["path"], d["blob_sha"]) == (
-        "T0", "Quokka", "all", ["ember"], "kb-all", "q.md", "bl1")
+        "T0",
+        "Quokka",
+        "all",
+        ["ember"],
+        "kb-all",
+        "q.md",
+        "bl1",
+    )
     assert (d["source_url"], d["occurred_at"], d["stale"]) == ("", "", False)
     assert (r["tier"], r["title"], r["source_url"], r["repo"], r["path"], r["blob_sha"]) == (
-        "T3", "QR", "https://s/1", "", "", "")
+        "T3",
+        "QR",
+        "https://s/1",
+        "",
+        "",
+        "",
+    )
     assert r["occurred_at"].startswith("2026-01-02")
 
 
@@ -116,6 +139,7 @@ async def test_labels_are_all_of(mcp_client, db):
     both = add_chunked_doc(db, "dingo", labels=["ember", "other"])
     none = add_chunked_doc(db, "dingo")
     db.commit()
+
     async def ids(**args):
         return {h["id"] for h in await hits(mcp_client, alice_all, query="dingo", **args)}
 
@@ -151,7 +175,8 @@ async def test_cursor_pages_and_is_bound_to_caller_and_query(mcp_client, db):
     other_query = await mcp_client.call(alice_all, "search", {"query": "wallaby", "limit": 1, "cursor": cur})
     assert other_query.is_error and other_query.text.endswith(CURSOR_FOREIGN)
     other_filter = await mcp_client.call(
-        alice_all, "search", {"query": "echidna", "limit": 1, "cursor": cur, "labels": ["ember"]})
+        alice_all, "search", {"query": "echidna", "limit": 1, "cursor": cur, "labels": ["ember"]}
+    )
     assert other_filter.is_error and other_filter.text.endswith(CURSOR_FOREIGN)
 
 

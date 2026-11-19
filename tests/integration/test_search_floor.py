@@ -35,7 +35,10 @@ def app_settings(db_settings, cursor_key):
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        settings=app_settings,
+        config=kh_config,
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
 
@@ -116,7 +119,8 @@ async def test_floor_keeps_paging_consistent(mcp_client, db, app_settings):
     assert not first.is_error, first.text
     assert len(first.data["hits"]) == 2 and first.data["next_cursor"]
     second = await mcp_client.call(
-        alice_all, "search", {"query": "echidna", "limit": 2, "cursor": first.data["next_cursor"]})
+        alice_all, "search", {"query": "echidna", "limit": 2, "cursor": first.data["next_cursor"]}
+    )
     assert not second.is_error, second.text
     assert len(second.data["hits"]) == 1 and second.data["next_cursor"] == ""
     ids = {h["id"] for h in first.data["hits"] + second.data["hits"]}

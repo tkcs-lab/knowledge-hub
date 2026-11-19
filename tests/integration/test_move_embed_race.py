@@ -17,8 +17,9 @@ DB = "kh_fresh"
 def world(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
         for name in KH_CONFIG.groups:
-            conn.execute("INSERT INTO kh.groups (name, repo) VALUES (%s, %s)",
-                         (name, KH_CONFIG.repo_for_group(name)))
+            conn.execute(
+                "INSERT INTO kh.groups (name, repo) VALUES (%s, %s)", (name, KH_CONFIG.repo_for_group(name))
+            )
     return fresh_db
 
 
@@ -48,7 +49,8 @@ async def test_audience_change_during_embedding_fails_the_job(world, indexer_poo
         "INSERT INTO kh.records (audience, source, source_ref, title, blob_key, excerpt, content_type,"
         " occurred_at, written_by, created_by_sub, created_by_type)"
         " VALUES ('all', 's', 'r', 'R', 'records/r1', 'x', 'text/plain', now(), 'kh-bot', 'sub',"
-        " 'claude_client') RETURNING id::text")
+        " 'claude_client') RETURNING id::text",
+    )
     worker = Worker(indexer_pool, None, MovingEmbedder(world, rec), KH_CONFIG, blobs, chunker_version=1)
     assert await worker.run_once() is True
     [(state, err)] = q(world, "SELECT state, last_error FROM kh.index_jobs WHERE kind = 'embed_record'")

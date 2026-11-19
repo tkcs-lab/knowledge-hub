@@ -30,8 +30,10 @@ class TechStep:
 
     async def plan(self) -> list[Change]:
         async with await psycopg.AsyncConnection.connect(self._dsn, autocommit=True) as conn:
-            return [Change("?", f"tech documents of {repo}: repo is not in tech_repos")
-                    for repo in await self._withdrawn(conn)]
+            return [
+                Change("?", f"tech documents of {repo}: repo is not in tech_repos")
+                for repo in await self._withdrawn(conn)
+            ]
 
     async def apply(self, prune: bool) -> list[Change]:
         out: list[Change] = []
@@ -41,9 +43,7 @@ class TechStep:
                     out.append(Change("?", f"tech documents of {repo}: repo is not in tech_repos"))
                     continue
                 async with conn.transaction():
-                    await conn.execute(
-                        "DELETE FROM kh.documents WHERE tier = 'T0a' AND repo = %s", (repo,)
-                    )
+                    await conn.execute("DELETE FROM kh.documents WHERE tier = 'T0a' AND repo = %s", (repo,))
                     await conn.execute("DELETE FROM kh.repo_state WHERE repo = %s", (repo,))
                 out.append(Change("-", f"tech documents of {repo}"))
         return out

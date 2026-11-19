@@ -33,7 +33,10 @@ def app_settings(db_settings, cursor_key):
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
-        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        settings=app_settings,
+        config=kh_config,
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
 

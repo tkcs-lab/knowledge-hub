@@ -62,8 +62,16 @@ async def test_new_record(mcp_client, seeded_db, fresh_db, blobs):
         " occurred_at, labels, written_by, created_by_sub, created_by_type FROM kh.records WHERE id = %s",
         key,
     )
-    assert row[:8] == ("all", "meet", "m-1", "https://x.test/m", "Weekly", f"records/{key}",
-                       "We agreed on the plan.", "text/plain")
+    assert row[:8] == (
+        "all",
+        "meet",
+        "m-1",
+        "https://x.test/m",
+        "Weekly",
+        f"records/{key}",
+        "We agreed on the plan.",
+        "text/plain",
+    )
     assert row[8].utcoffset() is not None and row[8].isoformat().startswith("2026-03-04T09:00:00")
     assert row[9:] == (["ember"], "kh-bot", "alice", "claude_client")
     got = await mcp_client.call(alice_all, "get_doc", {"id": rec_id})
@@ -198,8 +206,7 @@ async def test_other_control_characters_are_kept(mcp_client, seeded_db, blobs):
 async def _move_out(mcp_client, rec_id: str) -> None:
     from tests.support.principals import multi
 
-    res = await mcp_client.call(
-        multi, "move_item", {"id": rec_id, "from_group": "all", "to_group": "mgmt"})
+    res = await mcp_client.call(multi, "move_item", {"id": rec_id, "from_group": "all", "to_group": "mgmt"})
     assert not res.is_error, res.text
 
 
@@ -221,7 +228,8 @@ async def test_move_back_clears_the_tombstone(mcp_client, seeded_db, fresh_db, b
     first = await mcp_client.call(multi, "ingest_record", ARGS)
     await _move_out(mcp_client, first.data["id"])
     back = await mcp_client.call(
-        multi, "move_item", {"id": first.data["id"], "from_group": "mgmt", "to_group": "all"})
+        multi, "move_item", {"id": first.data["id"], "from_group": "mgmt", "to_group": "all"}
+    )
     assert not back.is_error, back.text
     again = await mcp_client.call(multi, "ingest_record", ARGS)
     assert not again.is_error, again.text

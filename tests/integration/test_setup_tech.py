@@ -36,8 +36,9 @@ def config(*repos):
 def seed(conn, repo, tier="T0a"):
     doc = add_doc(conn, repo=repo, tier=tier)
     add_chunk(conn, document_id=doc)
-    conn.execute("INSERT INTO kh.repo_state (repo, last_indexed_sha) VALUES (%s, 'x') "
-                 "ON CONFLICT DO NOTHING", (repo,))
+    conn.execute(
+        "INSERT INTO kh.repo_state (repo, last_indexed_sha) VALUES (%s, 'x') ON CONFLICT DO NOTHING", (repo,)
+    )
     return doc
 
 

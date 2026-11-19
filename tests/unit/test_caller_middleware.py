@@ -168,9 +168,7 @@ async def test_caller_none_resolver_refuses_every_token():
 
 async def test_caller_resolver_runs_before_the_body_is_read():
     mw, _ = make(max_body_bytes=10)
-    status, _, consumed = await request(
-        mw, headers=[("authorization", "Bearer nope")], chunks=[b"x" * 100]
-    )
+    status, _, consumed = await request(mw, headers=[("authorization", "Bearer nope")], chunks=[b"x" * 100])
     assert status == 401 and consumed == 0
 
 

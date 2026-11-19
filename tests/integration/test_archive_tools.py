@@ -53,7 +53,10 @@ def forgejo() -> FakeForgejo:
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
     out = Deps(
-        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        settings=app_settings,
+        config=kh_config,
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
     )
     out.forgejo_bot = ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport)
@@ -63,20 +66,31 @@ def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
 def _insert(fresh_db, **fields) -> str:
     with psycopg.connect(fresh_db.admin_dsn(FRESH_DB)) as conn:
         doc = add_chunked_doc(
-            conn, "archive probe text", embed=False, labels=["ember", "other"], audience="all",
-            repo="kb-all", **fields,
+            conn,
+            "archive probe text",
+            embed=False,
+            labels=["ember", "other"],
+            audience="all",
+            repo="kb-all",
+            **fields,
         )
         conn.commit()
     return doc
 
 
 RECORD = {
-    "source": "meet", "source_ref": "r1", "title": "T", "body": "B",
+    "source": "meet",
+    "source_ref": "r1",
+    "title": "T",
+    "body": "B",
     "occurred_at": "2026-01-02T03:04:05+00:00",
 }
 PROPOSE = {
-    "path": "guides/new.md", "id": "new-guide", "title": "A new guide",
-    "review_by": "2027-06-30", "body": "# Heading\n\nSome text.\n",
+    "path": "guides/new.md",
+    "id": "new-guide",
+    "title": "A new guide",
+    "review_by": "2027-06-30",
+    "body": "# Heading\n\nSome text.\n",
 }
 
 
@@ -99,9 +113,7 @@ async def test_ingest_into_archived_group_is_refused(mcp_client, seeded_db):
 
 
 async def test_propose_with_archived_label_is_unknown_label(mcp_client, seeded_db):
-    res = await mcp_client.call(
-        alice_all, "propose_doc", {**PROPOSE, "group": "all", "labels": ["other"]}
-    )
+    res = await mcp_client.call(alice_all, "propose_doc", {**PROPOSE, "group": "all", "labels": ["other"]})
     assert res.is_error and "unknown label" in res.text
 
 

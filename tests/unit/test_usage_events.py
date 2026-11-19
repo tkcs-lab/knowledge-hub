@@ -51,7 +51,12 @@ def test_searched_removes_nul_and_truncates():
     ev = UsageEvent.searched("a\x00b", "T3", 1, 2, ["doc:1"])
     assert ev.query == "ab"
     assert (ev.kind, ev.min_tier, ev.t0_fts_hits, ev.t3_fts_hits, ev.owner_keys) == (
-        "search", "T3", 1, 2, ("doc:1",))
+        "search",
+        "T3",
+        1,
+        2,
+        ("doc:1",),
+    )
     assert len(UsageEvent.searched("x" * 600, "T0", 0, 0, []).query) == 500
 
 

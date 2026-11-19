@@ -151,15 +151,10 @@ def _build_forgejo(monkeypatch, tmp_path, yaml_text):
 
 
 def test_forgejo_step_gets_a_tech_admin_when_tech_repos_are_set(monkeypatch, tmp_path):
-    base = (
-        "people: {alice: a@example.com}\n"
-        "groups: {all: {members: [alice], approvers: [alice]}}\n"
-    )
+    base = "people: {alice: a@example.com}\ngroups: {all: {members: [alice], approvers: [alice]}}\n"
     plain = _build_forgejo(monkeypatch, tmp_path, base)
     assert plain._tech_admin is None
-    step = _build_forgejo(
-        monkeypatch, tmp_path, base + "tech_org: kh-tech\ntech_repos: {docs-a: {}}\n"
-    )
+    step = _build_forgejo(monkeypatch, tmp_path, base + "tech_org: kh-tech\ntech_repos: {docs-a: {}}\n")
     assert step._tech_admin is not None
     assert step._tech_admin.org == "kh-tech"
     assert step._admin.org == "kh"
@@ -184,8 +179,12 @@ def test_slack_urls_file_parsing(tmp_path):
         "all": "https://hooks.slack.com/services/T0/B0/X"
     }
     assert read("") == {}
-    for text in ("- https://hooks.slack.com/a\n", "all: http://hooks.slack.com/a\n", "all: 12\n",
-                 "all: [unclosed\n"):
+    for text in (
+        "- https://hooks.slack.com/a\n",
+        "all: http://hooks.slack.com/a\n",
+        "all: 12\n",
+        "all: [unclosed\n",
+    ):
         with pytest.raises(ValueError) as exc:
             read(text)
         assert str(exc.value) == msg

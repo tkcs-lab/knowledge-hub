@@ -205,9 +205,7 @@ class ForgejoStep:
                 await self._trim(out, teams.get(team_name), team_name, keep, write)
             return
         write_team = await self._team(out, teams, name, "write", gc.members, missing, write)
-        approve_team = await self._team(
-            out, teams, f"{name}-approve", "read", gc.approvers, missing, write
-        )
+        approve_team = await self._team(out, teams, f"{name}-approve", "read", gc.approvers, missing, write)
         repo_exists = await self._repo(out, repos, repo, write)
         for team_name, tid in ((name, write_team), (f"{name}-approve", approve_team)):
             await self._team_repo(out, team_name, tid, repo, repo_exists, write)
@@ -216,8 +214,9 @@ class ForgejoStep:
         await self._protection(out, name, repo, repo_exists, write)
         await self._slack(out, name, repo, repo_exists, write, prune)
 
-    async def _trim(self, out: list[Change], team: dict[str, Any] | None, name: str,
-                    keep: list[str], write: bool) -> None:
+    async def _trim(
+        self, out: list[Change], team: dict[str, Any] | None, name: str, keep: list[str], write: bool
+    ) -> None:
         """Remove members the config dropped from an existing team; never add, never create."""
         if team is None:
             return
@@ -239,16 +238,25 @@ class ForgejoStep:
         have = {str(r.get("name")) for r in await admin.repos()}
         for repo in cfg.tech_repo_names:
             if repo not in have:
-                out.append(Change(
-                    "!", f"tech repo {repo}: not in org {cfg.tech_org}; create the clone or fork there"
-                ))
+                out.append(
+                    Change(
+                        "!", f"tech repo {repo}: not in org {cfg.tech_org}; create the clone or fork there"
+                    )
+                )
                 continue
             await self._collaborator(
-                out, repo, True, cfg.indexer_login, "read", cfg.indexer_login in missing, write,
+                out,
+                repo,
+                True,
+                cfg.indexer_login,
+                "read",
+                cfg.indexer_login in missing,
+                write,
                 admin=admin,
             )
             logins = sorted(
-                str(u.get("login")) for u in await admin.collaborators(repo)
+                str(u.get("login"))
+                for u in await admin.collaborators(repo)
                 if str(u.get("login")).casefold() != cfg.indexer_login.casefold()
             )
             out.append(Change("i", f"tech repo {repo}: collaborators {', '.join(logins) or 'none'}"))
@@ -312,9 +320,9 @@ class ForgejoStep:
             out.append(Change("+", f"team {name}: members {', '.join(wanted.values()) or '-'}"))
             if not write:
                 return None
-            team = await self._admin.create_team(name, permission, f"kh {name}", **{
-                k: v for k, v in want.items() if k != "permission"
-            })
+            team = await self._admin.create_team(
+                name, permission, f"kh {name}", **{k: v for k, v in want.items() if k != "permission"}
+            )
             teams[name] = team
             tid = int(team["id"])
             for login in wanted.values():
@@ -339,8 +347,9 @@ class ForgejoStep:
                     await self._admin.remove_team_member(tid, login)
         return tid
 
-    async def _repo(self, out: list[Change], repos: dict[str, dict[str, Any]], repo: str,
-                    write: bool) -> bool:
+    async def _repo(
+        self, out: list[Change], repos: dict[str, dict[str, Any]], repo: str, write: bool
+    ) -> bool:
         have = repos.get(repo)
         if have is None:
             out.append(Change("+", f"repo {repo}"))
@@ -359,8 +368,9 @@ class ForgejoStep:
             repos[repo] = await self._admin.edit_repo(repo, **drift)
         return True
 
-    async def _archive(self, out: list[Change], repos: dict[str, dict[str, Any]], group: str,
-                       repo: str, write: bool) -> None:
+    async def _archive(
+        self, out: list[Change], repos: dict[str, dict[str, Any]], group: str, repo: str, write: bool
+    ) -> None:
         """An archived group keeps its teams; only the repo is archived and members the config dropped
         are trimmed."""
         have = repos.get(repo)
@@ -371,8 +381,9 @@ class ForgejoStep:
             if write:
                 repos[repo] = await self._admin.edit_repo(repo, archived=True)
 
-    async def _team_repo(self, out: list[Change], name: str, tid: int | None, repo: str,
-                         repo_exists: bool, write: bool) -> None:
+    async def _team_repo(
+        self, out: list[Change], name: str, tid: int | None, repo: str, repo_exists: bool, write: bool
+    ) -> None:
         if tid is None or not repo_exists:
             out.append(Change("+", f"team repo {name}: {repo}"))
             return
@@ -385,9 +396,18 @@ class ForgejoStep:
             if other != repo:
                 out.append(Change("!", f"team repo {name}: {other} is not the group repo; remove it"))
 
-    async def _collaborator(self, out: list[Change], repo: str, repo_exists: bool, login: str,
-                            perm: str, account_missing: bool, write: bool,
-                            *, admin: ForgejoAdmin | None = None) -> None:
+    async def _collaborator(
+        self,
+        out: list[Change],
+        repo: str,
+        repo_exists: bool,
+        login: str,
+        perm: str,
+        account_missing: bool,
+        write: bool,
+        *,
+        admin: ForgejoAdmin | None = None,
+    ) -> None:
         admin = admin or self._admin
         label = f"collaborator {repo}/{login}"
         if account_missing:
@@ -416,8 +436,9 @@ class ForgejoStep:
         data = await (admin or self._admin).user_repo_permission(repo, login)
         return str(data.get("permission", "none"))
 
-    async def _protection(self, out: list[Change], group: str, repo: str, repo_exists: bool,
-                          write: bool) -> None:
+    async def _protection(
+        self, out: list[Change], group: str, repo: str, repo_exists: bool, write: bool
+    ) -> None:
         label = f"protection {repo}/main"
         want = protection_body(group)
         have = await self._admin.protection(repo) if repo_exists else None
@@ -445,9 +466,7 @@ class ForgejoStep:
         label = f"slack hook {repo}"
         channel = self._config.groups[group].slack_channel
         hooks = (
-            [h for h in await self._admin.repo_hooks(repo) if h.get("type") == "slack"]
-            if repo_exists
-            else []
+            [h for h in await self._admin.repo_hooks(repo) if h.get("type") == "slack"] if repo_exists else []
         )
         if channel is None:
             for hook in hooks:
@@ -496,8 +515,9 @@ class ForgejoStep:
         out.extend(Change("~", f"{label}: {field}") for field in drift)
         out.append(Change("i", f"{label}: url rewritten"))
 
-    async def _webhook(self, out: list[Change], write: bool, *, admin: ForgejoAdmin | None = None,
-                       label_prefix: str = "") -> None:
+    async def _webhook(
+        self, out: list[Change], write: bool, *, admin: ForgejoAdmin | None = None, label_prefix: str = ""
+    ) -> None:
         admin = admin or self._admin
         hub = self._config.hub_url
         if hub is None:
@@ -506,8 +526,11 @@ class ForgejoStep:
         url = hub.rstrip("/") + HOOK_PATH
         label = f"{label_prefix}webhook {url}"
         hook = next(
-            (h for h in await admin.org_hooks()
-             if isinstance(h.get("config"), dict) and h["config"].get("url") == url),
+            (
+                h
+                for h in await admin.org_hooks()
+                if isinstance(h.get("config"), dict) and h["config"].get("url") == url
+            ),
             None,
         )
         drift: list[str] = []

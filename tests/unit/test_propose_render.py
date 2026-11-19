@@ -15,8 +15,25 @@ def test_good_paths(path):
 
 @pytest.mark.parametrize(
     "path",
-    ["", "README.md", "A.md", "a.txt", "a", "/a.md", "a//b.md", "../a.md", "a/../b.md", ".a.md",
-     "a/.b.md", "a/.md", "a/b/", "-a.md", "a b.md", "a.md\n", "a/b..md"],
+    [
+        "",
+        "README.md",
+        "A.md",
+        "a.txt",
+        "a",
+        "/a.md",
+        "a//b.md",
+        "../a.md",
+        "a/../b.md",
+        ".a.md",
+        "a/.b.md",
+        "a/.md",
+        "a/b/",
+        "-a.md",
+        "a b.md",
+        "a.md\n",
+        "a/b..md",
+    ],
 )
 def test_bad_paths(path):
     assert not validate_path(path)
@@ -29,8 +46,23 @@ def test_good_text(text):
 
 @pytest.mark.parametrize(
     "text",
-    ["a\x00b", "a\rb", "a\x1bb", "a\x7fb", "a\x85b", "a‮b", "a‪b", "a⁦b", "a⁩b",
-     "x <!-- c --> y", "<!--", "<div>", "a <b>bold</b>", "</p>", "<script src=x>"],
+    [
+        "a\x00b",
+        "a\rb",
+        "a\x1bb",
+        "a\x7fb",
+        "a\x85b",
+        "a‮b",
+        "a‪b",
+        "a⁦b",
+        "a⁩b",
+        "x <!-- c --> y",
+        "<!--",
+        "<div>",
+        "a <b>bold</b>",
+        "</p>",
+        "<script src=x>",
+    ],
 )
 def test_bad_text(text):
     assert not check_text(text)
@@ -49,7 +81,12 @@ def test_render_parses_back():
     doc = parse_document(out, "d1.md")
     assert isinstance(doc, ParsedDoc)
     assert (doc.id, doc.title, doc.review_by.isoformat(), doc.labels, doc.body) == (
-        "d1", "A: tricky # title", "2027-01-31", ["x"], body)
+        "d1",
+        "A: tricky # title",
+        "2027-01-31",
+        ["x"],
+        body,
+    )
 
 
 def test_render_empty_labels():

@@ -48,12 +48,7 @@ def test_no_skip_checks_or_latest(text):
 
 
 def test_every_run_step_is_strict(wf):
-    runs = [
-        step["run"]
-        for job in wf["jobs"].values()
-        for step in job["steps"]
-        if "run" in step
-    ]
+    runs = [step["run"] for job in wf["jobs"].values() for step in job["steps"] if "run" in step]
     assert runs
     for run in runs:
         assert run.lstrip().startswith("set -euo pipefail"), run

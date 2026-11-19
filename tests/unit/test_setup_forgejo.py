@@ -70,8 +70,14 @@ async def admin(fake):
 
 
 def step(admin, config=None, *, secret="hmac", bot="bot-tok", indexer="idx-tok", slack=None):
-    return ForgejoStep(parse_config(config or CONFIG), admin, webhook_secret=secret,
-                       bot_token=bot, indexer_token=indexer, slack_urls=slack)
+    return ForgejoStep(
+        parse_config(config or CONFIG),
+        admin,
+        webhook_secret=secret,
+        bot_token=bot,
+        indexer_token=indexer,
+        slack_urls=slack,
+    )
 
 
 def lines(changes):
@@ -98,10 +104,19 @@ async def test_first_plan_is_only_creations(fake, admin):
     changes = await step(admin).plan()
     assert {c.prefix for c in changes} <= {"+", "i"}
     texts = [c.text for c in changes if c.prefix == "+"]
-    for name in ("team all", "team all-approve", "repo kb-all", "team mgmt", "repo kb-management",
-                 "protection kb-all/main", "protection kb-management/main", f"webhook {URL}",
-                 "collaborator kb-all/kh-bot", "collaborator kb-all/kh-indexer",
-                 "team repo all-approve: kb-all"):
+    for name in (
+        "team all",
+        "team all-approve",
+        "repo kb-all",
+        "team mgmt",
+        "repo kb-management",
+        "protection kb-all/main",
+        "protection kb-management/main",
+        f"webhook {URL}",
+        "collaborator kb-all/kh-bot",
+        "collaborator kb-all/kh-indexer",
+        "team repo all-approve: kb-all",
+    ):
         assert any(t.startswith(name) for t in texts), name
     assert "i webhook secret not verifiable" in lines(changes)
     # plan wrote nothing
@@ -166,19 +181,29 @@ async def test_approver_removed(fake, admin, applied):
     await repaired(admin, "~", r"^team all-approve: members \+alice")
 
 
-@pytest.mark.parametrize("field,value", [
-    ("permission", "admin"), ("units_map", {"repo.code": "admin"}),
-    ("includes_all_repositories", True), ("can_create_org_repo", True),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("permission", "admin"),
+        ("units_map", {"repo.code": "admin"}),
+        ("includes_all_repositories", True),
+        ("can_create_org_repo", True),
+    ],
+)
 async def test_team_field_changed(fake, admin, applied, field, value):
     fake.teams[fake.team_id("all-approve")][field] = value
     await repaired(admin, "~", rf"^team all-approve: {field}$")
 
 
-@pytest.mark.parametrize("field,value", [
-    ("private", False), ("default_branch", "dev"), ("has_actions", True),
-    ("default_delete_branch_after_merge", False),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("private", False),
+        ("default_branch", "dev"),
+        ("has_actions", True),
+        ("default_delete_branch_after_merge", False),
+    ],
+)
 async def test_repo_setting_changed(fake, admin, applied, field, value):
     fake.repos["kb-all"][field] = value
     await repaired(admin, "~", rf"^repo kb-all: {field}$")
@@ -195,11 +220,18 @@ async def test_collaborator_permission_raised(fake, admin, applied):
     assert fake.collabs["kb-all"]["kh-indexer"] == "read"
 
 
-@pytest.mark.parametrize("field,value", [
-    ("enable_push", True), ("enable_push_whitelist", True), ("enable_merge_whitelist", False),
-    ("merge_whitelist_teams", ["all"]), ("required_approvals", 1),
-    ("block_on_rejected_reviews", False), ("apply_to_admins", False),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("enable_push", True),
+        ("enable_push_whitelist", True),
+        ("enable_merge_whitelist", False),
+        ("merge_whitelist_teams", ["all"]),
+        ("required_approvals", 1),
+        ("block_on_rejected_reviews", False),
+        ("apply_to_admins", False),
+    ],
+)
 async def test_protection_field_changed(fake, admin, applied, field, value):
     fake.protections["kb-all"]["main"][field] = value
     await repaired(admin, "~", rf"^protection kb-all/main: {field}$")
@@ -345,8 +377,7 @@ async def test_missing_accounts(fake, admin):
 
 
 async def test_new_group_leaves_existing_ones_alone(fake, admin, applied):
-    config = {**CONFIG, "groups": {**CONFIG["groups"],
-                                   "ops": {"members": ["bob"], "approvers": ["bob"]}}}
+    config = {**CONFIG, "groups": {**CONFIG["groups"], "ops": {"members": ["bob"], "approvers": ["bob"]}}}
     fake.requests.clear()
     changes = await step(admin, config).apply(prune=False)
     assert all("ops" in c.text for c in changes if c.prefix in DRIFT), lines(changes)
@@ -431,8 +462,15 @@ async def tech_admin(tech_fake):
 
 
 def tech_step(admin, tech_admin, config=None, **kw):
-    return ForgejoStep(parse_config(config or TECH_CONFIG), admin, webhook_secret="hmac",
-                       bot_token="bot-tok", indexer_token="idx-tok", tech_admin=tech_admin, **kw)
+    return ForgejoStep(
+        parse_config(config or TECH_CONFIG),
+        admin,
+        webhook_secret="hmac",
+        bot_token="bot-tok",
+        indexer_token="idx-tok",
+        tech_admin=tech_admin,
+        **kw,
+    )
 
 
 async def test_tech_repo_missing_is_a_refusal_line(fake, admin, tech_fake, tech_admin):
@@ -493,8 +531,14 @@ async def test_tech_webhook_lines_have_the_tech_prefix(fake, admin, tech_fake, t
 
 async def test_no_tech_repos_changes_no_output(fake, admin, tech_fake, tech_admin):
     plain = lines(await step(admin).plan())
-    s = ForgejoStep(parse_config(CONFIG), admin, webhook_secret="hmac", bot_token="bot-tok",
-                    indexer_token="idx-tok", tech_admin=None)
+    s = ForgejoStep(
+        parse_config(CONFIG),
+        admin,
+        webhook_secret="hmac",
+        bot_token="bot-tok",
+        indexer_token="idx-tok",
+        tech_admin=None,
+    )
     assert lines(await s.plan()) == plain
     assert tech_fake.requests == []
 
@@ -506,12 +550,16 @@ async def test_tech_repos_never_get_teams_or_protection(fake, admin, tech_fake, 
     assert [t["name"] for t in tech_fake.teams.values()] == ["Owners"]
     assert tech_fake.protections == {"docs-a": {}, "docs-b": {}}
     assert tech_fake.repos["docs-a"] == tech_fake._new_repo("docs-a")
-    bad = [(m, p) for m, p in tech_fake.requests
-           if m != "GET" and "/collaborators/" not in p and "/hooks" not in p]
+    bad = [
+        (m, p)
+        for m, p in tech_fake.requests
+        if m != "GET" and "/collaborators/" not in p and "/hooks" not in p
+    ]
     assert bad == []
 
 
 # -- Slack repo hooks ----------------------------------------------------------------------------------
+
 
 @pytest.fixture
 async def slack_applied(fake, admin):
@@ -542,12 +590,15 @@ async def test_slack_plan_before_apply_is_a_creation(fake, admin):
     assert fake.repo_hooks == {}
 
 
-@pytest.mark.parametrize("field, key, value", [
-    ("events", "events", ["push"]),
-    ("content_type", "config.content_type", "form"),
-    ("channel", "config.channel", "#other"),
-    ("active", "active", False),
-])
+@pytest.mark.parametrize(
+    "field, key, value",
+    [
+        ("events", "events", ["push"]),
+        ("content_type", "config.content_type", "form"),
+        ("channel", "config.channel", "#other"),
+        ("active", "active", False),
+    ],
+)
 async def test_slack_hook_field_changed(fake, slack_applied, field, key, value):
     [hook] = fake.repo_hooks["kb-all"].values()
     if key.startswith("config."):
@@ -593,7 +644,11 @@ async def test_slack_url_missing_is_refused(fake, admin, slack):
 async def test_two_slack_hooks_are_refused(fake, slack_applied):
     fake._next_id += 1
     fake.repo_hooks["kb-all"][fake._next_id] = {
-        "id": fake._next_id, "type": "slack", "config": {}, "events": [], "active": True
+        "id": fake._next_id,
+        "type": "slack",
+        "config": {},
+        "events": [],
+        "active": True,
     }
     fake.requests.clear()
     msg = "! slack hook kb-all: 2 Slack hooks; delete the extra ones in Forgejo"
@@ -607,7 +662,11 @@ async def test_unmanaged_slack_hook_and_prune(fake, slack_applied):
     fake._next_id += 1
     hid = fake._next_id
     fake.repo_hooks["kb-management"][hid] = {
-        "id": hid, "type": "slack", "config": {}, "events": [], "active": True
+        "id": hid,
+        "type": "slack",
+        "config": {},
+        "events": [],
+        "active": True,
     }
     assert "? unmanaged slack hook kb-management" in lines(await slack_applied.plan())
     assert "? unmanaged slack hook kb-management" in lines(await slack_applied.apply(prune=False))
@@ -644,6 +703,7 @@ async def test_archived_group_slack_hook_untouched(fake, admin, slack_applied):
 
 
 # -- single-group methods (plan 3.6) -----------------------------------------------------------------
+
 
 async def test_sync_group_touches_only_that_group(fake, admin, applied):
     fake.requests.clear()

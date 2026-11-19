@@ -217,8 +217,10 @@ class FakeForgejo:
         for p in files:
             parts = p.split("/")
             dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
-        entries = [{"path": d, "type": "tree", "sha": hashlib.sha1(d.encode()).hexdigest(), "size": 0}  # noqa: S324
-                   for d in dirs]
+        entries = [
+            {"path": d, "type": "tree", "sha": hashlib.sha1(d.encode()).hexdigest(), "size": 0}  # noqa: S324
+            for d in dirs
+        ]
         entries += [
             {"path": p, "type": "blob", "sha": blob_sha(t), "size": len(t.encode("utf-8"))}
             for p, t in files.items()
@@ -289,8 +291,15 @@ class FakeForgejo:
         return httpx.Response(201, json=pull)
 
 
-def md(doc_id: str, title: str = "T", *, labels: list[str] | None = None, review_by: str = "2099-01-01",
-       body: str = "Body text.\n", supersedes: list[str] | None = None) -> str:
+def md(
+    doc_id: str,
+    title: str = "T",
+    *,
+    labels: list[str] | None = None,
+    review_by: str = "2099-01-01",
+    body: str = "Body text.\n",
+    supersedes: list[str] | None = None,
+) -> str:
     """A Markdown file with the required frontmatter (``labels`` omitted when None)."""
     lab = "" if labels is None else f"labels: [{', '.join(labels)}]\n"
     sup = "" if supersedes is None else f"supersedes: [{', '.join(supersedes)}]\n"

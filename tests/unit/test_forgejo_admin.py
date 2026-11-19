@@ -5,9 +5,14 @@ from knowledge_hub.forgejo.admin import ForgejoAdmin
 from tests.support.forgejo_admin_fake import FakeForgejoAdmin
 
 PROT = {
-    "rule_name": "main", "enable_push": False, "enable_push_whitelist": False,
-    "enable_merge_whitelist": True, "merge_whitelist_teams": ["g-approve"],
-    "required_approvals": 0, "block_on_rejected_reviews": True, "apply_to_admins": True,
+    "rule_name": "main",
+    "enable_push": False,
+    "enable_push_whitelist": False,
+    "enable_merge_whitelist": True,
+    "merge_whitelist_teams": ["g-approve"],
+    "required_approvals": 0,
+    "block_on_rejected_reviews": True,
+    "apply_to_admins": True,
 }
 
 
@@ -87,7 +92,8 @@ async def test_protection_create_then_edit_by_rule_name(fake, admin):
     stored = await admin.protection("kb-g")
     assert stored["required_approvals"] == 1 and stored["merge_whitelist_teams"] == ["g-approve"]
     assert [m for m, p in fake.requests if "branch_protections" in p and m in ("POST", "PATCH")] == [
-        "POST", "PATCH",
+        "POST",
+        "PATCH",
     ]
 
 
@@ -117,8 +123,12 @@ async def test_whitelist_unknown_team_is_422(admin):
 
 async def test_org_hooks(fake, admin):
     assert await admin.org_hooks() == []
-    body = {"type": "forgejo", "config": {"url": "https://hub/webhooks/forgejo", "content_type": "json",
-                                           "secret": "s1"}, "events": ["push"], "active": True}
+    body = {
+        "type": "forgejo",
+        "config": {"url": "https://hub/webhooks/forgejo", "content_type": "json", "secret": "s1"},
+        "events": ["push"],
+        "active": True,
+    }
     hook = await admin.create_org_hook(body)
     assert [h["id"] for h in await admin.org_hooks()] == [hook["id"]]
     edited = await admin.edit_org_hook(hook["id"], {"config": {"secret": "s2"}, "active": False})
@@ -165,8 +175,12 @@ async def test_non_admin_token_is_refused(fake):
 async def test_repo_hooks(fake, admin):
     await admin.create_repo("kb-g")
     assert await admin.repo_hooks("kb-g") == []
-    body = {"type": "slack", "config": {"url": "https://hooks.slack.com/x", "content_type": "json",
-                                         "channel": "#kh-g"}, "events": ["pull_request"], "active": True}
+    body = {
+        "type": "slack",
+        "config": {"url": "https://hooks.slack.com/x", "content_type": "json", "channel": "#kh-g"},
+        "events": ["pull_request"],
+        "active": True,
+    }
     hook = await admin.create_repo_hook("kb-g", body)
     assert [h["id"] for h in await admin.repo_hooks("kb-g")] == [hook["id"]]
     edited = await admin.edit_repo_hook("kb-g", hook["id"], {"active": False})

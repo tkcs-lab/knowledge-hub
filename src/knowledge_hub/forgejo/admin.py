@@ -39,8 +39,15 @@ class ForgejoAdmin(_Http):
                 break
         return out
 
-    async def _obj(self, method: str, path: str, *, body: dict[str, Any] | None = None,
-                   ok: tuple[int, ...] = (200,), missing: bool = False) -> dict[str, Any] | None:
+    async def _obj(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, Any] | None = None,
+        ok: tuple[int, ...] = (200,),
+        missing: bool = False,
+    ) -> dict[str, Any] | None:
         data = await self._json(method, path, body=body, ok=ok, missing=missing)
         if data is None:
             return None
@@ -48,8 +55,9 @@ class ForgejoAdmin(_Http):
             raise ForgejoError(f"{method} {path} failed: response is not an object")
         return data
 
-    async def _obj_required(self, method: str, path: str, *, body: dict[str, Any] | None = None,
-                            ok: tuple[int, ...] = (200,)) -> dict[str, Any]:
+    async def _obj_required(
+        self, method: str, path: str, *, body: dict[str, Any] | None = None, ok: tuple[int, ...] = (200,)
+    ) -> dict[str, Any]:
         data = await self._obj(method, path, body=body, ok=ok)
         assert data is not None
         return data
@@ -59,8 +67,9 @@ class ForgejoAdmin(_Http):
     async def org_teams(self) -> list[dict[str, Any]]:
         return await self._list(f"/orgs/{q(self.org)}/teams")
 
-    async def create_team(self, name: str, permission: str, description: str = "",
-                          **fields: Any) -> dict[str, Any]:
+    async def create_team(
+        self, name: str, permission: str, description: str = "", **fields: Any
+    ) -> dict[str, Any]:
         body = {"name": name, "permission": permission, "description": description, **fields}
         return await self._obj_required("POST", f"/orgs/{q(self.org)}/teams", body=body, ok=(201,))
 
@@ -101,8 +110,9 @@ class ForgejoAdmin(_Http):
         return await self._list(f"{self._repo(repo)}/collaborators")
 
     async def put_collaborator(self, repo: str, login: str, permission: str) -> None:
-        await self._request("PUT", f"{self._repo(repo)}/collaborators/{q(login)}",
-                            body={"permission": permission}, ok=(204,))
+        await self._request(
+            "PUT", f"{self._repo(repo)}/collaborators/{q(login)}", body={"permission": permission}, ok=(204,)
+        )
 
     # -- branch protection -----------------------------------------------------------------------
 
@@ -169,9 +179,7 @@ class ForgejoAdmin(_Http):
         return data
 
     async def user_repo_permission(self, repo: str, login: str) -> dict[str, Any]:
-        return await self._obj_required(
-            "GET", f"{self._repo(repo)}/collaborators/{q(login)}/permission"
-        )
+        return await self._obj_required("GET", f"{self._repo(repo)}/collaborators/{q(login)}/permission")
 
     async def org_owners(self) -> list[dict[str, Any]]:
         """Members of the org's Owners team (people who can bypass protection)."""

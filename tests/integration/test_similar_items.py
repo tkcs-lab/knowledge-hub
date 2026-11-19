@@ -20,7 +20,11 @@ pytestmark = pytest.mark.integration
 
 TITLE, BODY = "Quokka plan", "We agreed on the quokka plan."
 ARGS = {
-    "source": "meet", "source_ref": "m-1", "title": TITLE, "body": BODY, "audience": "all",
+    "source": "meet",
+    "source_ref": "m-1",
+    "title": TITLE,
+    "body": BODY,
+    "audience": "all",
     "occurred_at": "2026-03-04T10:00:00+01:00",
 }
 QUERY = f"{TITLE}\n\n{BODY}"
@@ -48,8 +52,12 @@ def forgejo() -> FakeForgejo:
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
     return Deps(
-        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(), blobs=MemoryBlobStore(),
+        settings=app_settings,
+        config=kh_config,
+        app_pool=app_pool,
+        indexer_pool=indexer_pool,
+        embedder=FakeEmbedder(),
+        blobs=MemoryBlobStore(),
         forgejo_bot=ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport),
     )
 
@@ -91,8 +99,15 @@ async def test_other_group_items_are_never_returned(mcp_client, db):
 
 
 async def test_outdated_and_superseded_items_are_not_returned(mcp_client, db):
-    seed_rec(db, TITLE, BODY, outdated=True, outdated_at="2026-01-02T00:00:00+00:00",
-             outdated_by="alice", replaced_by="")
+    seed_rec(
+        db,
+        TITLE,
+        BODY,
+        outdated=True,
+        outdated_at="2026-01-02T00:00:00+00:00",
+        outdated_by="alice",
+        replaced_by="",
+    )
     new = add_chunked_doc(db, "unrelated successor words", embed=False)
     add_chunked_doc(db, BODY, vector_of=QUERY, title=TITLE, superseded_by=new)
     db.commit()
@@ -150,14 +165,29 @@ async def test_existing_record_returns_no_similar_key(mcp_client, db):
 
 async def test_propose_doc_excludes_the_document_being_edited(mcp_client, db, forgejo):
     title, body = "Guide", "# Heading\n\nSome text.\n"
-    doc = add_chunked_doc(db, body, vector_of=f"{title}\n\n{body}", title=title, repo="kb-all",
-                          doc_key="g-1", path="guides/g.md", blob_sha="b1")
+    doc = add_chunked_doc(
+        db,
+        body,
+        vector_of=f"{title}\n\n{body}",
+        title=title,
+        repo="kb-all",
+        doc_key="g-1",
+        path="guides/g.md",
+        blob_sha="b1",
+    )
     other = add_chunked_doc(db, body, vector_of=f"{title}\n\n{body}", title=title)
     db.commit()
     old = md("g-1", "Guide")
     forgejo.commit("kb-all", {"guides/g.md": old})
-    args = {"group": "all", "path": "guides/g.md", "id": "g-1", "title": title,
-            "review_by": "2027-06-30", "body": body, "base_blob": blob_sha(old)}
+    args = {
+        "group": "all",
+        "path": "guides/g.md",
+        "id": "g-1",
+        "title": title,
+        "review_by": "2027-06-30",
+        "body": body,
+        "base_blob": blob_sha(old),
+    }
     res = await mcp_client.call(alice_all, "propose_doc", args)
     assert not res.is_error, res.text
     ids = [s["id"] for s in res.data["similar"]]

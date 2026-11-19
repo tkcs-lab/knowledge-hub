@@ -78,9 +78,7 @@ def build_app(settings: Settings, deps: Deps) -> Starlette:
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        holder["middleware"] = CallerMiddleware(
-            mcp_handler, deps.bearer, settings, config=deps.config
-        )
+        holder["middleware"] = CallerMiddleware(mcp_handler, deps.bearer, settings, config=deps.config)
         task = asyncio.create_task(deps.worker.run_forever()) if deps.worker is not None else None
         try:
             async with mcp.session_manager.run():
