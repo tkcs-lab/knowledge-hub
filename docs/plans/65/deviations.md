@@ -10,6 +10,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p1b-example-files
 
 - None.
+- gate: Release 0.6.0 was cut on main after the plan was written; by the owner's decision (board ask) a revision worker set the compose image tags and the inspect comment to 0.6.0 and removed the 'first release after 0.5.1' warning comment.
 
 ## p2-runbooks
 
