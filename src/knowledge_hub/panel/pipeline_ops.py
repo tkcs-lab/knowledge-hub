@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from knowledge_hub.config import ConfigError
 from knowledge_hub.jobs.rebuild_queue import queue_rebuild
 from knowledge_hub.jobs.requeue import requeue_embeddings
 from knowledge_hub.jobs.retry import reclaim_stuck, retry_jobs
 from knowledge_hub.panel.context import PanelContext
 from knowledge_hub.panel.ops import OpError
-
-
-def _noun(count: int) -> str:
-    return f"{count} job" + ("" if count == 1 else "s")
 
 
 async def run_inproc(name: str, args: dict[str, Any], ctx: PanelContext) -> str:
@@ -21,7 +18,10 @@ async def run_inproc(name: str, args: dict[str, Any], ctx: PanelContext) -> str:
         raise OpError("no database connection")
     if name == "repo.rebuild":
         repo = args["repo"]
-        cfg = ctx.load_config()
+        try:
+            cfg = ctx.load_config()
+        except ConfigError as exc:
+            raise OpError(str(exc)) from exc
         configured = {cfg.repo_for_group(g) for g in cfg.active_groups} | set(cfg.tech_repo_names)
         if repo not in configured:
             raise OpError(f"repo {repo} is not configured")
@@ -29,9 +29,9 @@ async def run_inproc(name: str, args: dict[str, Any], ctx: PanelContext) -> str:
             return f"queued rebuild of {repo}"
         return f"rebuild of {repo} is already queued"
     if name == "jobs.retry":
-        return f"retried {_noun(await retry_jobs(ctx.pool, args.get('ids')))}"
+        return f"retried {await retry_jobs(ctx.pool, args.get('ids'))} jobs"
     if name == "jobs.reclaim":
-        return f"reclaimed {_noun(await reclaim_stuck(ctx.pool))}"
+        return f"reclaimed {await reclaim_stuck(ctx.pool)} jobs"
     if name == "embeddings.requeue":
         return f"queued {await requeue_embeddings(ctx.pool)} embed_record jobs"
     raise OpError("unknown operation")

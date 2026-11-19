@@ -54,6 +54,13 @@ class FakeConn:
             raise ConnectionError("db down")
         return None
 
+    @asynccontextmanager
+    async def transaction(self):
+        yield
+
+    async def rollback(self):
+        return None
+
 
 class FakePool:
     db_error = False

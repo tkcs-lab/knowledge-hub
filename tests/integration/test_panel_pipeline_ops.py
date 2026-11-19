@@ -55,16 +55,16 @@ def _job(world, state, attempts=0, age="0 minutes"):
 async def test_jobs_retry(ctx, fresh_db):
     dead = _job(fresh_db, "failed", attempts=MAX_ATTEMPTS)
     other = _job(fresh_db, "failed", attempts=MAX_ATTEMPTS)
-    assert await run_inproc("jobs.retry", {"ids": [dead]}, ctx) == "retried 1 job"
+    assert await run_inproc("jobs.retry", {"ids": [dead]}, ctx) == "retried 1 jobs"
     assert _q(fresh_db, "SELECT state FROM kh.index_jobs WHERE id = %s", (dead,)) == [("queued",)]
     assert _q(fresh_db, "SELECT state FROM kh.index_jobs WHERE id = %s", (other,)) == [("failed",)]
-    assert await run_inproc("jobs.retry", {}, ctx) == "retried 1 job"
+    assert await run_inproc("jobs.retry", {}, ctx) == "retried 1 jobs"
 
 
 async def test_jobs_reclaim(ctx, fresh_db):
     old = _job(fresh_db, "running", age="2 hours")
     young = _job(fresh_db, "running", age="1 minute")
-    assert await run_inproc("jobs.reclaim", {}, ctx) == "reclaimed 1 job"
+    assert await run_inproc("jobs.reclaim", {}, ctx) == "reclaimed 1 jobs"
     assert _q(fresh_db, "SELECT state FROM kh.index_jobs WHERE id = %s", (old,)) == [("queued",)]
     assert _q(fresh_db, "SELECT state FROM kh.index_jobs WHERE id = %s", (young,)) == [("running",)]
 
