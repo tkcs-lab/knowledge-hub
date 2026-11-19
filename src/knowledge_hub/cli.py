@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from knowledge_hub.config import KhConfig, load_config
+from knowledge_hub.config_watch import EXIT_RESTART, watch
 from knowledge_hub.settings import Settings, load_settings
 
 COMMANDS = ("serve", "migrate")
 JOB_COMMANDS = ("rebuild", "check", "daily", "requeue-embeddings")
 
 
-async def _serve(settings: Settings, config: KhConfig, port: int) -> None:
+async def _serve(settings: Settings, config: KhConfig, port: int) -> int:
     import uvicorn
 
     from knowledge_hub.app import build_app
@@ -27,7 +29,25 @@ async def _serve(settings: Settings, config: KhConfig, port: int) -> None:
     try:
         app = build_app(settings, deps)
         server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info"))
-        await server.serve()
+        changed: list[bool] = []
+
+        def on_change() -> None:
+            server.should_exit = True
+            changed.append(True)
+
+        watcher = None
+        if settings.config_file is not None and settings.config_watch_seconds > 0:
+            watcher = asyncio.create_task(
+                watch(settings.config_file, config, settings.config_watch_seconds, on_change)
+            )
+        try:
+            await server.serve()
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watcher
+        return EXIT_RESTART if changed else 0
     finally:
         await close_deps(deps)
 
@@ -164,13 +184,12 @@ def main(argv: list[str] | None = None) -> int:
             print(exc, file=sys.stderr)
             return 2
     try:
-        asyncio.run(_serve(settings, config, args.port))
+        return asyncio.run(_serve(settings, config, args.port))
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        pass
-    return 0
+        return 0
 
 
 if __name__ == "__main__":
