@@ -24,6 +24,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Final review
 
 - final: The command table of docs/deployment.md grouped kh group, person and repo with kh migrate (migrator only); they build the setup forgejo step and need the setup Forgejo admin token, so they belong with kh setup. Fixed by fix-1.
+- scope: docs/runbook.md: fix-1 also edited the runbook restore steps (wording and --config) for non-blocking review findings 4 and 5; accepted.
 
 ## Finishing
 
