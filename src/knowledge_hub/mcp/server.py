@@ -21,6 +21,8 @@ class Deps:
     embedder: Any = None
     blobs: Any = None
     bearer: Any = None
+    membership: Any = None
+    oauth: Any = None
     ratelimiter: Any = None
     reader: Any = None
     worker: Any = None

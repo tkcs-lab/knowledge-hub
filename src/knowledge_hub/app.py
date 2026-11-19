@@ -3,9 +3,11 @@
 import asyncio
 import contextlib
 import hmac
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlsplit
 
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
@@ -13,11 +15,29 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
+from knowledge_hub.auth.hostguard import PublicHostGuard
 from knowledge_hub.auth.middleware import CallerMiddleware
 from knowledge_hub.indexer.webhook import make_webhook_endpoint
 from knowledge_hub.mcp.server import Deps, build_mcp
 from knowledge_hub.metrics import JOB_STATES, METRICS
+from knowledge_hub.oauth.routes import build_oauth_routes
 from knowledge_hub.settings import Settings
+
+log = logging.getLogger("knowledge_hub.app")
+
+PUBLIC_PATHS = frozenset(
+    {
+        "/mcp",
+        "/authorize",
+        "/token",
+        "/register",
+        "/revoke",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/oauth/callback",
+        "/oauth/consent",
+    }
+)
 
 
 def allowed_hosts(settings: Settings) -> list[str]:
@@ -55,7 +75,12 @@ def make_metrics_endpoint(settings: Settings, deps: Deps):
     return metrics
 
 
-def build_app(settings: Settings, deps: Deps) -> Starlette:
+def build_app(
+    settings: Settings,
+    deps: Deps,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> Any:
     """Root app. The caller opens ``deps.app_pool`` before the first request."""
     mcp = build_mcp(deps)
     sdk_app = mcp.streamable_http_app(
@@ -76,16 +101,32 @@ def build_app(settings: Settings, deps: Deps) -> Starlette:
         async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
             await holder["middleware"](scope, receive, send)
 
+    async def refresh_loop() -> None:
+        while True:
+            await sleep(settings.directory_view_seconds)
+            try:
+                await deps.membership.refresh()
+            except Exception:
+                log.exception("membership refresh failed")
+
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         holder["middleware"] = CallerMiddleware(
-            mcp_handler, deps.bearer, settings, config=deps.config
+            mcp_handler, deps.bearer, settings, config=deps.config, public_url=settings.public_url
         )
+        refresher = None
+        if deps.membership is not None:
+            await deps.membership.refresh()
+            refresher = asyncio.create_task(refresh_loop())
         task = asyncio.create_task(deps.worker.run_forever()) if deps.worker is not None else None
         try:
             async with mcp.session_manager.run():
                 yield
         finally:
+            if refresher is not None:
+                refresher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await refresher
             if task is not None:
                 deps.worker.stop()
                 try:
@@ -102,7 +143,9 @@ def build_app(settings: Settings, deps: Deps) -> Starlette:
     ]
     if settings.metrics_token_file is not None:
         routes.append(Route("/metrics", make_metrics_endpoint(settings, deps), methods=["GET"]))
-    return Starlette(
-        routes=routes,
-        lifespan=lifespan,
-    )
+    if settings.oauth_enabled and deps.oauth:
+        routes = [*build_oauth_routes(settings, deps.oauth["provider"], deps.oauth["flow"]), *routes]
+    app = Starlette(routes=routes, lifespan=lifespan)
+    if settings.public_url:
+        return PublicHostGuard(app, urlsplit(settings.public_url).netloc, PUBLIC_PATHS)
+    return app
