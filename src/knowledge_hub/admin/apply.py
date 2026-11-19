@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -23,7 +24,9 @@ Edit = Callable[[Doc], bool]
 Check = Callable[["Steps", KhConfig], Awaitable[str | None]]
 After = Callable[["Steps", bool], Awaitable[list[Change]]]
 
-RESTART_NOTE = "restart kh serve: the hub reads kh.yaml at start"
+RESTART_NOTE = (
+    "kh serve restarts itself within KH_CONFIG_WATCH_SECONDS; restart it by hand when the watch is off"
+)
 
 
 class StepBuildError(Exception):
@@ -73,6 +76,10 @@ def _refused(changes: Sequence[Change], target: str | None) -> bool:
     return any(c.prefix == "!" and (c.text == target or c.text.startswith(target + ":")) for c in changes)
 
 
+def text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 async def execute(
     path: Path | None,
     edit: Edit,
@@ -84,13 +91,16 @@ async def execute(
     dry_run: bool,
     no_apply: bool,
     steps_factory: StepsFactory | None = None,
+    if_sha256: str | None = None,
 ) -> int:
     if path is None:
         print("admin: no config file: pass --config or set KH_CONFIG_FILE")
         return 2
     try:
         with yamledit.locked(path):
-            return await _run(path, edit, check, after, target, notes, dry_run, no_apply, steps_factory)
+            return await _run(
+                path, edit, check, after, target, notes, dry_run, no_apply, steps_factory, if_sha256
+            )
     except ConfigError as exc:
         print(str(exc))
         return 2
@@ -106,8 +116,12 @@ async def _run(
     dry_run: bool,
     no_apply: bool,
     steps_factory: StepsFactory | None,
+    if_sha256: str | None = None,
 ) -> int:
     doc = yamledit.load(path)
+    if if_sha256 is not None and if_sha256 != text_sha256(doc.text):
+        print("admin: kh.yaml changed since the preview; preview again")
+        return 2
     if not edit(doc):
         print("nothing to change")
         return 0
@@ -182,6 +196,9 @@ async def _run(
             print("kh.yaml unchanged")
             return 2
 
+    if Path(path).read_text() != doc.text:
+        print("admin: kh.yaml changed while the command ran; run it again")
+        return 2
     yamledit.commit(path, new_text)
     code = 0
     if failed:
@@ -208,4 +225,3 @@ def _not_set(name: str, dry_run: bool) -> int:
         return 0
     print(f"admin: {name} is not set")
     return 2
-

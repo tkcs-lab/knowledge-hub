@@ -263,7 +263,7 @@ def test_success_prints_restart_note_and_commits(tmp_path, capsys):
     assert run(path, add_label(), after=after) == 0
     out = capsys.readouterr().out
     assert "+ label b" in out and "kh.yaml updated" in out
-    assert "restart kh serve: the hub reads kh.yaml at start" in out
+    assert apply.RESTART_NOTE in out
     assert "b: second" in path.read_text()
 
 
@@ -292,4 +292,32 @@ def test_notes_are_printed_after_success(tmp_path, capsys):
     assert run(path, add_label(), notes=["note one", "note two"]) == 0
     out = capsys.readouterr().out
     assert out.index("kh.yaml updated") < out.index("note one") < out.index("note two")
-    assert out.index("note two") < out.index("restart kh serve")
+    assert out.index("note two") < out.index("kh serve restarts itself")
+
+
+def test_wrong_if_sha256_refuses_untouched(tmp_path, capsys):
+    path = _file(tmp_path)
+    for dry in (False, True):
+        assert run(path, add_label(), if_sha256="0" * 64, dry_run=dry) == 2
+        out = capsys.readouterr().out
+        assert "admin: kh.yaml changed since the preview; preview again" in out
+        assert path.read_text() == TEXT
+
+
+def test_right_if_sha256_proceeds(tmp_path, capsys):
+    path = _file(tmp_path)
+    assert run(path, add_label(), if_sha256=apply.text_sha256(TEXT)) == 0
+    assert "  b: second" in path.read_text()
+
+
+def test_file_rewritten_during_the_run_is_not_overwritten(tmp_path, capsys):
+    path = _file(tmp_path)
+    other = TEXT + "# other\n"
+
+    async def after(steps, write):
+        path.write_text(other)
+        return []
+
+    assert run(path, add_label(), after=after) == 2
+    assert "admin: kh.yaml changed while the command ran; run it again" in capsys.readouterr().out
+    assert path.read_text() == other
