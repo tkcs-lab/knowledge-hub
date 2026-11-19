@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -73,6 +74,31 @@ class Settings(BaseSettings):
     usage_log: bool = True
     usage_retention_days: int = Field(default=180, ge=1, le=3650)
 
+    public_url: str | None = None
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret_file: Path | None = None
+    oidc_allowed_domains: str = ""
+    oidc_hosted_domains: str = ""
+    oauth_dcr: bool = True
+    oauth_redirect_allowlist: str = (
+        "https://claude.ai/api/mcp/auth_callback,http://localhost,http://127.0.0.1"
+    )
+    oauth_access_ttl_seconds: int = Field(3600, ge=300, le=86400)
+    oauth_refresh_ttl_days: int = Field(30, ge=1, le=365)
+    oauth_max_clients: int = Field(200, ge=1, le=10000)
+    oauth_register_per_min: int = Field(30, ge=1, le=1000)
+    oauth_authorize_per_min: int = Field(600, ge=1, le=100000)
+
+    directory_view_seconds: int = Field(30, ge=5, le=600)
+    directory_google_credentials_file: Path | None = None
+    directory_google_subject: str | None = None
+    directory_keycloak_url: str | None = None
+    directory_keycloak_realm: str | None = None
+    directory_keycloak_client_id: str | None = None
+    directory_keycloak_client_secret_file: Path | None = None
+    directory_keycloak_subgroups: bool = False
+
     setup_pg_admin_dsn_file: Path | None = None
     setup_forgejo_admin_token_file: Path | None = None
     setup_slack_webhooks_file: Path | None = None
@@ -101,7 +127,62 @@ class Settings(BaseSettings):
             raise ValueError("KH_DEV_IDENTITY is set while KH_ENV=prod; refusing to start")
         if self.embed_provider == "fake" and self.env not in ("dev", "test"):
             raise ValueError("KH_EMBED_PROVIDER=fake is only allowed when KH_ENV is dev or test")
+        oidc = (self.public_url, self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret_file)
+        if any(v is not None and v != "" for v in oidc) and not all(v is not None and v != "" for v in oidc):
+            raise ValueError("KH_OIDC_* and KH_PUBLIC_URL must be set together")
+        if self.public_url:
+            self._check_public_url(self.public_url)
+        if self.oauth_enabled:
+            if not self.allowed_domains_tuple:
+                raise ValueError("KH_OIDC_ALLOWED_DOMAINS is required when OAuth is on")
+            issuer_host = (urlsplit(self.oidc_issuer or "").hostname or "").lower()
+            if issuer_host == "accounts.google.com" and not self.hosted_domains_tuple:
+                raise ValueError("KH_OIDC_HOSTED_DOMAINS is required for a Google issuer")
+            if self.dev_identity is not None:
+                raise ValueError("KH_DEV_IDENTITY must not be set while OAuth is on")
         return self
+
+    def _check_public_url(self, url: str) -> None:
+        msg = "KH_PUBLIC_URL must be an https URL without a path"
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname
+            parts.port  # noqa: B018 - raises on a bad port
+        except ValueError as exc:
+            raise ValueError(msg) from exc
+        if not host or parts.username is not None or parts.password is not None or "@" in parts.netloc:
+            raise ValueError(msg)
+        if parts.path or parts.query or parts.fragment or url.endswith(("/", "?", "#")):
+            raise ValueError(msg)
+        if parts.scheme == "https":
+            return
+        loopback = host in ("localhost", "127.0.0.1", "::1")
+        if parts.scheme == "http" and loopback and self.env in ("dev", "test"):
+            return
+        raise ValueError(msg)
+
+    @property
+    def oauth_enabled(self) -> bool:
+        return all(
+            v is not None and v != ""
+            for v in (self.public_url, self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret_file)
+        )
+
+    @property
+    def resource_url(self) -> str | None:
+        return f"{self.public_url}/mcp" if self.public_url else None
+
+    @property
+    def allowed_domains_tuple(self) -> tuple[str, ...]:
+        return _csv(self.oidc_allowed_domains)
+
+    @property
+    def hosted_domains_tuple(self) -> tuple[str, ...]:
+        return _csv(self.oidc_hosted_domains)
+
+    @property
+    def redirect_allowlist_tuple(self) -> tuple[str, ...]:
+        return _csv(self.oauth_redirect_allowlist)
 
     def dsn(self, role: Literal["migrator", "app", "indexer"]) -> str:
         """Build a libpq key/value DSN for ``kh_<role>``."""
@@ -119,6 +200,10 @@ class Settings(BaseSettings):
         if password_file is not None:
             parts["password"] = password_file.read_text().strip()
         return " ".join(f"{k}={_quote(v)}" for k, v in parts.items())
+
+
+def _csv(value: str) -> tuple[str, ...]:
+    return tuple(p for p in (x.strip().lower() for x in value.split(",")) if p)
 
 
 def _quote(value: str) -> str:

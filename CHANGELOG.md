@@ -6,6 +6,7 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
 - `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
 
 ### Removed

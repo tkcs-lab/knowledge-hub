@@ -164,3 +164,102 @@ def test_tech_poll_minutes_defaults_to_60(monkeypatch):
         monkeypatch.setenv("KH_TECH_POLL_MINUTES", bad)
         with pytest.raises(ValidationError):
             Settings()
+
+
+OAUTH = {
+    "KH_PUBLIC_URL": "https://kh.example.com",
+    "KH_OIDC_ISSUER": "https://sso.example.com",
+    "KH_OIDC_CLIENT_ID": "kh",
+    "KH_OIDC_CLIENT_SECRET_FILE": "/run/secrets/oidc",
+    "KH_OIDC_ALLOWED_DOMAINS": "Example.com, ,b.io",
+}
+
+
+def _oauth(monkeypatch, **over):
+    for k, v in {**OAUTH, **over}.items():
+        if v is None:
+            monkeypatch.delenv(k, raising=False)
+        else:
+            monkeypatch.setenv(k, v)
+
+
+def test_oauth_defaults_and_properties(monkeypatch):
+    s = Settings()
+    assert s.oauth_enabled is False and s.resource_url is None
+    assert s.oauth_dcr is True and s.directory_view_seconds == 30
+    assert s.oauth_access_ttl_seconds == 3600 and s.oauth_refresh_ttl_days == 30
+    assert s.oauth_max_clients == 200 and s.oauth_register_per_min == 30 and s.oauth_authorize_per_min == 600
+    assert s.directory_keycloak_subgroups is False
+    assert s.redirect_allowlist_tuple == ("https://claude.ai/api/mcp/auth_callback", "http://localhost", "http://127.0.0.1")
+    _oauth(monkeypatch)
+    s = Settings()
+    assert s.oauth_enabled and s.resource_url == "https://kh.example.com/mcp"
+    assert s.allowed_domains_tuple == ("example.com", "b.io") and s.hosted_domains_tuple == ()
+
+
+def test_oauth_numeric_bounds(monkeypatch):
+    for name, bad in (
+        ("OAUTH_ACCESS_TTL_SECONDS", "299"), ("OAUTH_ACCESS_TTL_SECONDS", "86401"),
+        ("OAUTH_REFRESH_TTL_DAYS", "0"), ("OAUTH_REFRESH_TTL_DAYS", "366"),
+        ("OAUTH_MAX_CLIENTS", "0"), ("OAUTH_MAX_CLIENTS", "10001"),
+        ("OAUTH_REGISTER_PER_MIN", "1001"), ("OAUTH_AUTHORIZE_PER_MIN", "100001"),
+        ("DIRECTORY_VIEW_SECONDS", "4"), ("DIRECTORY_VIEW_SECONDS", "601"),
+    ):
+        monkeypatch.setenv(f"KH_{name}", bad)
+        with pytest.raises(ValidationError):
+            Settings()
+        monkeypatch.delenv(f"KH_{name}")
+
+
+@pytest.mark.parametrize(
+    "missing", ["KH_PUBLIC_URL", "KH_OIDC_ISSUER", "KH_OIDC_CLIENT_ID", "KH_OIDC_CLIENT_SECRET_FILE"]
+)
+def test_oidc_must_be_set_together(monkeypatch, missing):
+    _oauth(monkeypatch, **{missing: None})
+    with pytest.raises(ValidationError, match="KH_OIDC_\\* and KH_PUBLIC_URL must be set together"):
+        Settings()
+
+
+def test_oauth_requires_allowed_domains(monkeypatch):
+    _oauth(monkeypatch, KH_OIDC_ALLOWED_DOMAINS=" , ")
+    with pytest.raises(ValidationError, match="KH_OIDC_ALLOWED_DOMAINS is required when OAuth is on"):
+        Settings()
+
+
+def test_google_issuer_requires_hosted_domains(monkeypatch):
+    _oauth(monkeypatch, KH_OIDC_ISSUER="https://accounts.google.com")
+    with pytest.raises(ValidationError, match="KH_OIDC_HOSTED_DOMAINS is required for a Google issuer"):
+        Settings()
+    monkeypatch.setenv("KH_OIDC_HOSTED_DOMAINS", "Example.com")
+    assert Settings().hosted_domains_tuple == ("example.com",)
+
+
+def test_dev_identity_refused_while_oauth_is_on(monkeypatch):
+    _oauth(monkeypatch, KH_ENV="dev", KH_DEV_IDENTITY=IDENT)
+    with pytest.raises(ValidationError, match="KH_DEV_IDENTITY must not be set while OAuth is on"):
+        Settings()
+
+
+@pytest.mark.parametrize(
+    ("url", "env", "ok"),
+    [
+        ("https://h", "prod", True),
+        ("https://h:8443", "prod", True),
+        ("https://h/", "prod", False),
+        ("https://h/x", "prod", False),
+        ("https://u@h", "prod", False),
+        ("https://h?q", "prod", False),
+        ("http://h", "dev", False),
+        ("http://localhost", "prod", False),
+        ("http://localhost:8080", "test", True),
+        ("http://127.0.0.1:8080", "dev", True),
+        ("http://[::1]:8080", "dev", True),
+    ],
+)
+def test_public_url_shapes(monkeypatch, url, env, ok):
+    _oauth(monkeypatch, KH_PUBLIC_URL=url, KH_ENV=env)
+    if ok:
+        assert Settings().public_url == url
+    else:
+        with pytest.raises(ValidationError, match="KH_PUBLIC_URL must be an https URL without a path"):
+            Settings()
