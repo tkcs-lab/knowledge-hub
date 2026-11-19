@@ -739,3 +739,28 @@ async def test_missing_accounts_method(fake, admin):
     s = step(admin)
     assert await s.missing_accounts(["bob", "ghost", "alice", "nobody"]) == ["ghost", "nobody"]
     assert await s.missing_accounts([]) == []
+
+
+async def test_sync_tech_repo_missing_writes_nothing(fake, admin, tech_fake, tech_admin):
+    out = await tech_step(admin, tech_admin).sync_tech_repo("docs-a", write=True)
+    assert lines(out) == ["! tech repo docs-a: not in org kh-tech; create the clone or fork there"]
+    assert all(m == "GET" for m, _ in tech_fake.requests)
+    assert all(m == "GET" for m, _ in fake.requests)
+
+
+async def test_sync_tech_repo_present_gives_collaborator_and_webhook(fake, admin, tech_fake, tech_admin):
+    tech_fake.add_repo("docs-a")
+    out = lines(await tech_step(admin, tech_admin).sync_tech_repo("docs-a", write=True))
+    assert "+ collaborator docs-a/kh-indexer: read" in out
+    assert "i tech repo docs-a: collaborators none" in out
+    assert any(line.startswith("+ tech webhook") for line in out), out
+    assert tech_fake.collabs["docs-a"] == {"kh-indexer": "read"}
+    assert not any("docs-b" in line for line in out)
+
+
+async def test_sync_tech_repo_without_tech_admin(fake, admin):
+    s = ForgejoStep(parse_config(TECH_CONFIG), admin, webhook_secret="hmac",
+                    bot_token="bot-tok", indexer_token="idx-tok")
+    assert lines(await s.sync_tech_repo("docs-a", write=True)) == [
+        "! tech repo docs-a: tech_org is not set"
+    ]
