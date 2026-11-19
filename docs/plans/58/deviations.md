@@ -15,7 +15,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-config-settings
 
-- pending
+- None.
 
 ## p4-migration-identity
 
