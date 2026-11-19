@@ -32,7 +32,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-oidc-relying-party
 
-- pending
+- None.
 
 ## p8-google-provider
 
