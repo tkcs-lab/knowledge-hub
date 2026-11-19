@@ -78,7 +78,8 @@ async def test_plan_apply_converge(empty, settings, capsys):
     for expected in ("+ role kh_migrator", "+ role kh_app", "+ role kh_indexer", f"+ database {DB}",
                      "+ extension vector", "+ migration 0001_baseline.sql",
                      "+ migration 0002_usage_events.sql", "+ migration 0003_supersede.sql",
-                     "+ migration 0005_move_record.sql", "+ group all"):
+                     "+ migration 0005_move_record.sql", "+ migration 0006_identity.sql",
+                     "+ group all"):
         assert expected in planned
     with pytest.raises(psycopg.OperationalError):
         psycopg.connect(mig(empty))  # plan changed nothing

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -12,8 +12,10 @@ from psycopg import errors
 DB = "kh_fresh"
 SUB = "n8n-token:a"
 NOW = datetime.now(UTC)
-TABLES = ("schema_migrations", "claim_jti", "groups", "labels", "documents", "records", "chunks",
-          "index_jobs", "repo_state", "index_alerts", "usage_events", "record_moves")
+TABLES = ("schema_migrations", "groups", "labels", "documents", "records", "chunks",
+          "index_jobs", "repo_state", "index_alerts", "usage_events", "record_moves",
+          "api_keys", "oauth_clients", "oauth_pending", "oauth_codes", "oauth_tokens", "oauth_consents",
+          "directory_snapshot")
 
 # role -> table -> commands granted (a role or table not listed has no grant)
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -25,11 +27,16 @@ GRANTS = {
     "kh_indexer": {
         "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": ALL, "records": {"SELECT"},
         "chunks": ALL, "index_jobs": ALL, "repo_state": ALL, "index_alerts": ALL,
-        "claim_jti": {"SELECT", "DELETE"}, "usage_events": {"SELECT", "DELETE"},
+        "usage_events": {"SELECT", "DELETE"},
     },
 }
-DEFINERS = ("claim_seen", "records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated",
-            "move_record", "record_moved")
+DEFINERS = ("records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated",
+            "move_record", "record_moved",
+            "api_key_get", "api_key_touch", "oauth_client_get", "oauth_client_put",
+            "oauth_client_authorize", "oauth_client_touch", "oauth_pending_put", "oauth_pending_take",
+            "oauth_pending_peek", "oauth_code_put", "oauth_code_take", "oauth_token_put", "oauth_token_get",
+            "oauth_refresh_use", "oauth_token_revoke", "oauth_family_revoke", "oauth_consent_has",
+            "oauth_consent_put", "directory_snapshot_get", "directory_snapshot_put", "oauth_purge",)
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
@@ -169,11 +176,6 @@ def test_definers_are_owned_by_migrator_with_a_pinned_search_path(fresh_db):
                 " JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'kh'"
                 " AND p.proname = %s", (fn,)).fetchall()
             assert rows == [("kh_migrator", True, ["search_path=kh, pg_temp"])], fn
-        for fn in ("claim_seen",):
-            q = ("SELECT has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
-                 " WHERE p.proname = %s AND p.pronamespace = 'kh'::regnamespace")
-            assert conn.execute(q, ("kh_app", fn)).fetchone()[0]
-            assert not conn.execute(q, ("kh_indexer", fn)).fetchone()[0]
         for fn in HELPERS:
             q = ("SELECT p.prosecdef, has_function_privilege(%s, p.oid, 'EXECUTE') FROM pg_proc p"
                  " WHERE p.proname = %s AND p.pronamespace = 'kh'::regnamespace")
@@ -216,8 +218,10 @@ def test_indexer_cannot_write_records_or_groups(seeded_db, fresh_db):
             is errors.InsufficientPrivilege
 
 
-@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts", "claim_jti",
-                                   "schema_migrations", "record_moves"])
+@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts",
+                                   "schema_migrations", "record_moves",
+                                   "api_keys", "oauth_clients", "oauth_pending", "oauth_codes",
+                                   "oauth_tokens", "oauth_consents", "directory_snapshot"])
 def test_app_has_no_access_to_internal_tables(seeded_db, fresh_db, table):
     with role_conn(fresh_db, "kh_app", "all") as conn:
         assert attempt(conn, f"SELECT * FROM kh.{table}") is errors.InsufficientPrivilege
@@ -230,24 +234,6 @@ def test_app_cannot_update_or_delete(seeded_db, fresh_db, table):
                      else f"UPDATE kh.{table} SET audience = audience" if table != "groups"
                      else "UPDATE kh.groups SET repo = repo", f"DELETE FROM kh.{table}"):
             assert attempt(conn, stmt) is errors.InsufficientPrivilege, stmt
-
-
-def test_claim_jti_is_only_purged_when_expired(fresh_db):
-    with psycopg.connect(fresh_db.admin_dsn(DB), autocommit=True) as conn:
-        conn.execute("INSERT INTO kh.claim_jti VALUES ('old', %s), ('new', %s)",
-                     [NOW - timedelta(hours=1), NOW + timedelta(hours=1)])
-    with role_conn(fresh_db, "kh_indexer") as conn:
-        assert [r[0] for r in conn.execute("SELECT jti FROM kh.claim_jti")] == ["old"]
-        assert attempt(conn, "DELETE FROM kh.claim_jti") == 1
-        assert attempt(conn, "INSERT INTO kh.claim_jti VALUES ('x', now())") \
-            is errors.InsufficientPrivilege
-
-
-def test_claim_seen_is_the_only_door_for_the_app(fresh_db):
-    with role_conn(fresh_db, "kh_app") as conn:
-        exp = NOW + timedelta(minutes=5)
-        assert conn.execute("SELECT kh.claim_seen('j1', %s)", [exp]).fetchone() == (True,)
-        assert conn.execute("SELECT kh.claim_seen('j1', %s)", [exp]).fetchone() == (False,)
 
 
 # --------------------------------------------------------------------------- audiences

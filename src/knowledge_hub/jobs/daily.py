@@ -17,3 +17,11 @@ async def run_daily(indexer_pool: Any) -> int:
             " WHERE stale IS DISTINCT FROM (review_by < current_date)"
         )
         return flipped.rowcount
+
+
+async def purge_identity(indexer_pool: Any) -> int:
+    """Delete expired OAuth state through ``kh.oauth_purge()``; return the number of rows removed."""
+    async with indexer_pool.connection() as conn, conn.transaction():
+        cur = await conn.execute("SELECT kh.oauth_purge()")
+        row = await cur.fetchone()
+        return int(row[0])
