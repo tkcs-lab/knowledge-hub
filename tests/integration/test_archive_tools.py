@@ -12,6 +12,7 @@ from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.forgejo import ForgejoBot
 from knowledge_hub.mcp.errors import AUDIENCE_NOT_HELD, BAD_LABEL
 from knowledge_hub.mcp.server import Deps
+from tests.support.bearer import TestBearerResolver
 from tests.support.forgejo_fake import FakeForgejo
 from tests.support.mcp_client import HOST
 from tests.support.pg import FRESH_DB
@@ -54,7 +55,7 @@ def forgejo() -> FakeForgejo:
 def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
     out = Deps(
         settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(),
+        embedder=FakeEmbedder(), bearer=TestBearerResolver(kh_config),
     )
     out.forgejo_bot = ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport)
     return out

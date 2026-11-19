@@ -14,6 +14,7 @@ import pytest
 from knowledge_hub.app import build_app
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.metrics import METRICS
+from tests.support.bearer import TestBearerResolver
 from tests.support.principals import alice_all
 
 TOKEN = "metrics-secret-token"
@@ -42,7 +43,10 @@ def app_settings(app_settings, tmp_path):
 
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool):
-    return Deps(settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool)
+    return Deps(
+        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        bearer=TestBearerResolver(kh_config),
+    )
 
 
 async def scrape(http, token=TOKEN):

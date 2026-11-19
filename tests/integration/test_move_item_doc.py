@@ -14,6 +14,7 @@ from knowledge_hub.forgejo import ForgejoBot, ForgejoError
 from knowledge_hub.mcp import errors
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.propose_render import render_file
+from tests.support.bearer import TestBearerResolver
 from tests.support.forgejo_fake import FakeForgejo, blob_sha
 from tests.support.mcp_client import HOST
 from tests.support.pg import FRESH_DB
@@ -64,6 +65,7 @@ def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
         app_pool=app_pool,
         indexer_pool=indexer_pool,
         embedder=FakeEmbedder(),
+        bearer=TestBearerResolver(kh_config),
         forgejo_bot=ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport),
     )
 

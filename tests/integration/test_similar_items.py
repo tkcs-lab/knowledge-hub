@@ -10,6 +10,7 @@ import pytest
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.forgejo import ForgejoBot
 from knowledge_hub.mcp.server import Deps
+from tests.support.bearer import TestBearerResolver
 from tests.support.blobs import MemoryBlobStore
 from tests.support.forgejo_fake import FakeForgejo, blob_sha, md
 from tests.support.pg import FRESH_DB
@@ -49,7 +50,7 @@ def forgejo() -> FakeForgejo:
 def deps(app_settings, kh_config, app_pool, indexer_pool, forgejo) -> Deps:
     return Deps(
         settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(), blobs=MemoryBlobStore(),
+        embedder=FakeEmbedder(), bearer=TestBearerResolver(kh_config), blobs=MemoryBlobStore(),
         forgejo_bot=ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport),
     )
 

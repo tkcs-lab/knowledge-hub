@@ -403,13 +403,23 @@ async def _boot(
     app = build_app(settings, deps)
     started, stop = asyncio.Event(), asyncio.Event()
 
+    # With a public URL ``build_app`` wraps the Starlette app in the host guard, which has no router.
+    inner = getattr(app, "app", app)
+
     async def lifespan() -> None:
-        async with app.router.lifespan_context(app):
+        async with inner.router.lifespan_context(inner):
             started.set()
             await stop.wait()
 
     task = asyncio.create_task(lifespan())
-    await asyncio.wait_for(started.wait(), 10)
+    waiter = asyncio.create_task(started.wait())
+    # Wake when the lifespan task dies too, so its exception shows instead of a bare timeout.
+    await asyncio.wait({task, waiter}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+    if not started.is_set():
+        waiter.cancel()
+        if task.done():
+            task.result()
+        raise TimeoutError("the app lifespan did not start")
     hub = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=PUBLIC_URL)
     stack = OAuthStack(
         settings=settings,

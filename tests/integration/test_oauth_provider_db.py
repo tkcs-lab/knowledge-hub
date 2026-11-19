@@ -36,8 +36,12 @@ def migrator(world):
 
 
 def make_config(members=("sam",)):
+    # Approvers must be members; the group keeps a member of its own when sam is not one.
+    others = [m for m in members if m != "sam"] or ["kim"]
+    members = list(members) or others
     return KhConfig(
-        people={"sam": "sam@x.org"}, groups={"g": GroupConfig(members=list(members), approvers=["sam"])}
+        people={"sam": "sam@x.org", "kim": "kim@x.org"},
+        groups={"g": GroupConfig(members=members, approvers=members[:1])},
     )
 
 
@@ -160,7 +164,7 @@ async def test_refresh_for_person_without_group_revokes_family(box):
     c = cl("a")
     t = await tokens(box, c)
     r = await box.provider.load_refresh_token(c, t.refresh_token)
-    box.membership = Membership.from_config(make_config(members=()).model_copy(update={"people": {}}))
+    box.membership = Membership.from_config(make_config(members=("kim",)))
     with pytest.raises(TokenError) as exc:
         await box.provider.exchange_refresh_token(c, r, r.scopes)
     assert exc.value.error == "invalid_grant"
