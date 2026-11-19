@@ -73,6 +73,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p17-forgejo-membership
 
 - None.
+- conflict: CHANGELOG.md conflict resolved by keeping both bullets (mechanical).
 
 ## p18-flow-tests
 
