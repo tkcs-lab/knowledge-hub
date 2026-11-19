@@ -2,7 +2,7 @@
 
 The hub gives agents one MCP interface over three tiers: canonical documents in git (T0), technical documents indexed without review (T0a) and raw records in Postgres (T3).
 Every result carries its tier and is filtered by the caller's groups inside Postgres, by row-level security, not in Python.
-This document records the decisions as built, the alternatives that were rejected and one deviation from the PrivacyFence contract.
+This document records the decisions as built, the alternatives that were rejected and the residuals the owner accepted.
 
 ## Tiers and groups
 
@@ -12,7 +12,7 @@ This document records the decisions as built, the alternatives that were rejecte
 | T0a | `kh.documents` (tier T0a), from the root `CLAUDE.md` and the `.md` files under the repo's `dirs` (default `docs`) on the default branch of a tech repo | the hourly poll and the push webhook, no approval | indexed without review |
 | T3 | `kh.records`, body in S3 | `ingest_record` | raw material |
 
-- A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name an n8n token carries and the access group of one T0 repo. Every group has exactly one repo.
+- A **group** is a name matching `^[a-z0-9][a-z0-9_-]{0,62}$`. It is the audience stored on rows, the audience name a hub key carries and the access group of one T0 repo. Every group has exactly one repo.
 - A **label** matches `^[a-z0-9][a-z0-9_.:-]{0,62}$` (`product:ember` is legal), is defined in `kh.yaml` and stored in `kh.labels`. Label names are visible to every caller; do not put secrets in them.
 - An **archived group** (`archived: true` on the group in `kh.yaml`) acts as removed without deleting data: nobody holds it, so its documents and records are hidden, `ingest_record` and `propose_doc` refuse it and nothing is indexed for it. The database is unchanged; the state lives in `kh.yaml` and the hub reads it at start.
 - An **archived label** (a name listed under `archived_labels` in `kh.yaml`) vanishes from `list_labels`, from result labels (`search`, `get_doc`, `list_stale`, `usage`) and from search filters, and writes using it fail with `unknown label`. The database is unchanged: the label stays in `kh.labels`, so documents that name it are still indexed, and the state lives in `kh.yaml`.
@@ -52,19 +52,24 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 
 ## Access model
 
-- **Resolution.** `ClaimMiddleware` resolves the caller's groups from the verified claim. A `claude_client` holds the groups of `kh.yaml` in which a member's `people` email equals the claim's verified email, compared in lower case; a claim without an email gives no group, and the claim's `audiences` are ignored. An `n8n_workflow` holds the claim's `audiences` that are configured, non-archived groups, because a workflow has no `people` entry. A `service` calls only `list_audiences`. The config is read when `kh serve` starts, so a change to `people` or to a group needs a restart.
+- **Credentials.** Two credential types reach `/mcp`: a hub key (`khk_`, for n8n and other workflows) and an OAuth access token (`kha_`, for people through Claude). In development `KH_DEV_IDENTITY` stands in when no `Authorization` header is sent. The verified email of the hub's own sign-in is the identity of a person; PrivacyFence plays no part (see "Sign-in, OAuth and keys").
+- **Resolution.** `CallerMiddleware` resolves the caller's groups at every request. A `claude_client` holds the groups of the effective membership in which a member's email equals the token's, in lower case. The effective membership is the static `people` and group lists of `kh.yaml` plus the directory snapshot, so a joiner or leaver in Google or Keycloak takes effect without a restart. An `n8n_workflow` holds the one group of its key, if that group is active.
 - **The rule.** `kh.can_read(a)` is `a = ANY(kh.caller_audiences())`. A document, record or chunk is visible when its audience is held; inserting a record needs the audience too.
-- **One list for people.** `kh.yaml` decides both a person's Forgejo teams and what the hub lets them read, so a joiner or leaver changes one file. PrivacyFence keeps authentication, the verified email and the write popups; its group-to-audience mapping is no longer used for people. A person whose PrivacyFence email differs from their `people` email reads nothing.
-- **PrivacyFence reads the groups from the hub.** The declaration sets `audiences_tool: list_audiences`, so PrivacyFence calls that tool itself with a `service` claim (`sub` `privacyfence`) at startup and every `audiences_refresh_seconds` (default 300). The answer, `{"version": 1, "audiences": {group: [email, ...]}}`, lists the `people` emails of each active group. PrivacyFence then needs no `upstream_mcp.kh.groups` map (one that exists is ignored), no membership source for this upstream and no approvals. A scoped token's audiences are its creator's hub groups at each call, intersected with those ticked at creation (PrivacyFence ADR 0298); existing tokens stay valid because the source is not in the declaration digest. A change to `kh.yaml` reaches PrivacyFence after `kh serve` restarts and within one interval. A failed refresh keeps the last answer; an answer older than three intervals gives nobody any audience. The hub's rule is unchanged: it ignores a `claude_client` claim's audiences and keeps an `n8n_workflow` claim's audiences that are configured groups. The tool refuses every caller but PrivacyFence's `service` claim (`service_only`); it is not under `tools` in the declaration, so PrivacyFence never forwards it for a person or workflow.
-- **Limits on `kh.yaml`.** PrivacyFence refuses the whole answer, and keeps the previous one, when it has more than 200 audiences, more than 20000 addresses in all, or more than 1000000 characters (it caps the text, which the SDK indents, and the structured content separately). `kh.yaml` is therefore refused at load with more than 200 active groups, more than 20000 group members in all, or an audience table over 1000000 characters. Checking at call time would fail silently inside PrivacyFence and, three intervals later, every n8n token would lose every audience; at start-up and in `kh setup plan` the operator sees it at once.
-- **Non-ASCII emails.** They are sent as they are; PrivacyFence drops them, and such a person gets no `email` in a claim anyway, so they read nothing either way.
+- **One list for people.** `kh.yaml` and the directory together decide both a person's Forgejo teams and what the hub lets them read, so a joiner or leaver changes one place. A person whose sign-in email differs from their `people` email reads nothing.
 
 ### Accepted residuals
 
-- A caller holding two groups can `ingest_record` or `propose_doc` into the wider one. The PrivacyFence popup shows `audience` and `group` and is the only gate.
+- A caller holding two groups can `ingest_record` or `propose_doc` into the wider one, and no popup gates any caller any more.
 - A leaked bot token can create branches and pull requests, push to open pull-request branches in every repo and read every T0 repo. It cannot merge.
 - With required approvals 0 the approver must review the final diff before merging.
 - The verified email is the identity: a Workspace email that is reassigned gives its new holder the old person's groups until `people` is edited. Remove a leaver from `people` first.
+- A person who is suspended in Google keeps a token until the next sync, and a person who is moved out of a directory group loses it within about six minutes.
+- Registered OAuth clients are anonymous public clients; the consent page is the only phishing guard.
+- A person who signs in with a different upstream `sub` but the same verified email is the same person: the email is the identity.
+- Domain-wide delegation lets the Google service-account key impersonate any user of the domain; the two read-only scopes, not the reader account's role, are the limit.
+- `kh serve` holds the `kh_indexer` password, so a compromised hub could write the directory snapshot (a separate `kh_directory` role is a follow-up), and `kh_app` can mint codes and tokens through its definer functions.
+- The owners and managers of a Google or Keycloak group decide who gets access and approver rights.
+- A reassigned email inherits the old person's groups, bounded by the refresh family lifetime (30 days by default).
 - A move is not a purge: the old repo's history, past usage queries and backups keep the old copy. The two pull requests of a document move are not ordered; merge the add first.
 - Exact vector scans take time in proportion to the number of hidden rows; this timing is the accepted residual of the no-existence-leak rule.
 - Push access to a tech repo puts text in front of every caller (audience `all`); `kh setup` reports its collaborators and cannot restrict them.
@@ -83,7 +88,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 | Table | kh_app | kh_indexer |
 |---|---|---|
 | `schema_migrations` | none | none |
-| `claim_jti` | through `kh.claim_seen` only | SELECT and DELETE of expired rows |
+| `api_keys`, `oauth_*`, `directory_snapshot` | through definer functions only | `directory_snapshot_put` and `oauth_purge` |
 | `groups`, `labels` | SELECT | SELECT |
 | `documents` | SELECT where `can_read(audience)` | ALL |
 | `records` | SELECT where `can_read(audience)`; INSERT with check `can_read(audience) AND created_by_sub = kh.caller_sub()`; UPDATE only through the definer functions `kh.mark_record_outdated` and `kh.move_record`; no DELETE | SELECT |
@@ -99,17 +104,35 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 - Caller-path inserts use application-generated UUIDs.
 - No existence leaks: `get_doc` runs one RLS query and answers `not found` for a missing and a hidden row alike.
 
-## Claim middleware and call binding
+## Caller middleware and call binding
 
-- `ClaimMiddleware` is pure ASGI around `/mcp` only. It buffers the body (413 past `KH_MAX_BODY_BYTES`), reads the `X-PrivacyFence-Claim` header and verifies it with PrivacyFence's vendored verifier (`auth/pf_claim_verify.py`, source commit and sha256 in `auth/VENDORED.md`). Any failure is 401 with an empty body and only the error code is logged.
-- The replay cache is `kh.claim_seen(jti, expires_at)`, so a claim id works once across processes. The daily job purges expired ids.
-- `human` is always refused, `service` is refused on `tools/call` except `list_audiences` with `sub` `privacyfence`. `email` is lower-cased and kept only for `claude_client`. Audiences must match the group regex; a claim with a bad name is refused for every principal type. The email then selects the person's groups through `people`, and the claim's `audiences` are used only for n8n workflows.
-- The verifier checks the `req` field, a hash of the tool name and arguments. The middleware stores the parsed name and arguments as `kh_call`. `tool_guard` refuses a dispatch whose tool name differs from `kh_call`, or whose keyword arguments are not exactly the stored arguments over the declared defaults, so the call that runs is the call that was hashed. Any refusal answers `internal error (ref ...)`.
-- `GET` and `DELETE` on `/mcp` are verified and answered 405: the server is stateless.
+- `CallerMiddleware` is pure ASGI around `/mcp` only. An `Authorization` header that is not a well-formed `Bearer <token>` is a 401 and never gets the dev identity; otherwise the token is resolved before the body is read. A `khk_` token is a hub key, a `kha_` token an OAuth access token; both are looked up in Postgres on every request, so a revocation takes effect at the next call. The body is buffered (413 past `KH_MAX_BODY_BYTES`) only to check the `kh_call` consistency below. A 401 has an empty body, only the rejection code is logged, and `WWW-Authenticate` carries `resource_metadata` with OAuth on.
+- Two credential types, plus the dev identity. A hub key is a `n8n_workflow` caller with `sub` `key:<id>`, one group and an allowlist of tools; it is refused when its group is not active. An OAuth token is a `claude_client` caller with `sub` `u:<lower email>`, whose groups come from the effective membership at every call, and a tool allowlist from its scopes (`kh:read`, `kh:write`). The token's `resource` must equal `<KH_PUBLIC_URL>/mcp`. The verified email of the hub's own sign-in is the identity.
+- **Groups.** The effective membership is the static `people` and group lists of `kh.yaml` plus the directory snapshot (see "Directory"). A person holds the groups in which an entry of `people` has their email, compared in lower case; a caller without an email holds none. A change in the directory reaches the hub within `refresh_seconds` plus `KH_DIRECTORY_VIEW_SECONDS` with no restart. A change to `kh.yaml` itself needs a restart.
+- `kh_call` is the parsed name and arguments of a `tools/call` body. `tool_guard` refuses a dispatch whose tool name differs from it, or whose keyword arguments are not exactly the stored arguments over the declared defaults, and a tool outside the caller's allowlist (`this credential may not call this tool`). A bearer caller is not bound to a body hash. Any refusal answers `internal error (ref ...)`.
+- An unauthenticated `GET` or `DELETE` on `/mcp` is a 401; an authenticated one is answered 405: the server is stateless.
 - Errors are fixed texts (`mcp/errors.py`). Any other exception becomes `internal error (ref <uuid>)` with the detail logged server-side only.
-- Tool schemas are flat (`str`, bounded `int`, `bool`, `list[str]`, `Literal`), no argument is called `reason`, and a unit test applies PrivacyFence's skip rules to every registered schema.
-- `KH_DEV_IDENTITY` is refused when `KH_ENV=prod`, and is used only for requests with no claim header. It follows the rules above: its `audiences` are ignored for a `claude_client`, whose groups come from its `email`.
+- Tool schemas are flat (`str`, bounded `int`, `bool`, `list[str]`, `Literal`), and a unit test checks that every registered schema is flat.
+- `KH_DEV_IDENTITY` is refused when `KH_ENV=prod` or when OAuth is on, and is used only for requests with no `Authorization` header. Its `audiences` are ignored for a `claude_client`, whose groups come from its `email`.
 - `/metrics` exists only when `KH_METRICS_TOKEN_FILE` is set. The rate limiter (`KH_RATE_LIMIT_PER_MIN` per caller) is per process, so a second replica doubles the allowance.
+
+## Sign-in, OAuth and keys
+
+- **The hub is its own authorization server.** It mounts the SDK's OAuth routes (`/authorize`, `/token`, `/register`, `/revoke` and the two metadata documents) and delegates only the password step to one upstream OIDC provider chosen by config (`KH_OIDC_ISSUER`). OAuth is on only when `KH_PUBLIC_URL` and the three `KH_OIDC_*` settings are set; with it off only keys work.
+- **Upstream ID token.** Every check refuses on failure and nothing comes from userinfo: discovery whose `issuer` matches exactly and whose endpoints are `https` on the issuer's host, the signature (RS256 or ES256 only, key chosen by `kid`), `iss`, `aud` and `azp`, `exp` and `iat`, the stored `nonce`, `email` with `email_verified` the boolean `true`, the email domain in `KH_OIDC_ALLOWED_DOMAINS` and, for Google, `hd` in `KH_OIDC_HOSTED_DOMAINS`.
+- **Clients and consent.** Dynamic registration is limited to an allowlist of redirect URIs and a cap on clients; clients are anonymous public clients (`token_endpoint_auth_method` `none`). A person who signs in for a client the first time sees a consent page (client name, redirect host, email) behind a one-time ticket cookie and a CSRF field, with a strict content-security policy. A person with no group is refused at the callback.
+- **Tokens.** Access tokens (`kha_`, default one hour) and refresh tokens (`khr_`, default 30 days) are stored as SHA-256 with a family id. Refresh rotates; a reuse outside a 10-second grace revokes the family; a family ends after the refresh lifetime from the first sign-in, and a refresh by a person who holds no group is refused. Access tokens read the effective membership at every call.
+- **Hub keys.** `khk_<id>.<secret>` for n8n and other workflows: one group, a tool allowlist, an optional expiry, stored as `id` and SHA-256 of a 256-bit secret. `kh key create`, `list` and `revoke` manage them; the secret is shown once. A key whose group is archived or unknown is refused.
+- **Public surface.** Only the OAuth paths and `/mcp` answer on the public host; a small guard answers 404 for `/webhooks/forgejo`, `/metrics` and `/healthz` there even if the proxy forwards them. `kh daily` purges expired OAuth rows and stale flags.
+- **Records written before the change** carry the old `sub` in `created_by_sub`; they stay readable, and a person's cursors and usage hash restart.
+
+## Directory
+
+- **Groups come from a directory lookup**, not a token claim: Google (Directory API, domain-wide delegation of a dedicated reader account with two read-only scopes) or Keycloak (admin API, a service-account client), chosen by `directory.provider`. Per-group references sit under `groups.<g>.directory.<provider>`, so switching is one key.
+- **A separate process.** `kh directory sync` fetches whole groups with its own credentials and stores one snapshot row (raw users, so rule changes need no refetch); `kh serve` only reads it, every `KH_DIRECTORY_VIEW_SECONDS`. This keeps admin credentials out of the internet-facing process. A change guard refuses a snapshot whose user count shrank below `100 - shrink_guard_percent` percent or more than doubled, unless `--accept-change`.
+- **Rules** (`directory/rules.py`, no I/O): a user is skipped when disabled, unverified, without a valid email, outside `directory.domains`, without a valid login, or a reserved login (bot, indexer, `owners`). A login shared by several emails is skipped, a static `people` entry wins, and an approver who is not a member is skipped. Skips are logged and listed by `kh directory plan`.
+- **Fail closed.** A snapshot older than `max_stale_seconds`, missing, of another provider or of another version gives the static membership: a directory outage over that limit removes directory-derived access, while static entries and keys keep working. `kh setup` applies the same rule, so its timer never grants more than the hub serves.
+- **Revocation.** Keys and tokens: the next request. A person removed or suspended in the directory: about six minutes (sync interval plus view interval); `kh directory sync --once` forces it. Forgejo teams: the next `kh setup apply`, up to about 21 minutes. A directory-sourced Forgejo login is added to a team only when the account's email equals the directory email.
 
 ## Indexer
 
@@ -139,7 +162,7 @@ One statement inside `caller_tx`: an exact vector order (no ANN index) fused by 
 
 ## Tools
 
-Ten tools, all with flat arguments: `search`, `get_doc`, `list_stale`, `list_labels`, `usage` (reads, `auto`) and `ingest_record`, `mark_record_outdated`, `move_item`, `propose_doc` (writes, `popup`) and `list_audiences` (PrivacyFence's service claim only, not under `tools`). The declaration in `deploy/privacyfence-upstream.example.yaml` allows `claude_client` and `n8n_workflow`.
+Nine tools, all with flat arguments: `search`, `get_doc`, `list_stale`, `list_labels`, `usage` (reads, scope `kh:read`) and `ingest_record`, `mark_record_outdated`, `move_item`, `propose_doc` (writes, scope `kh:write`). A hub key may be given any of them except `move_item`.
 
 - `ingest_record` refuses unless the caller holds `audience` and it is a configured group, when the body exceeds `KH_MAX_RECORD_BYTES`, or when a label is unknown, or when a text argument (`source`, `source_ref`, `title`, `body`, `source_url`, `content_type` or a label) contains a NUL character, which Postgres text cannot store (`argument <name> is invalid`); other control characters are kept. It stores the body at `records/<uuid>`, keeps the first 2000 characters as excerpt and stamps the config's `bot_login` as `written_by`.
 - `mark_record_outdated(id, outdated=true, replaced_by="", note="")` takes record ids only and calls the definer function `kh.mark_record_outdated`, which checks the caller can read the record and that `replaced_by` (a `doc:` or `rec:` id) belongs to the same group; a missing or unreadable record answers `NOT_FOUND`. `outdated=false` clears the mark, and then `replaced_by` and `note` must be empty. The table keeps only the last actor (`outdated_by`, never returned); the call is logged at INFO.
@@ -155,14 +178,6 @@ Ten tools, all with flat arguments: `search`, `get_doc`, `list_stale`, `list_lab
 - **Worker lock and re-embed policy.** The embed worker (`_embed_record`) takes `pg_advisory_xact_lock` on `rec:<id>` at the start of its write transaction and re-reads the audience; if the audience differs from the one it used for `may_embed`, it fails and the job retries. The move queues its own `embed_record` job, which embeds under the target group's policy. Two effects follow: a move into a group that may embed sends the body to the embedder for the first time; a move into a group that may not embed drops the vectors, so the record is then found by full-text search only.
 - **A move is not a purge.** The old repo's history, past usage queries and backups keep the old copy.
 
-## Deviation from the PrivacyFence contract
-
-`docs/identity-claim.md` in PrivacyFence says only `sub`, `principal_type`, `audiences` and `req` may change what a query returns, and calls `email` audit-only. The hub uses `email` for access: it selects a person's groups through `people` in `kh.yaml`. The owner decided this on 2026-11-15 for attendee-only records and extended it on 2026-11-17 (`group-source: khyaml-email`): the email is now the only thing that gives a person any group, and the claim's `audiences` are used only for n8n workflows.
-
-PrivacyFence 8.0.0a3 ships the opt-in key `email_for_visibility` (PrivacyFence ADR 0310). The declaration sets it, so PrivacyFence puts the verified email in the claim for this upstream. Without it no person's claim carries an email, so no person holds any group.
-
-What the hub relies on: `email` is lower-cased; it is ASCII only; it is present only for `claude_client` (the hub also drops it for every other principal); a change to any of these is a breaking contract change in PrivacyFence.
-
 ## Rejected alternatives
 
 | Alternative | Why not |
@@ -171,9 +186,9 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | HNSW index from day one | Older pgvector filters after the index scan, so narrow audiences lose recall. Exact scans are correct; speed is measured after the first deploy. |
 | Filtering in Python | The requirement is enforcement in the database. |
 | Indexing in the webhook request | Embedding is slow and Forgejo times out; the webhook queues a job. |
-| The SDK's `auth=` hook | The claim is in its own header and verification needs the raw body. |
+| The SDK's `auth=` hook | The claim is in its own header and verification needs the raw body. Still true: the hub mounts the SDK's OAuth routes and verifies bearers in its own middleware. |
 | Filesystem blob store | Owner declined; S3 from day one (`blobs/s3.py`, path-style, one object version, history from backups). |
-| A second auth path | Owner declined; one claim path, n8n tested with signed claims. |
+| A second auth path | Superseded on 2026-11-19 by the owner's decision in issue #58: one middleware now verifies two credential types (design, "Sign-in, OAuth and keys"). |
 | A formal-review trust walk | Closest to the old design, but much more code than letting Forgejo branch protection decide. |
 | A trust walk by merger | Still needs a walk and verdict storage. |
 | A `sync_teams` job copying Forgejo team members into Postgres | A second store and a freshness rule for a list the hub already loads. |
@@ -199,4 +214,17 @@ What the hub relies on: `email` is lower-cased; it is ASCII only; it is present 
 | A tier named `T1` | The owner chose `T0a`: it is a variant of T0, not a step between T0 and T3. |
 | Counting T0a in `t0_fts_hits` | A technical document is not a normative answer, so the promotion agent would stop seeing the gap. |
 | `kh setup` creating the clones | The clone or fork is a decision about upstream and credentials; the operator makes it and `kh setup` only checks it. |
-| PrivacyFence's group map and a membership source for n8n tokens | A second copy of kh.yaml kept in step by hand; PrivacyFence ignores it once audiences_tool is set. |
+| Keycloak as the only authorization server | Google, the production provider, has no dynamic registration and no RFC 8707 audience, so "switch by config" would break. |
+| A broker in front of the hub | A second service the owner does not want; the point is independence. |
+| Signed JWT access tokens | Revocation within minutes needs a lookup anyway. |
+| A second middleware for keys | Duplicate body and error handling; one middleware verifies both credential types. |
+| A `groups` token claim | Google ID tokens carry none, and `kh setup` and the Forgejo teams need the whole table, including people who never signed in. |
+| A per-login live directory lookup | A Google call on every request and nothing for Forgejo teams. |
+| A refresher inside `kh serve` | Puts a delegation key or a Keycloak admin secret in the internet-facing process and breaks "the hub never holds admin credentials". |
+| The converge-time model for directory groups | Leavers wait for the next converge. |
+| `groups.<g>.google.*` in `kh.yaml` | `GroupConfig` would have to name providers; `groups.<g>.directory.<provider>` lets both identifier sets sit side by side, so switching is `directory.provider` only. |
+| Open registration without consent | Confused deputy: the consent page names the client and the redirect host. |
+| Pre-registration only (no `/register`) | claude.ai cannot be configured without a registered client unless the operator knows its settings; `kh client` is not built now. |
+| Client ID metadata documents (CIMD) | The hub would fetch arbitrary URLs (SSRF) and the SDK does not advertise it; Claude falls back to registration. |
+| `<provider>:<upstream sub>` as `sub` | Switching provider would reset usage counts and cursors; `sub` is `u:<lower email>`. |
+| A legacy PrivacyFence path | On 2026-11-19 the owner said backward compatibility is not needed; a legacy mode would keep the vendored verifier, the replay table, two principal types and a flag alive for nothing. |

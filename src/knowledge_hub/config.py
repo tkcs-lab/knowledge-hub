@@ -5,14 +5,12 @@ Every error text starts with ``config:``.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import pydantic_core
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -35,19 +33,6 @@ MAX_LABELS = 500
 MAX_TECH_DIRS = 20
 MAX_LABEL_DESCRIPTION = 200
 MAX_EMAIL = 254
-MAX_AUDIENCES = 200
-MAX_AUDIENCE_ADDRESSES = 20000
-MAX_AUDIENCE_ANSWER_CHARS = 1_000_000
-
-
-def _audience_table(people: dict[str, str], groups: dict[str, Any]) -> dict[str, list[str]]:
-    """Active group name -> sorted, de-duplicated member emails (the PrivacyFence audiences answer)."""
-    by_login = {login.casefold(): email.lower() for login, email in people.items()}
-    return {
-        name: sorted({by_login[m.casefold()] for m in group.members if m.casefold() in by_login})
-        for name, group in sorted(groups.items())
-        if not group.archived
-    }
 
 
 def _check_logins(logins: list[str], where: str) -> None:
@@ -61,11 +46,72 @@ def _check_logins(logins: list[str], where: str) -> None:
         seen.add(folded)
 
 
+PROVIDER_KEY_RE = re.compile(r"[a-z][a-z0-9_]{0,30}")
+PROVIDER_RE = re.compile(r"none|[a-z][a-z0-9_]{0,30}")
+DOMAIN_RE = re.compile(r"[a-z0-9][a-z0-9.-]{0,252}")
+
+
+class GroupDirectoryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    members: list[str] = []
+    approvers: list[str] = []
+
+    @field_validator("members", "approvers")
+    @classmethod
+    def _references(cls, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for ref in values:
+            if not ref or len(ref) > MAX_EMAIL:
+                raise ValueError(f"directory reference {ref!r} is not valid")
+            if ref in seen:
+                raise ValueError(f"directory reference {ref} is listed twice")
+            seen.add(ref)
+        return values
+
+
+class DirectoryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = "none"
+    domains: list[str] = []
+    refresh_seconds: int = Field(300, ge=60, le=3600)
+    max_stale_seconds: int = Field(21600, le=604800)
+    shrink_guard_percent: int = Field(50, ge=1, le=99)
+
+    @field_validator("provider")
+    @classmethod
+    def _provider(cls, value: str) -> str:
+        if not PROVIDER_RE.fullmatch(value):
+            raise ValueError(f"directory.provider {value!r} is not valid")
+        return value
+
+    @field_validator("domains")
+    @classmethod
+    def _domains(cls, values: list[str]) -> list[str]:
+        out: list[str] = []
+        for value in values:
+            low = value.lower()
+            if not DOMAIN_RE.fullmatch(low):
+                raise ValueError(f"directory.domains entry {value!r} is not valid")
+            if low in out:
+                raise ValueError(f"directory.domains lists {low} twice")
+            out.append(low)
+        return out
+
+    @model_validator(mode="after")
+    def _rules(self) -> DirectoryConfig:
+        if self.max_stale_seconds < 2 * self.refresh_seconds:
+            raise ValueError("directory.max_stale_seconds must be at least twice refresh_seconds")
+        if self.provider != "none" and not self.domains:
+            raise ValueError("directory.domains is required when directory.provider is set")
+        return self
+
+
 class GroupConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     repo: str | None = None
     members: list[str] = []
-    approvers: list[str]
+    approvers: list[str] = []
+    directory: dict[str, GroupDirectoryConfig] = {}
     archived: bool = False
     slack_channel: str | None = None
 
@@ -74,6 +120,14 @@ class GroupConfig(BaseModel):
     def _repo_name(cls, value: str | None) -> str | None:
         if value is not None and not REPO_RE.fullmatch(value):
             raise ValueError(f"repo {value!r} is not a valid repository name")
+        return value
+
+    @field_validator("directory")
+    @classmethod
+    def _directory_keys(cls, value: dict[str, GroupDirectoryConfig]) -> dict[str, GroupDirectoryConfig]:
+        for key in value:
+            if not PROVIDER_KEY_RE.fullmatch(key):
+                raise ValueError(f"directory provider name {key} is not valid")
         return value
 
     @field_validator("slack_channel")
@@ -103,6 +157,7 @@ class KhConfig(BaseModel):
     archived_labels: list[str] = Field(default_factory=list)
     tech_org: str | None = None
     tech_repos: dict[str, TechRepoConfig] = Field(default_factory=dict)
+    directory: DirectoryConfig = Field(default_factory=DirectoryConfig)
 
     @field_validator("forgejo_web_url")
     @classmethod
@@ -169,8 +224,9 @@ class KhConfig(BaseModel):
             repos[group.repo] = name
             _check_logins(group.members, f"group {name} members")
             _check_logins(group.approvers, f"group {name} approvers")
-            if not group.approvers:
+            if not group.approvers and not any(d.approvers for d in group.directory.values()):
                 raise ValueError(f"group {name} needs at least one approver")
+            directory_members = any(d.members for d in group.directory.values())
             members = {m.casefold() for m in group.members}
             for login in group.members:
                 if login.casefold() in bots:
@@ -178,28 +234,8 @@ class KhConfig(BaseModel):
                 if login.casefold() not in folded_people:
                     raise ValueError(f"group {name} member {login} is not in people")
             for login in group.approvers:
-                if login.casefold() not in members:
+                if not directory_members and login.casefold() not in members:
                     raise ValueError(f"group {name} approver {login} is not a member")
-
-        table = _audience_table(self.people, self.groups)
-        if len(table) > MAX_AUDIENCES:
-            raise ValueError(
-                "active groups are more than 200; "
-                "PrivacyFence accepts at most 200 audiences"
-            )
-        if sum(len(v) for v in table.values()) > MAX_AUDIENCE_ADDRESSES:
-            raise ValueError(
-                f"active groups list more than {MAX_AUDIENCE_ADDRESSES} members in all; "
-                f"PrivacyFence accepts at most {MAX_AUDIENCE_ADDRESSES} addresses"
-            )
-        answer = {"version": 1, "audiences": table}
-        # PrivacyFence caps the text and the structured content separately, and the text is indented.
-        size = max(len(json.dumps(answer)), len(pydantic_core.to_json(answer, indent=2).decode()))
-        if size > MAX_AUDIENCE_ANSWER_CHARS:
-            raise ValueError(
-                f"the audience table is larger than {MAX_AUDIENCE_ANSWER_CHARS} characters; "
-                "PrivacyFence refuses it"
-            )
 
         if len(self.labels) > MAX_LABELS:
             raise ValueError(f"labels has more than {MAX_LABELS} entries")
@@ -308,9 +344,6 @@ class KhConfig(BaseModel):
             for name, group in self.groups.items()
             if not group.archived and logins & {m.casefold() for m in group.members}
         )
-
-    def audience_members(self) -> dict[str, list[str]]:
-        return _audience_table(self.people, self.groups)
 
 
 def _wrap(exc: ValidationError) -> ConfigError:

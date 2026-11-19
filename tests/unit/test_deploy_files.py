@@ -6,7 +6,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -53,11 +52,12 @@ def test_backup_script_content():
 def test_compose_example_has_no_secret_values():
     text = (ROOT / "deploy" / "compose.example.yaml").read_text()
     data = yaml.safe_load(text)
-    env = data["services"]["knowledge-hub"]["environment"]
-    for key, value in env.items():
-        if re.search(r"(PASSWORD|TOKEN|KEY|HMAC)", key):
-            assert key.endswith("_FILE"), key
-            assert str(value).startswith("/run/secrets/"), key
+    for name in ("knowledge-hub", "knowledge-hub-directory"):
+        env = data["services"][name]["environment"]
+        for key, value in env.items():
+            if re.search(r"(PASSWORD|TOKEN|KEY|HMAC|SECRET|CREDENTIALS)", key):
+                assert key.endswith("_FILE"), key
+                assert str(value).startswith("/run/secrets/"), key
     assert not re.search(r"(?i)(password|token|secret)\s*[:=]\s*[\"']?[A-Za-z0-9+/]{16,}", text)
 
 
@@ -68,25 +68,39 @@ def _compose():
     return yaml.safe_load(COMPOSE.read_text())
 
 
-def test_compose_example_claim_settings():
-    env = _compose()["services"]["knowledge-hub"]["environment"]
-    issuer = urlparse(env["KH_PF_ISSUER"])
-    jwks = urlparse(env["KH_PF_JWKS_URL"])
-    assert issuer.scheme == "https" and issuer.path == ""
-    assert jwks.scheme == "http"
-    assert jwks.path == "/upstream-mcp/jwks"
-    assert jwks.hostname == issuer.hostname
-    assert "well-known" not in COMPOSE.read_text()
-
-
 def test_compose_example_networks():
     data = _compose()
     used = set()
     for svc in data["services"].values():
         used |= set(svc.get("networks", []))
     for name in used:
-        assert data["networks"][name]["internal"] is True
-    assert "pf-kh" in data["services"]["knowledge-hub"]["networks"]
+        if name != "egress":
+            assert data["networks"][name]["internal"] is True
+    assert not (data["networks"]["egress"] or {}).get("internal", False)
+    assert set(data["networks"]) == {"db", "kh", "egress"}
+    assert used == {"db", "kh", "egress"}
+    assert "egress" not in data["services"]["ollama"]["networks"]
+
+
+def test_compose_example_directory_service():
+    data = _compose()
+    hub = data["services"]["knowledge-hub"]
+    svc = data["services"]["knowledge-hub-directory"]
+    assert svc["image"] == hub["image"]
+    assert svc["command"] == ["directory", "sync", "--every", "300"]
+    assert set(svc["networks"]) == {"db", "egress"}
+    assert svc["read_only"] is True and svc["cap_drop"] == ["ALL"]
+    assert set(svc["secrets"]) == {"pg_kh_indexer", "kh_directory_google_key", "kh_directory_keycloak_secret"}
+    # Only the sync holds a directory credential.
+    assert "kh_directory_google_key" not in hub["secrets"]
+    assert "kh_directory_keycloak_secret" not in hub["secrets"]
+    assert "kh_oidc_client_secret" in hub["secrets"]
+    assert "kh_oidc_client_secret" not in svc["secrets"]
+    for name in ("kh_oidc_client_secret", "kh_directory_google_key", "kh_directory_keycloak_secret"):
+        assert data["secrets"][name] == {"file": f"/etc/stack-secrets/{name}"}
+    assert "KH_OIDC_CLIENT_SECRET_FILE: /run/secrets/kh_oidc_client_secret" in COMPOSE.read_text()
+    assert not [k for k in hub["environment"] if k.startswith("KH_PF_")]
+    assert "pf-kh" not in data["networks"]
 
 
 def test_compose_example_ollama_and_image():

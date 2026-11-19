@@ -12,18 +12,44 @@ Unknown `KH_*` variables are ignored. `kh serve` and every other command exit 2 
 | Variable | Default | Meaning |
 |---|---|---|
 | `KH_ENV` | `prod` | `dev`, `test` or `prod`. `prod` refuses `KH_DEV_IDENTITY` and the fake embedder. |
-| `KH_DEV_IDENTITY` | none | JSON `{"sub", "principal_type", "audiences", "email"?}` used for requests with no claim header. `principal_type` is `claude_client` or `n8n_workflow`. Refused when `KH_ENV=prod`. `audiences` is ignored for a `claude_client`: its groups come from its `email` through `people` in `kh.yaml`, so a dev identity without a listed email reads nothing. For an `n8n_workflow` the audiences that are configured groups are held. |
-| `KH_PF_ISSUER` | none | Issuer (`iss`) the verifier accepts: the address PrivacyFence is served at, with no path, for example `https://pf.tkcs.name`. |
-| `KH_PF_AUDIENCE` | none | Audience (`aud`) the claim must carry. |
-| `KH_PF_JWKS_URL` | none | URL of PrivacyFence's signing keys, `<issuer>/upstream-mcp/jwks`. It may use another host address than the issuer: see below. |
+| `KH_DEV_IDENTITY` | none | JSON `{"sub", "principal_type", "audiences", "email"?}` used for requests with no `Authorization` header (a malformed one is a 401, never the dev identity). `principal_type` is `claude_client` or `n8n_workflow`. Refused when `KH_ENV=prod` and when OAuth is on. `audiences` is ignored for a `claude_client`: its groups come from its `email` through `people` in `kh.yaml`, so a dev identity without a listed email reads nothing. For an `n8n_workflow` the audiences that are configured groups are held. |
 | `KH_ALLOWED_HOSTS` | empty | Comma list of `host:port` entries accepted in the `Host` header (DNS-rebinding protection), for example `knowledge-hub:8080`. A bare host gets HTTP 421. |
 | `KH_MAX_BODY_BYTES` | `1048576` | Largest `/mcp` request body; larger gets 413. |
 
-### Claim verification over the private network
+### Sign-in and OAuth
 
-`KH_PF_ISSUER` is compared only with the `iss` claim and is never fetched. `KH_PF_JWKS_URL` is only where the signing keys are fetched, and the vendored verifier does not tie its host to `iss`: it accepts any `http://` or `https://` URL (`tests/unit/test_claims.py` pins this). In production the issuer is the public address `https://pf.tkcs.name`, and the JWKS URL is `http://pf.tkcs.name:8765/upstream-mcp/jwks`, reached over the private `pf-kh` Docker network where the PrivacyFence container has the network alias `pf.tkcs.name`. The host is the issuer's host name because PrivacyFence answers any other `Host` header with 400; the scheme is `http` because the hop never leaves the Docker network.
+Secrets only as `*_FILE`. OAuth is on only when `KH_PUBLIC_URL` and all three `KH_OIDC_*` settings are set; some but not all exits 2 with `KH_OIDC_* and KH_PUBLIC_URL must be set together`. With OAuth off only hub keys work. `kh serve` logs `auth paths: oauth=<on|off> keys=on dev_identity=<on|off>`. The old PrivacyFence variables are gone; a leftover one is ignored like any unknown `KH_*` variable.
 
-Why that is safe: the keys are public, so nothing secret crosses the hop. What matters is that nobody else can answer at that address, and the network guarantees it: `pf-kh` is `internal` (no internet, no published port) and only the hub and PrivacyFence join it. Never attach another service to `pf-kh`. A claim is still Ed25519 signed, bound to one call, and checked for audience, issuer, expiry and replay.
+| Variable | Default | Meaning |
+|---|---|---|
+| `KH_PUBLIC_URL` | none | `https://host` with no path, userinfo, query, fragment or trailing slash; `http://` only when `KH_ENV` is `dev` or `test` and the host is `localhost`, `127.0.0.1` or `[::1]`. It is the authorization server's issuer; the resource is `<KH_PUBLIC_URL>/mcp`. |
+| `KH_OIDC_ISSUER` | none | Issuer of the upstream OIDC provider that checks the password (Google or Keycloak). |
+| `KH_OIDC_CLIENT_ID` | none | The hub's client id at that provider. |
+| `KH_OIDC_CLIENT_SECRET_FILE` | none | File with the client secret. |
+| `KH_OIDC_ALLOWED_DOMAINS` | empty | Comma list of lower-case email domains; required when OAuth is on (`KH_OIDC_ALLOWED_DOMAINS is required when OAuth is on`). |
+| `KH_OIDC_HOSTED_DOMAINS` | none | Comma list; when set the ID token's `hd` must be in it. Required for a Google issuer (`accounts.google.com`): `KH_OIDC_HOSTED_DOMAINS is required for a Google issuer`. |
+| `KH_OAUTH_DCR` | `true` | Mount dynamic client registration (`/register`). |
+| `KH_OAUTH_REDIRECT_ALLOWLIST` | `https://claude.ai/api/mcp/auth_callback,http://localhost,http://127.0.0.1` | Comma list. An `https` entry matches only the identical URI; an `http://localhost` or `http://127.0.0.1` entry matches any port and path on that exact host, with no userinfo or fragment. Checked at registration, at `/authorize` and in the callback. |
+| `KH_OAUTH_ACCESS_TTL_SECONDS` | `3600` | 300 to 86400. |
+| `KH_OAUTH_REFRESH_TTL_DAYS` | `30` | 1 to 365; also the length of a refresh family counted from the first sign-in. |
+| `KH_OAUTH_MAX_CLIENTS` | `200` | Registered clients that were authorised plus unauthorised ones younger than one hour; more is refused. `kh daily` purges old ones. |
+| `KH_OAUTH_REGISTER_PER_MIN` | `30` | Registration requests per minute for the whole hub. |
+| `KH_OAUTH_AUTHORIZE_PER_MIN` | `600` | Requests per minute for the whole hub to `/authorize`, `/oauth/callback` and `/oauth/consent` together (429 above it). |
+
+### Directory
+
+Read by `kh serve` (the view) and by `kh directory` and `kh setup`. The sync is a separate process with its own secret files: `kh serve` never needs the Google key or the Keycloak secret. The hub never holds admin credentials; `kh setup` does.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KH_DIRECTORY_VIEW_SECONDS` | `30` | 5 to 600: how often `kh serve` re-reads the snapshot. |
+| `KH_DIRECTORY_GOOGLE_CREDENTIALS_FILE` | none | Service account key (JSON) for domain-wide delegation. |
+| `KH_DIRECTORY_GOOGLE_SUBJECT` | none | Admin address the key impersonates (a dedicated reader account with a custom role: Groups read and Users read). |
+| `KH_DIRECTORY_KEYCLOAK_URL` | none | Base URL, no trailing slash; `https` unless `KH_ENV` is `dev` or `test` or the host is a single-label name such as `keycloak` on the internal admin network. |
+| `KH_DIRECTORY_KEYCLOAK_REALM` | none | Realm name. |
+| `KH_DIRECTORY_KEYCLOAK_CLIENT_ID` | none | Service-account client with the realm-management roles `view-users`, `query-users` and `query-groups`. |
+| `KH_DIRECTORY_KEYCLOAK_CLIENT_SECRET_FILE` | none | File with that client's secret. |
+| `KH_DIRECTORY_KEYCLOAK_SUBGROUPS` | `false` | `true` also reads the members of subgroups. Off by default: anyone who manages a subgroup could otherwise grant access to the parent. |
 
 ### Database
 
@@ -55,7 +81,7 @@ Why that is safe: the keys are public, so nothing secret crosses the hop. What m
 | `KH_SETUP_FORGEJO_ADMIN_TOKEN_FILE` | none | Token of a Forgejo site administrator. Required by the `forgejo` step. |
 | `KH_SETUP_SLACK_WEBHOOKS_FILE` | none | YAML file mapping group name to its Slack incoming-webhook URL (`https://`). Needed only for groups with `slack_channel`. |
 
-The `kh serve` service never mounts these files. The hub never holds admin credentials; `kh setup` does.
+The `kh serve` service never mounts these files. The hub never holds admin credentials; `kh setup` does. The directory sync is a separate process with its own secret files (see "Directory").
 
 ### Embeddings
 
@@ -123,9 +149,16 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | `kh group add\|remove\|archive\|unarchive\|member\|approver\|list` | Edit the groups of `kh.yaml` and apply the change. |
 | `kh repo list\|add\|set\|remove` | Edit `tech_repos` of `kh.yaml` (the technical repos, T0a) and apply the change; see `kh admin commands`. |
 | `kh person add\|remove\|list` | Edit `people` (and with `--from-groups` the group lists) and apply the change. |
+| `kh key create --group G [--tools t1,t2] --name N [--expires-days D] [--out FILE]` | Create a hub key (`khk_<id>.<secret>`) for one active group. Default tools `search,ingest_record`; `move_item` cannot be given. The key is shown once (or written to FILE, mode 0600). Errors, exit 1: `key: group <G> is not an active group`, `key: unknown tool <t>`, `key: tool <t> cannot be given to a key`, `key: name <N> is not valid`. |
+| `kh key list [--json]` | Tab-separated `id name group tools expires last_used status` (`active`, `expired` or `revoked`); never a secret. |
+| `kh key revoke ID` | Revoke a key; `key: <id> not found` exits 1. |
+| `kh directory sync [--once \| --every N] [--accept-change]` | Fetch the groups of the provider and store the snapshot. Exit 0, 1 (`directory: <provider>: <reason>`) or 3 (refused change: rerun with `--accept-change`). `--every` loops and logs errors; the previous snapshot stays. Run it as a separate service with its own secret files. |
+| `kh directory plan` | Print group, person and skip counts and one `skip <group> <role> <who>: <reason>` line per skip; exit 1 when the snapshot is missing or stale. |
+| `kh directory people [--json]` | The effective people with `login`, `email`, `source` (`static` or `directory`), `groups` and `approver_of`. |
+| `kh directory show` | The provider and the snapshot's age and size, or `snapshot: none`. |
 | `kh rebuild [--repo R]` | Forget the indexed head and sync again. Idempotent. |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>`). |
-| `kh daily` | Recompute `stale` flags, purge expired claim ids and delete usage events past `KH_USAGE_RETENTION_DAYS`. |
+| `kh daily` | Recompute `stale` flags, purge expired OAuth rows and stale flags and delete usage events past `KH_USAGE_RETENTION_DAYS`. |
 | `kh requeue-embeddings` | Queue an `embed_record` job for every record without chunks. |
 | `kh lint FILE...` | Offline frontmatter check, no settings or config needed; exit 1 on a problem. |
 
@@ -142,12 +175,18 @@ One file for the hub and for `kh setup`. Unknown keys are refused and every erro
 | `indexer_login` | `kh-indexer` | Owner of the read-only token. Must differ from `bot_login`; neither may appear in `people` or a member list. |
 | `forgejo_web_url` | null | Null or an `https://` URL; the base of `source_link` (empty links when null). |
 | `hub_url` | null | Null or an http(s) URL without a path: how Forgejo reaches the hub. Only `kh setup` needs it (webhook target). |
-| `people` | `{}` | Map of Forgejo login to the email PrivacyFence verifies for that person. Logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$` and are unique case-folded; an email has exactly one `@`, at most 254 characters, is stored lower-case and is unique (`config: email <e> belongs to two people`). |
+| `people` | `{}` | Map of Forgejo login to the email the sign-in verifies for that person. Logins match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,38}$` and are unique case-folded; an email has exactly one `@`, at most 254 characters, is stored lower-case and is unique (`config: email <e> belongs to two people`). |
 | `groups` | `{}` | Map of group name to `{repo, members, approvers, archived, slack_channel}`. |
-| `groups` (limits) | none | PrivacyFence reads the active groups as its audiences and refuses an answer over its limits, so `kh.yaml` is refused with more than 200 active groups (`config: active groups are more than 200; PrivacyFence accepts at most 200 audiences`), more than 20000 members in all (`config: active groups list more than 20000 members in all; PrivacyFence accepts at most 20000 addresses`) or an audience table over 1000000 characters, compact or indented (`config: the audience table is larger than 1000000 characters; PrivacyFence refuses it`). |
+| `groups.<g>.directory` | `{}` | Map of provider name (`^[a-z][a-z0-9_]{0,30}$`, else `config: directory provider name <x> is not valid`) to `{members, approvers}`: group references of that provider (Google group addresses; Keycloak group names or `/paths`). Entries are non-empty strings of at most 254 characters, unique in a list (`config: directory reference <x> is not valid`, `config: directory reference <x> is listed twice`). Both providers' references can sit side by side; `directory.provider` picks the one in use. Only the shape is checked here. |
+| `directory` | see below | Directory sync policy. |
+| `directory.provider` | `none` | `none`, `google` or `keycloak` (`config: directory.provider <x> is not valid` for a malformed name; an unknown name is refused by `kh directory` and `kh serve` with `directory: unknown provider <x>`, exit 2). |
+| `directory.domains` | `[]` | Lower-case email domains a person may have; required when the provider is not `none` (`config: directory.domains is required when directory.provider is set`; `config: directory.domains entry <x> is not valid`; `config: directory.domains lists <x> twice`). |
+| `directory.refresh_seconds` | `300` | 60 to 3600: how often `kh directory sync --every` fetches. |
+| `directory.max_stale_seconds` | `21600` | At most 604800 and at least twice `refresh_seconds` (`config: directory.max_stale_seconds must be at least twice refresh_seconds`). A snapshot older than this is ignored: directory-derived groups disappear and static entries stay. |
+| `directory.shrink_guard_percent` | `50` | 1 to 99: `kh directory sync` refuses a snapshot with fewer than `100 - n` percent of the stored user count, or more than double it (from 10 users), unless `--accept-change`. |
 | `groups.<g>.repo` | `kb-<g>` | Repo name, `^[a-z0-9][a-z0-9._-]{0,99}$`, unique. Immutable once applied. |
 | `groups.<g>.members` | `[]` | Logins; each must be in `people` (`config: group <g> member <login> is not in people`). Members read and write. |
-| `groups.<g>.approvers` | required | Non-empty subset of `members` (`config: group <g> approver <login> is not a member`). Approvers merge. |
+| `groups.<g>.approvers` | required | Non-empty subset of `members` (`config: group <g> approver <login> is not a member`); may be empty only when some `directory.<p>.approvers` of the group is non-empty (otherwise `config: group <g> needs at least one approver`). With a `directory.<p>.members` list the check is made on the effective membership instead. Approvers merge. |
 | `groups.<g>.archived` | `false` | An archived group is held by nobody: its documents and records are hidden, writes into it are refused (`audience is not held by this caller or not configured`), and nothing is indexed for it. Nothing is deleted. Every other group check still applies. |
 | `groups.<g>.slack_channel` | null | Null or a Slack channel `#name` (lower case, digits, `-`, `_`, at most 80 characters after `#`). `kh setup` keeps one Slack hook on the group's repo for pull request events; its URL comes from `KH_SETUP_SLACK_WEBHOOKS_FILE`. Ignored while the group is archived. |
 | `labels` | `{}` | Map of label name (`^[a-z0-9][a-z0-9_.:-]{0,62}$`) to a description of at most 200 characters; at most 500 labels. |
@@ -188,7 +227,7 @@ tech_repos:
     dirs: [docs, adr]
 ```
 
-The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart. `deploy/kh.example.yaml` is the maintained example.
+The hub reads `kh.yaml` when `kh serve` starts, so a change to `people` or a group needs a restart; directory changes do not (the snapshot is re-read every `KH_DIRECTORY_VIEW_SECONDS`). `deploy/kh.example.yaml` is the maintained example.
 
 ## kh setup
 

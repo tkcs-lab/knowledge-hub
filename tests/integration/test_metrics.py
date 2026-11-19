@@ -14,7 +14,7 @@ import pytest
 from knowledge_hub.app import build_app
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.metrics import METRICS
-from tests.support.claims import verifier_for_tests
+from tests.support.bearer import TestBearerResolver
 from tests.support.principals import alice_all
 
 TOKEN = "metrics-secret-token"
@@ -43,7 +43,10 @@ def app_settings(app_settings, tmp_path):
 
 @pytest.fixture
 def deps(app_settings, kh_config, app_pool, indexer_pool):
-    return Deps(settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool)
+    return Deps(
+        settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
+        bearer=TestBearerResolver(kh_config),
+    )
 
 
 async def scrape(http, token=TOKEN):
@@ -89,11 +92,11 @@ async def test_webhook_results_are_counted(mcp_client):
     assert 'kh_webhook_events_total{result="bad_signature"} 1' in text
 
 
-async def test_rejected_claim_is_counted(mcp_client):
-    res = await mcp_client.call(alice_all, "anything", {}, token="not-a-claim")
+async def test_rejected_bearer_is_counted(mcp_client):
+    res = await mcp_client.call(alice_all, "anything", {}, token="not-a-token")
     assert res.status == 401
     text = (await scrape(mcp_client.http)).text
-    assert re.search(r'kh_claim_rejections_total\{code="[a-z_]+"\} 1', text)
+    assert re.search(r'kh_auth_rejections_total\{code="[a-z_]+"\} 1', text)
 
 
 async def test_tool_call_counters_are_rendered():
@@ -126,7 +129,7 @@ async def test_metrics_text_leaks_nothing(mcp_client):
 
 async def test_route_absent_without_token_file(app_settings, deps):
     settings = app_settings.model_copy(update={"metrics_token_file": None})
-    app = build_app(settings, deps, verifier_for_tests())
+    app = build_app(settings, deps)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as http:
         assert (await http.get("/metrics", headers={"authorization": f"Bearer {TOKEN}"})).status_code == 404
 
@@ -135,14 +138,14 @@ async def test_empty_token_file_never_authenticates(app_settings, deps, tmp_path
     empty = tmp_path / "empty.token"
     empty.write_text("\n")
     settings = app_settings.model_copy(update={"metrics_token_file": empty})
-    app = build_app(settings, deps, verifier_for_tests())
+    app = build_app(settings, deps)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as http:
         for auth in ("Bearer ", "Bearer", ""):
             assert (await http.get("/metrics", headers={"authorization": auth})).status_code == 401
 
 
 def test_label_values_come_from_fixed_sets():
-    METRICS.claim_rejection("alice@example.org")
+    METRICS.auth_rejection("alice@example.org")
     METRICS.webhook_event("anything")
     METRICS.tool_call("t", "doc:123", 0.0)
     text = METRICS.render()

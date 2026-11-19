@@ -6,6 +6,45 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Added
 
+- App wiring of authentication: `BearerResolver` (hub keys and OAuth access tokens, scope-limited tool allowlists, audiences from the live membership), `PublicHostGuard` (404 for non-public paths on the public host), `build_deps` building the OAuth stack when configured, and a membership refresh task in the app lifespan.
+- OAuth routes (`oauth/routes.py`, `oauth/consent.py`): hub-owned authorization-server and protected-resource metadata, the SDK routes with limiters on `/register` and `/authorize`, `/oauth/callback` and `/oauth/consent`, and the consent page with its security headers. App wiring arrives in a later phase.
+- OAuth authorization flow (`oauth/flow.py`): the upstream callback, the consent ticket and decision, and single-use authorization codes. The routes arrive in a later phase.
+- `kh setup` and the admin commands build Forgejo teams from the effective membership (static plus directory snapshot); directory people without a Forgejo account or with a different account email are left out and reported, and a missing or stale snapshot prints `! directory: ...`.
+- Google directory provider (`directory/google.py`): Directory API with domain-wide delegation, two read-only scopes, no Google client library.
+- Keycloak directory provider (`directory/keycloak.py`): client-credentials token, group lookup by name or path, direct members (subgroups optional), and a `kh-test` realm fixture for a live test.
+- Hub keys for workflows: `kh key create|list|revoke` (`auth/keys.py`, `auth/keys_cli.py`), keys `khk_<id>.<secret>` bound to one group and a tool list, and a tool allowlist in `tool_guard` that refuses a tool outside `Caller.tools` with `this credential may not call this tool`. The request path that accepts these keys arrives with the caller middleware.
+- `directory/store.py`: the directory snapshot store, `MembershipCache` (fails closed to the static membership when the snapshot is missing, of another provider or older than `max_stale_seconds`) and `load_membership`; the gauge `kh_directory_snapshot_age_seconds`.
+- `oauth/provider.py`: `HubAuthProvider`, the MCP SDK authorization-server provider (client registration with the redirect allowlist, authorize, single-use codes, hashed access and refresh tokens, refresh rotation with reuse detection, family revocation). The routes and the callback arrive with later phases.
+- Migration `0006_identity.sql`: tables and `SECURITY DEFINER` functions for hub keys, the OAuth server state and the directory snapshot, and `deploy/rollback-0006.sql` to undo it. `kh daily` purges expired OAuth state through `jobs/daily.py` `purge_identity`.
+
+- `kh directory sync [--once | --every N] [--accept-change]`, `plan`, `people [--json]` and `show` (`directory/sync.py`, `directory/cli.py`): the separate sync process that fetches directory groups, refuses a snapshot whose user count shrinks or grows too much (exit 3) and stores it as `kh_indexer`. `kh daily` also purges expired OAuth state and prints `identity rows purged`.
+
+- The hub is its own OAuth authorization server with a consent page, and signs people in at an upstream OIDC provider through `KH_PUBLIC_URL` and `KH_OIDC_*`. Claude connects with OAuth; see `docs/runbook-identity.md`.
+- Directory groups from Google or Keycloak: providers `google` and `keycloak`, `kh directory sync|plan|people|show` and the `directory` keys of `kh.yaml` (`directory` and `groups.<g>.directory`). The sync runs as a separate service, `knowledge-hub-directory`, in `deploy/compose.example.yaml`.
+- Hub keys for workflows: `kh key create|list|revoke`.
+- Migration `0006_identity.sql`, applied by `kh migrate` or the postgres step of `kh setup apply`. `deploy/rollback-0006.sql` undoes it; run it before an older image is started.
+- `docs/runbook-identity.md`: sign-in, directory, hub keys and the move off PrivacyFence.
+
+### Changed
+
+- `kh.yaml` gains a `directory` section and `groups.<g>.directory` lists; `groups.<g>.approvers` may be empty when the group has directory approvers. New settings `KH_PUBLIC_URL`, `KH_OIDC_*`, `KH_OAUTH_*` and `KH_DIRECTORY_*` are read and validated.
+- `/mcp` callers are now identified by a single bearer-token middleware (`auth/middleware.py`); a refused request is a 401 with a `WWW-Authenticate` header, also for GET and DELETE. The replay table `kh.claim_jti` and function `kh.claim_seen` are dropped by migration 0006. The metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`. The `list_audiences` tool is removed, and the hub no longer builds the PrivacyFence claim verifier (`KH_PF_*` settings are no longer required).
+- `groups.<g>.approvers` may be empty when the group has directory approvers; `kh setup` reads the effective membership (static plus directory snapshot) and prints new `i account` and `! directory` lines; `kh daily` purges identity rows instead of claims; the metric `kh_claim_rejections_total` is renamed `kh_auth_rejections_total`.
+
+### Added
+
+- `knowledge_hub.oauth.upstream`: the OIDC relying party for the upstream identity provider (discovery, PKCE, code exchange, strict ID-token validation: signature algorithm and key binding, issuer, audience, nonce, verified email, allowed and hosted domains). It is not wired into the app yet.
+
+### Removed
+
+- The PrivacyFence integration: the claim verifier and replay cache modules, the `KH_PF_ISSUER`, `KH_PF_AUDIENCE` and `KH_PF_JWKS_URL` settings (a leftover `KH_PF_*` variable is ignored), the audience-count limits in `kh.yaml` validation, the `pf-kh` network and `KH_PF_*` variables of `deploy/compose.example.yaml`, and `deploy/privacyfence-upstream.example.yaml`. `kh daily` no longer purges claim rows.
+- Operators: move n8n workflows to hub keys and Claude to the hub connector before or right after the deploy; PrivacyFence-minted tokens and its connector stop working at the deploy.
+- PrivacyFence: the claim header and verifier, the tool `list_audiences`, `KH_PF_ISSUER`, `KH_PF_AUDIENCE`, `KH_PF_JWKS_URL`, `deploy/privacyfence-upstream.example.yaml`, the `pf-kh` network of the compose example, PrivacyFence's audience-table limits and the replay table dropped by migration `0006`.
+
+### Security
+
+- The hub now serves a public OAuth surface (`/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, the two `.well-known` documents, `/oauth/callback`, `/oauth/consent`); other paths answer 404 on the public name. The directory sync uses a service account with two read-only Google scopes (`admin.directory.group.member.readonly`, `admin.directory.user.readonly`).
+
 - `kh repo list|add|set|remove`: edit the technical repos (`tech_repos`) of `kh.yaml` and apply the change; `remove` deletes the repo's indexed documents.
 - `tech_repos.<r>.dirs`: the directories whose `.md` files are indexed (default `[docs]`); the root `CLAUDE.md` is always indexed.
 

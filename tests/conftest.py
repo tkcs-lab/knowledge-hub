@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ["tests.support.fixtures_db", "tests.support.fixtures_app"]
+pytest_plugins = ["tests.support.fixtures_db", "tests.support.fixtures_app", "tests.support.oauth_app"]
 
 _ROOT = Path(__file__).parent
 

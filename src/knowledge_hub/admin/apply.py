@@ -23,9 +23,7 @@ Edit = Callable[[Doc], bool]
 Check = Callable[["Steps", KhConfig], Awaitable[str | None]]
 After = Callable[["Steps", bool], Awaitable[list[Change]]]
 
-RESTART_NOTE = (
-    "restart kh serve: the hub reads kh.yaml at start (PrivacyFence follows within its refresh interval)"
-)
+RESTART_NOTE = "restart kh serve: the hub reads kh.yaml at start"
 
 
 class StepBuildError(Exception):

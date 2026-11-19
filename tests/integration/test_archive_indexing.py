@@ -19,7 +19,6 @@ from knowledge_hub.indexer.worker import Worker
 from knowledge_hub.mcp.server import Deps
 from knowledge_hub.metrics import METRICS
 from tests.support.blobs import MemoryBlobStore
-from tests.support.claims import verifier_for_tests
 from tests.support.principals import KH_CONFIG
 
 DB = "kh_fresh"
@@ -77,7 +76,7 @@ def deps(hook_settings, kh_config, app_pool, indexer_pool):
 
 @pytest.fixture
 async def http(hook_settings, deps):
-    app = build_app(hook_settings, deps, verifier_for_tests())
+    app = build_app(hook_settings, deps)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://x") as client:
         yield client
 

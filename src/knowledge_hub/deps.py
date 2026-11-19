@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
-from knowledge_hub.auth.pf_claim_verify import ClaimVerifier
+import logging
+
+import httpx
+
+from knowledge_hub.auth.bearer import BearerResolver
 from knowledge_hub.blobs.s3 import S3BlobStore
 from knowledge_hub.config import KhConfig
 from knowledge_hub.db.pool import make_app_pool, make_indexer_pool
+from knowledge_hub.directory.store import MembershipCache
 from knowledge_hub.embed.factory import make_embedder
 from knowledge_hub.forgejo import ForgejoBot, ForgejoReader
 from knowledge_hub.indexer.worker import Worker
 from knowledge_hub.mcp.server import Deps
+from knowledge_hub.oauth.flow import AuthorizationFlow
+from knowledge_hub.oauth.provider import HubAuthProvider
+from knowledge_hub.oauth.store import OAuthStore
+from knowledge_hub.oauth.upstream import UpstreamClient, UpstreamConfig
 from knowledge_hub.ratelimit import RateLimiter
 from knowledge_hub.settings import Settings
+
+log = logging.getLogger("knowledge_hub.deps")
 
 
 def make_blob_store(settings: Settings) -> S3BlobStore | None:
@@ -59,26 +70,10 @@ def make_bot(settings: Settings, config: KhConfig) -> ForgejoBot | None:
     return ForgejoBot(settings.forgejo_url, token, config.org)
 
 
-def make_verifier(settings: Settings) -> ClaimVerifier | None:
-    """The production verifier. Without PrivacyFence settings only the dev identity may stand in."""
-    if settings.pf_jwks_url and settings.pf_issuer and settings.pf_audience:
-        # Replay protection lives in the middleware (``PgReplayCache``), so the verifier has none.
-        return ClaimVerifier(
-            issuer=settings.pf_issuer,
-            audience=settings.pf_audience,
-            jwks_url=settings.pf_jwks_url,
-            replay_cache=None,
-        )
-    if settings.dev_identity is not None:
-        return None
-    raise ValueError(
-        "KH_PF_JWKS_URL, KH_PF_ISSUER and KH_PF_AUDIENCE are required unless KH_DEV_IDENTITY is set"
-    )
-
-
-async def build_deps(settings: Settings, config: KhConfig) -> Deps:
+async def build_deps(
+    settings: Settings, config: KhConfig, *, upstream_http: httpx.AsyncClient | None = None
+) -> Deps:
     """Create every dependency; both pools are open when this returns."""
-    verifier = make_verifier(settings)
     embedder = make_embedder(settings)
     blobs = make_blob_store(settings)
     reader = make_reader(settings, config)
@@ -111,6 +106,36 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
             tech_reader=tech_reader,
             tech_poll_seconds=settings.tech_poll_minutes * 60,
         )
+    membership = MembershipCache(app_pool, config, settings)
+    provider = flow = upstream = None
+    own_http: httpx.AsyncClient | None = None
+    if settings.oauth_enabled:
+        http = upstream_http
+        if http is None:
+            http = own_http = httpx.AsyncClient()
+        secret = settings.oidc_client_secret_file.read_text().strip()  # type: ignore[union-attr]
+        upstream = UpstreamClient(
+            UpstreamConfig(
+                issuer=settings.oidc_issuer,  # type: ignore[arg-type]
+                client_id=settings.oidc_client_id,  # type: ignore[arg-type]
+                client_secret=secret,
+                allowed_domains=settings.allowed_domains_tuple,
+                hosted_domains=settings.hosted_domains_tuple,
+                redirect_uri=f"{settings.public_url}/oauth/callback",
+                allow_http=settings.env in ("dev", "test"),
+            ),
+            http,
+        )
+        store = OAuthStore(app_pool)
+        provider = HubAuthProvider(store, upstream, settings, config, membership)
+        flow = AuthorizationFlow(store, upstream, settings, config, membership)
+    resource_url = settings.resource_url if provider is not None else None
+    bearer = BearerResolver(app_pool, config, provider, membership, resource_url)
+    log.info(
+        "auth paths: oauth=%s keys=on dev_identity=%s",
+        "on" if provider is not None else "off",
+        "on" if settings.dev_identity is not None else "off",
+    )
     return Deps(
         settings=settings,
         config=config,
@@ -118,18 +143,24 @@ async def build_deps(settings: Settings, config: KhConfig) -> Deps:
         indexer_pool=indexer_pool,
         embedder=embedder,
         blobs=blobs,
-        verifier=verifier,
         ratelimiter=RateLimiter(settings.rate_limit_per_min),
         reader=reader,
         worker=worker,
         forgejo_bot=bot,
         tech_reader=tech_reader,
+        bearer=bearer,
+        membership=membership,
+        oauth={"provider": provider, "flow": flow, "upstream": upstream, "http": own_http}
+        if provider is not None
+        else None,
     )
 
 
 async def close_deps(deps: Deps) -> None:
     if deps.worker is not None:
         deps.worker.stop()
+    if deps.oauth and deps.oauth.get("http") is not None:
+        await deps.oauth["http"].aclose()
     if deps.reader is not None:
         await deps.reader.aclose()
     if deps.forgejo_bot is not None:

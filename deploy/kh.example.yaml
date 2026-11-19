@@ -5,7 +5,13 @@ bot_login: kh-bot             # opens every T0 pull request and is stamped on ev
 indexer_login: kh-indexer     # read-only token owner
 forgejo_web_url: null         # for example https://forgejo.example.com, used for source links
 hub_url: http://knowledge-hub:8080   # how Forgejo reaches the hub; only `kh setup` needs it
-# Forgejo login -> the email PrivacyFence verifies for that person. Every group member needs an entry.
+# Forgejo login -> the email the sign-in verifies for that person. Every group member needs an entry.
+# Directory groups (Google or Keycloak): people who sign in with a domain address get their
+# groups from a snapshot written by `kh directory sync`. Everything here stays commented out.
+# directory:
+#   provider: google          # none | google | keycloak
+#   domains: [example.com]    # lower-case email domains a person may have
+#   refresh_seconds: 300
 people:
   alice: alice@example.com
   bob: bob@example.com
@@ -14,6 +20,9 @@ groups:
     repo: kb-all              # default: kb-<group>
     members: [alice, bob]
     approvers: [alice]        # non-empty subset of members
+#     directory:              # references per provider; switching is `directory.provider` only
+#       google:   {members: [kh-all@example.com], approvers: [kh-all-approvers@example.com]}
+#       keycloak: {members: [kh-all], approvers: [kh-all-approvers]}
 #     slack_channel: "#kh-all-approvers"   # optional: Slack hook on the repo for pull requests; URL in KH_SETUP_SLACK_WEBHOOKS_FILE
   mgmt:
     members: [alice]

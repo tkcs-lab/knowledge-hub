@@ -100,7 +100,7 @@ async def test_app_cannot_update_or_delete(app_pool, seeded_db, table):
                 await conn.execute(stmt)
 
 
-@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts", "claim_jti"])
+@pytest.mark.parametrize("table", ["index_jobs", "repo_state", "index_alerts"])
 async def test_app_cannot_read_internal_tables(app_pool, seeded_db, table):
     with pytest.raises(errors.InsufficientPrivilege):
         async with caller_tx(app_pool, bob_mgmt) as conn:

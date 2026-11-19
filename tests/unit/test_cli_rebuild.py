@@ -73,7 +73,7 @@ def test_check_exit_code_follows_drift(monkeypatch, capsys, lines, code):
 def test_daily_and_requeue(monkeypatch, capsys):
     async def run_daily(pool):
         assert pool == "pool"
-        return 3, 2
+        return 3
 
     async def requeue(pool):
         assert pool == "pool"
@@ -84,14 +84,19 @@ def test_daily_and_requeue(monkeypatch, capsys):
         assert days == 180
         return 5
 
+    async def purge_identity(pool):
+        assert pool == "pool"
+        return 2
+
     monkeypatch.setattr(daily_mod, "run_daily", run_daily)
+    monkeypatch.setattr(daily_mod, "purge_identity", purge_identity)
     monkeypatch.setattr(usage_mod, "purge_usage", purge_usage)
     monkeypatch.setattr(requeue_mod, "requeue_embeddings", requeue)
     assert cli.main(["daily"]) == 0
     assert cli.main(["requeue-embeddings"]) == 0
     out = capsys.readouterr().out
     assert out.splitlines()[0].endswith("; usage events purged: 5")
-    assert "3" in out and "2" in out and "queued 4 embed_record jobs" in out
+    assert "stale flags changed: 3" in out and "queued 4 embed_record jobs" in out
 
 
 def test_settings_error_exits_2(monkeypatch, capsys):

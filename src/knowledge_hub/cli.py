@@ -25,7 +25,7 @@ async def _serve(settings: Settings, config: KhConfig, port: int) -> None:
 
     deps = await build_deps(settings, config)
     try:
-        app = build_app(settings, deps, deps.verifier)
+        app = build_app(settings, deps)
         server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info"))
         await server.serve()
     finally:
@@ -73,12 +73,13 @@ async def _check(deps: Any) -> int:
 
 
 async def _daily(deps: Any) -> int:
-    from knowledge_hub.jobs.daily import run_daily
+    from knowledge_hub.jobs.daily import purge_identity, run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
-    stale, purged = await run_daily(deps.indexer_pool)
+    stale = await run_daily(deps.indexer_pool)
+    identity = await purge_identity(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
-    print(f"stale flags changed: {stale}; expired claims purged: {purged}; usage events purged: {usage}")
+    print(f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}")
     return 0
 
 
@@ -119,6 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.admin.cli import main as admin_main
 
         return admin_main(argv)
+    if argv and argv[0] == "directory":
+        from knowledge_hub.directory.cli import main as directory_main
+
+        return directory_main(argv[1:])
+    if argv and argv[0] == "key":
+        from knowledge_hub.auth.keys_cli import main as key_main
+
+        return key_main(argv[1:])
     parser = argparse.ArgumentParser(prog="kh")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in COMMANDS:

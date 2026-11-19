@@ -7,6 +7,7 @@ import pytest
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.mcp.errors import NORMATIVE
 from knowledge_hub.mcp.server import Deps
+from tests.support.bearer import TestBearerResolver
 from tests.support.mcp_client import HOST
 from tests.support.principals import (
     KH_CONFIG,
@@ -34,7 +35,7 @@ def app_settings(db_settings, tmp_path):
 def deps(app_settings, kh_config, app_pool, indexer_pool) -> Deps:
     return Deps(
         settings=app_settings, config=kh_config, app_pool=app_pool, indexer_pool=indexer_pool,
-        embedder=FakeEmbedder(),
+        embedder=FakeEmbedder(), bearer=TestBearerResolver(kh_config),
     )
 
 

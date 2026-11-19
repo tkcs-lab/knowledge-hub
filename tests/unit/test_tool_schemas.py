@@ -1,4 +1,4 @@
-"""PrivacyFence skips upstream tools whose schema it cannot forward (plan 3.2); ours must all pass."""
+"""MCP clients drop tools whose schema they cannot forward, so ours stay flat."""
 
 import json
 
@@ -20,7 +20,7 @@ def _walk(node):
             yield from _walk(item)
 
 
-async def test_every_registered_tool_passes_privacyfence_skip_rules():
+async def test_every_registered_tool_has_a_flat_schema():
     deps = Deps(settings=Settings(env="test"), config=KhConfig(), app_pool=None, indexer_pool=None)
     tools = await build_mcp(deps).list_tools()
     for tool in tools:
