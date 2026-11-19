@@ -66,9 +66,9 @@ async def test_oauth_hub_key_reads_only_its_group_and_its_tools(oauth_stack):
     key = await s.create_key("mgmt", ("search",))
     assert await s.search_ids(key) == [s.doc("mgmt")]
     denied = await s.mcp_call(key, "get_doc", {"id": s.doc("mgmt")})
-    assert denied.is_error and denied.text == TOOL_NOT_ALLOWED
+    assert denied.is_error and denied.text == f"Error executing tool get_doc: {TOOL_NOT_ALLOWED}"
     other = await s.mcp_call(key, "list_labels")
-    assert other.is_error and other.text == TOOL_NOT_ALLOWED
+    assert other.is_error and other.text == f"Error executing tool list_labels: {TOOL_NOT_ALLOWED}"
 
 
 async def test_oauth_off_hub_key_still_works(keys_stack):

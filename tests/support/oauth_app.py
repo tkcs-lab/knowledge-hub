@@ -330,7 +330,12 @@ class OAuthStack:
         )
 
     async def revoke(self, client_id: str, token: str) -> httpx.Response:
-        return await self.hub.post("/revoke", data={"token": token, "client_id": client_id})
+        # The SDK's RevocationRequest declares `client_secret: str | None` with no default, so the
+        # field must be present even for a public client (auth method "none"); an empty value is
+        # accepted and ignored by the client authenticator.
+        return await self.hub.post(
+            "/revoke", data={"token": token, "client_id": client_id, "client_secret": ""}
+        )
 
     async def login(self, email: str) -> tuple[SignIn, dict[str, Any]]:
         """A complete login: returns the sign-in and the token response."""
