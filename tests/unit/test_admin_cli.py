@@ -217,3 +217,22 @@ def test_dispatcher_routes_label_group_person(monkeypatch):
     for cmd in ("label", "group", "person"):
         assert cli.main([cmd, "list"]) == 7
     assert seen == [["label", "list"], ["group", "list"], ["person", "list"]]
+
+
+def test_if_sha256_option_parses_and_gates(cfg, steps, capsys):
+    assert main("label", "add", "c", "--if-sha256", "0" * 64, "--config", str(cfg)) == 2
+    assert "changed since the preview" in capsys.readouterr().out
+    digest = apply.text_sha256(TEXT)
+    assert main("label", "add", "c", "--if-sha256", digest, "--config", str(cfg)) == 0
+
+
+def test_if_sha256_rejects_short_value(cfg):
+    with pytest.raises(SystemExit) as exc:
+        main("label", "add", "c", "--if-sha256", "a" * 63, "--config", str(cfg))
+    assert exc.value.code == 2
+
+
+def test_list_has_no_if_sha256(cfg):
+    with pytest.raises(SystemExit) as exc:
+        main("label", "list", "--if-sha256", "a" * 64, "--config", str(cfg))
+    assert exc.value.code == 2
