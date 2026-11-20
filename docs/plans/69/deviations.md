@@ -22,7 +22,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p5-panel-move
 
-- pending
+- None.
 
 ## p6-docs
 
