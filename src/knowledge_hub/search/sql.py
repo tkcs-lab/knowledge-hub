@@ -17,7 +17,7 @@ TIERS = ("T0", "T0a", "T3")
 @dataclass(frozen=True)
 class SearchFilters:
     query: str
-    query_vector: list[float]
+    query_vector: list[float] | None
     embedding_model: str
     min_tier: str = "T3"
     labels: list[str] = field(default_factory=list)
@@ -86,7 +86,8 @@ def _lists(prefix: str, tiers: str) -> str:
   SELECT id, row_number() OVER (ORDER BY dist, id) AS rnk
     FROM (SELECT c.id, c.embedding <=> %(qvec)s::vector AS dist
             FROM kh.chunks c
-           WHERE c.embedding IS NOT NULL AND c.embedding_model = %(model)s AND {flt}
+           WHERE c.embedding IS NOT NULL AND %(qvec)s::vector IS NOT NULL
+             AND c.embedding_model = %(model)s AND {flt}
            ORDER BY dist, c.id
            LIMIT %(pool)s) v
    WHERE %(max_dist)s::float8 >= 2 OR v.dist <= %(max_dist)s::float8
@@ -170,7 +171,11 @@ def build_search_query(filters: SearchFilters) -> tuple[str, dict[str, Any]]:
     sql = _BODY.format(main_lists=_lists("main", "tiers"), low_lists=_lists("low", "low_tiers"))
     params: dict[str, Any] = {
         "query": filters.query,
-        "qvec": "[" + ",".join(repr(float(x)) for x in filters.query_vector) + "]",
+        "qvec": (
+            None
+            if filters.query_vector is None
+            else "[" + ",".join(repr(float(x)) for x in filters.query_vector) + "]"
+        ),
         "model": filters.embedding_model,
         "tiers": filters.tiers_at_or_above(),
         "low_tiers": filters.tiers_below(),

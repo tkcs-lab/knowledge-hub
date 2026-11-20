@@ -85,7 +85,9 @@ async def search(
             cursor,
             max_offset=settings.search_max_offset,
         )
-    (vector,) = await deps.embedder.embed([query])
+    covered = ({audience} & call.caller.audiences) if audience else call.caller.audiences
+    embed = bool(covered) and all(deps.embedder.may_embed(g) for g in covered)
+    vector = (await deps.embedder.embed([query]))[0] if embed else None
     filters = SearchFilters(
         query=query,
         query_vector=vector,
