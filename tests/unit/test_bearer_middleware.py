@@ -204,6 +204,7 @@ async def test_scope_sets_match_registered_tools():
     assert READ_TOOLS | WRITE_TOOLS | KEY_ONLY_TOOLS == names
     assert not READ_TOOLS & WRITE_TOOLS
     assert not (READ_TOOLS | WRITE_TOOLS) & KEY_ONLY_TOOLS
+    assert "move_item" not in READ_TOOLS | WRITE_TOOLS | KEY_ONLY_TOOLS
 
 
 async def test_refused_tool_is_never_called_and_dispatch_must_match():

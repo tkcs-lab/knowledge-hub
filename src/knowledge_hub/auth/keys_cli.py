@@ -47,8 +47,6 @@ async def _create(args: argparse.Namespace, settings, config) -> int:
         return _fail(f"key: group {args.group} is not an active group")
     tools = [t for t in args.tools.split(",") if t]
     for tool in tools:
-        if tool == "move_item":
-            return _fail(f"key: tool {tool} cannot be given to a key")
         if tool not in KEY_TOOLS:
             return _fail(f"key: unknown tool {tool}")
     if not tools:

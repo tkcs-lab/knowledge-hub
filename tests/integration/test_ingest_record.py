@@ -7,6 +7,7 @@ import asyncio
 import psycopg
 import pytest
 
+from knowledge_hub.admin.move_cmd import do_move
 from knowledge_hub.mcp.errors import AUDIENCE_NOT_HELD, BAD_ARG, BAD_LABEL, ONLY_WORKFLOWS, TOO_LARGE
 from tests.support.blobs import MemoryBlobStore
 from tests.support.pg import FRESH_DB
@@ -203,33 +204,25 @@ async def test_other_control_characters_are_kept(mcp_client, seeded_db, blobs):
     assert blobs.objects[f"records/{res.data['id'][4:]}"] == (body.encode(), "text/plain")
 
 
-async def _move_out(mcp_client, rec_id: str) -> None:
-    from tests.support.principals import multi
-
-    res = await mcp_client.call(
-        multi, "move_item", {"id": rec_id, "from_group": "all", "to_group": "mgmt"})
-    assert not res.is_error, res.text
+async def _move_out(deps, rec_id: str) -> None:
+    await do_move(deps, "admin@example.test", rec_id, "all", "mgmt")
 
 
-async def test_ingest_refuses_a_moved_out_source_ref(mcp_client, seeded_db, fresh_db, blobs):
+async def test_ingest_refuses_a_moved_out_source_ref(mcp_client, seeded_db, fresh_db, blobs, deps):
     from knowledge_hub.mcp.errors import RECORD_MOVED
 
     first = await mcp_client.call(wf_all, "ingest_record", ARGS)
     assert not first.is_error, first.text
-    await _move_out(mcp_client, first.data["id"])
+    await _move_out(deps, first.data["id"])
     again = await mcp_client.call(wf_all, "ingest_record", ARGS)
     assert again.is_error and again.text.endswith(RECORD_MOVED)
     assert _rows(fresh_db, "SELECT count(*) FROM kh.records WHERE source_ref = 'm-1'") == [(1,)]
 
 
-async def test_move_back_clears_the_tombstone(mcp_client, seeded_db, fresh_db, blobs):
-    from tests.support.principals import multi
-
+async def test_move_back_clears_the_tombstone(mcp_client, seeded_db, fresh_db, blobs, deps):
     first = await mcp_client.call(wf_all, "ingest_record", ARGS)
-    await _move_out(mcp_client, first.data["id"])
-    back = await mcp_client.call(
-        multi, "move_item", {"id": first.data["id"], "from_group": "mgmt", "to_group": "all"})
-    assert not back.is_error, back.text
+    await _move_out(deps, first.data["id"])
+    await do_move(deps, "admin@example.test", first.data["id"], "mgmt", "all")
     again = await mcp_client.call(wf_all, "ingest_record", ARGS)
     assert not again.is_error, again.text
     assert again.data["existed"] is True and again.data["id"] == first.data["id"]
