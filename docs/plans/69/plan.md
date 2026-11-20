@@ -10,7 +10,7 @@
 
 **Security:** A prompt-injected record can no longer move or write content into a wider group through a Claude session. Residual: `propose_doc` and `mark_record_outdated` stay reachable from Claude; a document move still opens a "Move in" pull request that target-group members can read before approval. `--by` records who asked and does not authenticate them: anyone with the container's secrets can pass any admin email.
 
-**Review focus:** the cutover for n8n and OAuth flows that ingest today (5); the admin caller of the move core and the removed `claude_client` check (3.3, p4); the panel op that adds `--by` from the session and never from the request body (3.4, p5); the NULL query vector in the search SQL (3.2, p2); re-reading only same-tier rows on a group mismatch (3.1, p1).
+**Review focus:** the cutover for n8n and OAuth flows that ingest today (5); the admin caller of the move core and the removed `claude_client` check (3.3, p4); the panel op that adds `--by` from the session and never from the request body (3.5, p5); the NULL query vector in the search SQL (3.2, p2); re-reading only same-tier rows on a group mismatch (3.1, p1).
 
 ## 1. Goal
 
