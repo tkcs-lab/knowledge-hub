@@ -10,7 +10,7 @@ from knowledge_hub.auth.keys import verify_key
 __all__ = ["KEY_ONLY_TOOLS", "READ_TOOLS", "WRITE_TOOLS", "BearerResolver"]
 
 READ_TOOLS = frozenset({"search", "get_doc", "list_stale", "list_labels", "usage"})
-WRITE_TOOLS = frozenset({"mark_record_outdated", "propose_doc", "move_item"})
+WRITE_TOOLS = frozenset({"mark_record_outdated", "propose_doc"})
 KEY_ONLY_TOOLS = frozenset({"ingest_record"})
 
 UNKNOWN = "bearer_unknown"

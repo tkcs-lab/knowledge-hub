@@ -60,7 +60,7 @@ def test_parse_key_refuses(text):
 async def test_key_tools_match_registered_tools():
     deps = Deps(settings=Settings(env="test"), config=KhConfig(), app_pool=None, indexer_pool=None)
     names = {t.name for t in await build_mcp(deps).list_tools()}
-    assert set(KEY_TOOLS) == names - {"move_item"}
+    assert set(KEY_TOOLS) == names
     assert list(KEY_TOOLS) == sorted(KEY_TOOLS)
 
 
