@@ -16,7 +16,7 @@ from tests.support.bearer import TestBearerResolver
 from tests.support.forgejo_fake import FakeForgejo
 from tests.support.mcp_client import HOST
 from tests.support.pg import FRESH_DB
-from tests.support.principals import KH_CONFIG, alice_all, carol_hr
+from tests.support.principals import KH_CONFIG, alice_all, carol_hr, wf_all, wf_hr
 from tests.support.seed import add_chunked_doc
 
 pytestmark = pytest.mark.integration
@@ -89,13 +89,13 @@ async def test_archived_label_is_not_listed(mcp_client, seeded_db):
 
 async def test_ingest_with_archived_label_is_unknown_label(mcp_client, seeded_db):
     res = await mcp_client.call(
-        alice_all, "ingest_record", {**RECORD, "audience": "all", "labels": ["other"]}
+        wf_all, "ingest_record", {**RECORD, "audience": "all", "labels": ["other"]}
     )
     assert res.is_error and BAD_LABEL in res.text and "unknown label" in res.text
 
 
 async def test_ingest_into_archived_group_is_refused(mcp_client, seeded_db):
-    res = await mcp_client.call(carol_hr, "ingest_record", {**RECORD, "audience": "hr"})
+    res = await mcp_client.call(wf_hr, "ingest_record", {**RECORD, "audience": "hr"})
     assert res.is_error and AUDIENCE_NOT_HELD in res.text
 
 

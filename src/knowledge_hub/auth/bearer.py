@@ -7,10 +7,11 @@ from typing import Any
 from knowledge_hub.auth.claims import Caller
 from knowledge_hub.auth.keys import verify_key
 
-__all__ = ["READ_TOOLS", "WRITE_TOOLS", "BearerResolver"]
+__all__ = ["KEY_ONLY_TOOLS", "READ_TOOLS", "WRITE_TOOLS", "BearerResolver"]
 
 READ_TOOLS = frozenset({"search", "get_doc", "list_stale", "list_labels", "usage"})
-WRITE_TOOLS = frozenset({"ingest_record", "mark_record_outdated", "propose_doc", "move_item"})
+WRITE_TOOLS = frozenset({"mark_record_outdated", "propose_doc", "move_item"})
+KEY_ONLY_TOOLS = frozenset({"ingest_record"})
 
 UNKNOWN = "bearer_unknown"
 RESOURCE = "bearer_resource"

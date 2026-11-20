@@ -41,6 +41,22 @@ wf_token = Caller(
 )
 
 
+def _workflow(name: str, *groups: str) -> Caller:
+    return Caller(
+        sub=f"key:{name}",
+        principal_type="n8n_workflow",
+        email=None,
+        audiences=frozenset(groups),
+        token_id=None,
+    )
+
+
+wf_all = _workflow("wf-all", "all")
+wf_mgmt = _workflow("wf-mgmt", "mgmt")
+wf_hr = _workflow("wf-hr", "hr")
+wf_none = _workflow("wf-none")
+
+
 def _legacy(sub: str, audiences: tuple[str, ...], email: str | None, ptype: str = "claude_client") -> Caller:
     return Caller(sub=sub, principal_type=ptype, email=email, audiences=frozenset(audiences), token_id=None)
 
