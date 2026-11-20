@@ -95,7 +95,8 @@ async def check(deps: Any) -> list[str]:
             wanted = TECH_AUDIENCE if is_tech else deps.config.group_for_repo(repo)
             if wanted != audience:
                 says = wanted or "no group"
-                lines.append(f"document {path} in {repo} has audience {audience}, config says {says}")
+                fix = f"; run kh rebuild --repo {repo}" if wanted is not None else ""
+                lines.append(f"document {path} in {repo} has audience {audience}, config says {says}{fix}")
             wanted_tier = "T0a" if is_tech else "T0"
             if tier != wanted_tier:
                 lines.append(f"document {path} in {repo} has tier {tier}, config says {wanted_tier}")

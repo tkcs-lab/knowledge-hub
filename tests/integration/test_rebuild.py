@@ -111,7 +111,9 @@ async def test_record_without_chunks_only_after_five_minutes(world, fake, deps):
 async def test_audience_drift(world, fake, deps):
     await synced(deps, fake)
     q(world, "UPDATE kh.documents SET audience = 'mgmt' WHERE path = 'a.md'")
-    assert await check(deps) == ["document a.md in kb-all has audience mgmt, config says all"]
+    assert await check(deps) == [
+        "document a.md in kb-all has audience mgmt, config says all; run kh rebuild --repo kb-all"
+    ]
 
 
 async def test_rebuild_one_repo_clears_state_and_syncs(world, fake, deps):
@@ -233,7 +235,9 @@ async def test_check_survives_an_unreadable_tech_repo(tworld, fake, tech_fake, t
     tech_fake.fail_next(f"/repos/kh-tech/{TECH_REPO}", 500)
     got = await check(tdeps)
     assert got[0].startswith(f"tech repo {TECH_REPO} not readable: ")
-    assert "document a.md in kb-all has audience mgmt, config says all" in got  # the loop went on
+    assert (
+        "document a.md in kb-all has audience mgmt, config says all; run kh rebuild --repo kb-all" in got
+    )  # the loop went on
 
 
 async def test_check_accepts_audience_all_for_tech_documents(tworld, fake, tdeps):

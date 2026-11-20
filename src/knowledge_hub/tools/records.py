@@ -49,6 +49,8 @@ async def ingest_record(
     source_url: str = "",
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
+    if call.caller.principal_type != "n8n_workflow":
+        raise kh_error("only_workflows", errors.ONLY_WORKFLOWS)
     deps, caller = call.deps, call.caller
     if audience not in caller.audiences or not deps.config.is_active(audience):
         raise kh_error("audience_not_held", errors.AUDIENCE_NOT_HELD)
@@ -112,8 +114,9 @@ def register(server: MCPServer, deps: Deps) -> None:
     server.tool(
         name="ingest_record",
         description=(
-            "Store a raw record (a meeting note, message or similar) readable by the named audience, "
-            "which you must hold. Re-sending the same source and source_ref returns the existing id. "
+            "Store a raw record (a meeting note, message or similar) readable by the named audience "
+            "(hub keys only; the audience must be the key's group). "
+            "Re-sending the same source and source_ref returns the existing id. "
             "occurred_at is ISO 8601 with a timezone. "
             "The reply of a new record lists up to three similar items of the same group in similar."
         ),

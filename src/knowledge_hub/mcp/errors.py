@@ -47,14 +47,14 @@ ID_IN_USE = "id is used by another file in this repo"
 TOO_MANY_OPEN = "too many open proposals in this repo"
 NOT_CONFIGURED = "writes are not configured"
 PROPOSE_FAILED = "could not open the pull request"
-NOT_FOR_WORKFLOWS = "this tool is not available to workflows"
+ONLY_WORKFLOWS = "this tool is available to workflows only"
 MOVE_WRONG_GROUP = "the item is not in from_group"
 MOVE_CONFLICT = "the target group already has an item with this source and source_ref, path or id"
 MOVE_LINKED = "another item names this one as its replacement or successor; clear that first"
 RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
 MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
 TOOL_NOT_ALLOWED = "this credential may not call this tool"
-MOVE_PARTIAL = "the removal pull request could not be opened; call move_item again to open it"
+MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 
 
 class KhError(Exception):

@@ -157,10 +157,7 @@ def test_default_tools(cli, admin):
         (["--group", "old", "--name", "n"], "key: group old is not an active group"),
         (["--group", "nope", "--name", "n"], "key: group nope is not an active group"),
         (["--group", "all", "--tools", "bogus", "--name", "n"], "key: unknown tool bogus"),
-        (
-            ["--group", "all", "--tools", "move_item", "--name", "n"],
-            "key: tool move_item cannot be given to a key",
-        ),
+        (["--group", "all", "--tools", "move_item", "--name", "n"], "key: unknown tool move_item"),
         (["--group", "all", "--name", "_bad"], "key: name _bad is not valid"),
     ],
 )

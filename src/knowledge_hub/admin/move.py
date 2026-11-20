@@ -1,4 +1,4 @@
-"""``move_item``: move a record, or a document, from one group the caller holds to another (plan 3.1, 3.2)."""
+"""Move a record or a document between groups: the core of kh move (plan 69)."""
 
 import hashlib
 import logging
@@ -6,13 +6,11 @@ import uuid
 from typing import Any
 
 import psycopg
-from mcp.server.mcpserver import MCPServer
 
 from knowledge_hub.forgejo import ForgejoError
 from knowledge_hub.indexer.frontmatter import ParsedDoc, parse_document
 from knowledge_hub.mcp import errors
-from knowledge_hub.mcp.errors import ToolCall, kh_error, tool_guard
-from knowledge_hub.mcp.server import Deps
+from knowledge_hub.mcp.errors import ToolCall, kh_error
 from knowledge_hub.propose_render import check_text, render_file, validate_path
 from knowledge_hub.tools.docs import parse_id
 
@@ -23,16 +21,6 @@ WRONG_GROUP_SQLSTATE = "P0K09"
 LINKED_SQLSTATE = "P0K0A"
 
 TITLE_MAX = 120
-
-DESCRIPTION = (
-    "Move a record (rec:) or a document (doc:) from from_group to to_group, two groups you hold; "
-    "from_group must be the group the item is in now. A record moves at once and keeps its id. "
-    "A document moves with two pull requests: one adds it to to_group's repo, one removes it from "
-    "from_group's repo; each group's approvers merge their own, add first. The document gets a new "
-    "doc: id when the target repo is indexed. This is not a purge: the old repo's history, past usage "
-    "queries and backups keep the old copy. Claude clients only."
-)
-
 
 async def _move_record(call: ToolCall, key: str, from_group: str, to_group: str) -> dict[str, Any]:
     try:
@@ -232,8 +220,6 @@ def _log(sub: str, item: str, from_group: str, to_group: str) -> None:
 
 async def move_item(call: ToolCall, id: str, from_group: str, to_group: str) -> dict[str, Any]:
     caller, deps = call.caller, call.deps
-    if caller.principal_type != "claude_client":
-        raise kh_error("not_for_workflows", errors.NOT_FOR_WORKFLOWS)
     if from_group == to_group:
         raise kh_error("bad_arg", errors.BAD_ARG, name="to_group")
     for group in (from_group, to_group):
@@ -246,6 +232,3 @@ async def move_item(call: ToolCall, id: str, from_group: str, to_group: str) -> 
         return await _move_record(call, str(parsed[1]), from_group, to_group)
     return await _move_document(call, str(parsed[1]), from_group, to_group)
 
-
-def register(server: MCPServer, deps: Deps) -> None:
-    server.tool(name="move_item", description=DESCRIPTION)(tool_guard("move_item", deps)(move_item))

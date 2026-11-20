@@ -10,7 +10,7 @@ from starlette.applications import Starlette
 
 import knowledge_hub.auth.bearer as bearer_mod
 from knowledge_hub.app import build_app
-from knowledge_hub.auth.bearer import READ_TOOLS, WRITE_TOOLS, BearerResolver
+from knowledge_hub.auth.bearer import KEY_ONLY_TOOLS, READ_TOOLS, WRITE_TOOLS, BearerResolver
 from knowledge_hub.auth.claims import Call, Caller
 from knowledge_hub.auth.hostguard import PublicHostGuard
 from knowledge_hub.auth.middleware import CallerMiddleware
@@ -172,7 +172,7 @@ async def test_audiences_follow_the_membership_at_each_call(parts):
     ("scopes", "allowed", "refused"),
     [
         (["kh:read"], "search", "ingest_record"),
-        (["kh:write"], "ingest_record", "search"),
+        (["kh:write"], "propose_doc", "search"),
     ],
 )
 async def test_scopes_limit_tools(parts, scopes, allowed, refused):
@@ -181,6 +181,13 @@ async def test_scopes_limit_tools(parts, scopes, allowed, refused):
     caller, _ = await resolver_for(provider, membership).resolve("kha_s")
     assert allowed in caller.tools
     assert refused not in caller.tools
+
+
+async def test_oauth_write_scope_never_gets_ingest_record(parts):
+    provider, membership = parts
+    provider.tokens["kha_s"] = access(scopes=["kh:read", "kh:write"])
+    caller, _ = await resolver_for(provider, membership).resolve("kha_s")
+    assert "ingest_record" not in caller.tools
 
 
 async def test_no_scope_means_no_tools(parts):
@@ -194,8 +201,10 @@ async def test_scope_sets_match_registered_tools():
     settings = Settings(_env_file=None, env="test")
     deps = Deps(settings=settings, config=CONFIG, app_pool=None, indexer_pool=None)
     names = {t.name for t in await build_mcp(deps).list_tools()}
-    assert READ_TOOLS | WRITE_TOOLS == names
+    assert READ_TOOLS | WRITE_TOOLS | KEY_ONLY_TOOLS == names
     assert not READ_TOOLS & WRITE_TOOLS
+    assert not (READ_TOOLS | WRITE_TOOLS) & KEY_ONLY_TOOLS
+    assert "move_item" not in READ_TOOLS | WRITE_TOOLS | KEY_ONLY_TOOLS
 
 
 async def test_refused_tool_is_never_called_and_dispatch_must_match():
