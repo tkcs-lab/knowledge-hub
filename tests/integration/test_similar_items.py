@@ -14,7 +14,7 @@ from tests.support.bearer import TestBearerResolver
 from tests.support.blobs import MemoryBlobStore
 from tests.support.forgejo_fake import FakeForgejo, blob_sha, md
 from tests.support.pg import FRESH_DB
-from tests.support.principals import alice_all, multi
+from tests.support.principals import alice_all, wf_all
 from tests.support.seed import add_chunked_doc, add_chunked_record
 
 pytestmark = pytest.mark.integration
@@ -66,7 +66,7 @@ def seed_rec(db, title="Old", body="old body", **fields):
     return add_chunked_record(db, body, vector_of=f"{title}\n\n{body}", title=title, **fields)
 
 
-async def ingest(mcp_client, caller=alice_all, **args):
+async def ingest(mcp_client, caller=wf_all, **args):
     res = await mcp_client.call(caller, "ingest_record", {**ARGS, **args})
     assert not res.is_error, res.text
     return res.data
@@ -88,7 +88,7 @@ async def test_unrelated_text_is_not_returned(mcp_client, db):
 async def test_other_group_items_are_never_returned(mcp_client, db):
     seed_rec(db, TITLE, BODY, audience="mgmt")
     db.commit()
-    assert (await ingest(mcp_client, caller=multi))["similar"] == []
+    assert (await ingest(mcp_client))["similar"] == []
 
 
 async def test_outdated_and_superseded_items_are_not_returned(mcp_client, db):
