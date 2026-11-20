@@ -10,7 +10,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-search-embed-guard
 
-- pending
+- None.
 
 ## p3-ingest-key-only
 
