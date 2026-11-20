@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-20
+
 ### Changed
 
 - **Breaking:** `move_item` is no longer an MCP tool. Move an item with `kh move` or the panel's "Move an item" form; an old OAuth token loses it at its next call, and `kh key create --tools move_item` now gives `key: unknown tool move_item`.
