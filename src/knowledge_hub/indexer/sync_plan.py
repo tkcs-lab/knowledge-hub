@@ -55,6 +55,17 @@ def is_included(entry: Mapping[str, Any]) -> bool:
     return int(entry.get("size", 0)) <= MAX_FILE_BYTES
 
 
+def mark_regrouped(
+    rows: Iterable[tuple[str, str, str, str, str]], audience: str, tier: str
+) -> list[tuple[str, str, str]]:
+    """rows: (path, blob_sha, doc_key, audience, tier) as stored. Returns (path, blob_sha, doc_key) where
+    blob_sha is "" for a row whose tier equals ``tier`` but whose audience differs from ``audience``."""
+    return [
+        (path, "" if row_tier == tier and row_audience != audience else blob, key)
+        for path, blob, key, row_audience, row_tier in rows
+    ]
+
+
 def changed_paths(tree: Iterable[Mapping[str, Any]], stored: Iterable[tuple[str, str, str]]) -> list[str]:
     """Included paths that are not stored with the same blob sha: their text is needed."""
     have = {path: blob for path, blob, _ in stored}
