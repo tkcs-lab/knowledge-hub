@@ -19,6 +19,10 @@ MAX_IDS = 100
 MAX_DESCRIPTION = 200
 MAX_EMAIL = 254
 CFG = "\0config"  # placeholder where ``argv`` inserts the common options
+BY = "\0by"  # placeholder where ``argv`` inserts ``--by=<signed-in email>``
+ITEM_ID_RE = re.compile(
+    r"(doc|rec):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -37,10 +41,12 @@ class Op:
     keys: tuple[str, ...]
     optional: tuple[str, ...]
     build: Callable[[dict[str, Any]], list[str]]
+    config_op: bool = True
+    needs_by: bool = False
 
     @property
     def is_config_op(self) -> bool:
-        return self.kind == "cli" and not self.name.startswith("health.")
+        return self.kind == "cli" and self.config_op
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,7 @@ def _ids(value: Any) -> list[int]:
     return list(value)
 
 
+_item_id = _pattern("item id", ITEM_ID_RE)
 _label = _pattern("label name", LABEL_RE)
 _login = _pattern("login", LOGIN_RE)
 _repo = _pattern("repo name", REPO_RE)
@@ -149,6 +156,9 @@ RULES: dict[str, Callable[[Any], Any]] = {
     "labels": _labels,
     "repo": _repo,
     "ids": _ids,
+    "id": _item_id,
+    "from_group": _group_name,
+    "to_group": _group_name,
 }
 
 # ``name`` means a label, a group or a repo depending on the op.
@@ -211,8 +221,10 @@ def _cli(
     keys: tuple[str, ...],
     build: Callable[[dict[str, Any]], list[str]],
     optional: tuple[str, ...] = (),
+    config_op: bool = True,
+    needs_by: bool = False,
 ) -> Op:
-    return Op(name, "cli", keys, optional, build)
+    return Op(name, "cli", keys, optional, build, config_op, needs_by)
 
 
 def _in(name: str, optional: tuple[str, ...] = ()) -> Op:
@@ -309,8 +321,23 @@ def _build_ops() -> dict[str, Op]:
             ("name", "confirm"),
             _cmd(["repo", "remove"], lambda a: _flag(a, "confirm", "--yes"), lambda a: [a["name"]]),
         ),
-        _cli("health.setup_plan", (), _setup_plan),
-        _cli("health.index_check", (), _plain(["check"])),
+        _cli("health.setup_plan", (), _setup_plan, config_op=False),
+        _cli("health.index_check", (), _plain(["check"]), config_op=False),
+        _cli(
+            "item.move",
+            ("id", "from_group", "to_group"),
+            lambda a: [
+                "move",
+                CFG,
+                f"--from={a['from_group']}",
+                f"--to={a['to_group']}",
+                BY,
+                "--",
+                a["id"],
+            ],
+            config_op=False,
+            needs_by=True,
+        ),
         Op("repo.rebuild", "inproc", ("repo",), (), _inproc),
         _in("jobs.retry", optional=("ids",)),
         _in("jobs.reclaim"),
@@ -371,9 +398,13 @@ def validate(op: str, args: object, dry_run: object, config_sha256: object) -> V
     return ValidatedOp(spec, clean, dry_run, sha)
 
 
-def argv(valid: ValidatedOp, config_file: str) -> list[str]:
+def argv(valid: ValidatedOp, config_file: str, by: str | None = None) -> list[str]:
     """The ``kh`` arguments (without the interpreter) for a validated ``cli`` operation."""
     built = valid.op.build(valid.args)
+    if valid.op.needs_by:
+        if by is None:
+            raise OpError("signed-in email is missing")
+        built = [f"--by={by}" if t == BY else t for t in built]
     common: list[str] = [f"--config={config_file}"]
     if valid.op.is_config_op:
         if valid.dry_run:

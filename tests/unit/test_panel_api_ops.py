@@ -78,6 +78,15 @@ def test_submit_then_get(env, monkeypatch):
         assert got.status_code == 200 and got.json()["state"] == "done"
 
 
+def test_item_move_is_accepted_with_the_session_email(env, monkeypatch):
+    move_id = "rec:0a1b2c3d-0000-4000-8000-0123456789ab"
+    args = {"id": move_id, "from_group": "mgmt", "to_group": "all"}
+    with _client(env, monkeypatch) as client:
+        r = client.post("/api/ops", headers=HEADERS, json={"op": "item.move", "args": args})
+        assert r.status_code == 202
+        assert env[1].submitted == [("item.move", args, False, "a@example.test")]
+
+
 def test_validation_error_is_400_with_reason(env, monkeypatch):
     with _client(env, monkeypatch) as client:
         r = client.post("/api/ops", headers=HEADERS, json={"op": "nope", "args": {}})

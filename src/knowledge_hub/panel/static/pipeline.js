@@ -57,6 +57,30 @@ function action(op, fixed, label, reload, confirmText) {
   }).form;
 }
 
+function moveCard(reload) {
+  return opForm({
+    op: "item.move",
+    fields: [
+      { name: "id", label: "Item id (rec:... or doc:...)" },
+      { name: "from_group", label: "From group" },
+      { name: "to_group", label: "To group" },
+    ],
+    previewless: true,
+    submitLabel: "Move",
+    confirmText: "Move this item? A record moves at once; a document opens two pull requests.",
+    onApplied: (job) => {
+      setNotice("Move", job);
+      reload();
+    },
+    onBusy: (on) => {
+      busy += on ? 1 : -1;
+      if (on && notice) {
+        clear(notice);
+      }
+    },
+  }).form;
+}
+
 function failedRow(job, reload) {
   const actions = h("div", { class: "actions" });
   if (job.dead) {
@@ -113,6 +137,9 @@ function render(body, data, reload) {
   }
   toolbar.appendChild(action("embeddings.requeue", null, "Queue embeddings", reload, null));
   body.appendChild(toolbar);
+
+  body.appendChild(h("h3", {}, "Move an item"));
+  body.appendChild(moveCard(reload));
 
   body.appendChild(h("h3", {}, "Failed jobs"));
   if ((jobs.failed_dead || 0) > 0) {

@@ -13,6 +13,8 @@ CFG = "--config=/etc/kh.yaml"
 SHA = "a" * 64
 IFSHA = f"--if-sha256={SHA}"
 
+MOVE_ID = "rec:0a1b2c3d-0000-4000-8000-0123456789ab"
+
 # (op, args, dry_run, sha, expected argv)
 EXAMPLES = [
     (
@@ -135,6 +137,13 @@ EXAMPLES = [
     ),
     ("health.setup_plan", {}, False, None, ["setup", "plan", CFG]),
     ("health.index_check", {}, False, None, ["check"]),
+    (
+        "item.move",
+        {"id": MOVE_ID, "from_group": "mgmt", "to_group": "all"},
+        False,
+        None,
+        ["move", CFG, "--from=mgmt", "--to=all", "--by=a@b.test", "--", MOVE_ID],
+    ),
 ]
 
 INPROC = [
@@ -146,8 +155,8 @@ INPROC = [
 ]
 
 
-def test_ops_table_has_24_operations():
-    assert len(OPS) == 24
+def test_ops_table_has_25_operations():
+    assert len(OPS) == 25
 
 
 def test_every_op_has_an_example():
@@ -160,7 +169,7 @@ def test_valid_example_argv(op, args, dry, sha, expected):
     valid = validate(op, args, dry, sha)
     assert valid.name == op
     assert valid.args == args
-    assert argv(valid, "/etc/kh.yaml") == expected
+    assert argv(valid, "/etc/kh.yaml", "a@b.test") == expected
 
 
 @pytest.mark.parametrize(("op", "args"), INPROC)
@@ -343,7 +352,7 @@ HOSTILE = [
 
 @pytest.mark.parametrize(
     ("op", "args", "dry", "sha"),
-    [(e[0], e[1], e[2], e[3]) for e in EXAMPLES if not e[0].startswith("health.")]
+    [(e[0], e[1], e[2], e[3]) for e in EXAMPLES if not e[0].startswith(("health.", "item."))]
     + [(op, args, True, SHA) for op, args in HOSTILE]
     + [(op, args, False, None) for op, args in HOSTILE],
 )
@@ -359,8 +368,60 @@ def test_argv_round_trips_through_the_real_parser(op, args, dry, sha):
 
 def test_every_config_op_is_round_tripped():
     cli_ops = {n for n, o in OPS.items() if o.is_config_op}
-    assert cli_ops == {e[0] for e in EXAMPLES if not e[0].startswith("health.")}
+    assert cli_ops == {e[0] for e in EXAMPLES if not e[0].startswith(("health.", "item."))}
 
 
 def test_ops_module_exports():
     assert ops.OPS is OPS
+
+
+# ---- item.move ----
+
+MOVE_ARGS = {"id": MOVE_ID, "from_group": "mgmt", "to_group": "all"}
+
+
+def test_item_move_round_trips_through_the_real_parser():
+    valid = validate("item.move", MOVE_ARGS, False, None)
+    ns = parser().parse_args(argv(valid, "/etc/kh.yaml", "a@b.test"))
+    assert ns.id == MOVE_ID
+    assert ns.from_group == "mgmt"
+    assert ns.to_group == "all"
+    assert ns.by == "a@b.test"
+    assert str(ns.config) == "/etc/kh.yaml"
+
+
+def test_item_move_is_not_a_config_op():
+    assert OPS["item.move"].is_config_op is False
+    assert OPS["item.move"].needs_by is True
+
+
+def test_item_move_refuses_by_in_args():
+    with pytest.raises(OpError, match="unexpected argument: by"):
+        validate("item.move", {**MOVE_ARGS, "by": "x@y.test"}, False, None)
+
+
+def test_item_move_refuses_dry_run_and_config_sha256():
+    with pytest.raises(OpError, match="dry_run is not available"):
+        validate("item.move", MOVE_ARGS, True, None)
+    with pytest.raises(OpError, match="config_sha256 is not available"):
+        validate("item.move", MOVE_ARGS, False, SHA)
+
+
+def test_item_move_refuses_a_bad_id():
+    with pytest.raises(OpError, match="item id is not valid"):
+        validate("item.move", {**MOVE_ARGS, "id": "rec:x"}, False, None)
+
+
+def test_item_move_needs_the_signed_in_email():
+    valid = validate("item.move", MOVE_ARGS, False, None)
+    with pytest.raises(OpError, match="signed-in email is missing"):
+        argv(valid, "/c.yaml")
+    assert argv(valid, "/c.yaml", "a@b.test") == [
+        "move",
+        "--config=/c.yaml",
+        "--from=mgmt",
+        "--to=all",
+        "--by=a@b.test",
+        "--",
+        MOVE_ID,
+    ]

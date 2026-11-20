@@ -176,3 +176,7 @@ def test_pipeline_notice_survives_reload():
     assert re.search(r"onApplied: \(job\) => \{\s*setNotice\(label, job\);\s*reload\(\);", text)
     assert re.search(r"if \(on && notice\) \{\s*clear\(notice\)", text)
     assert "innerHTML" not in text
+
+
+def test_pipeline_has_the_move_form():
+    assert "item.move" in _text("pipeline.js")
