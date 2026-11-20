@@ -72,7 +72,7 @@ With `directory.provider` set, group membership comes from Google or Keycloak gr
 
 ## Hub keys
 
-A hub key is for a workflow (n8n): bound to one active group and a list of tools, sent as `Authorization: Bearer khk_<id>.<secret>`. A key never holds more than its group; `move_item` cannot be given to a key. A key whose group is archived is refused.
+A hub key is for a workflow (n8n): bound to one active group and a list of tools, sent as `Authorization: Bearer khk_<id>.<secret>`. A key never holds more than its group; `ingest_record` is for hub keys only, so a Claude connector cannot call it; `--tools move_item` gives `key: unknown tool move_item`, because moves are `kh move`. A key whose group is archived is refused.
 
 - **Create.** `kh key create --group G --tools search,ingest_record --name <workflow> [--expires-days D] [--out FILE]`. The key is shown once, so with `--out FILE` it goes to the file (mode 0600) instead. The file holds the line `key: khk_<id>.<secret>`; the bearer value is the part after `key: `, so remove that prefix before you store it as the header credential. Store it as a header credential in n8n's credential store, never in chat. The tool list defaults to `search,ingest_record`; add `propose_doc`, `usage` and the rest only for a workflow that needs them.
 - **List.** `kh key list` shows `id`, `name`, `group`, `tools`, `expires`, `last_used` and `status` (`active`, `expired`, `revoked`); never a secret. A workflow whose `last_used` stays empty is not reaching the hub.

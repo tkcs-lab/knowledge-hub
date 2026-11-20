@@ -103,6 +103,7 @@ A mounted secret file must exist, or compose fails to start the service. For the
 | `kh migrate`, `kh label` | one with the migrator password | migrator | none |
 | `kh group\|person\|repo` | one-off container or the panel container (like `kh setup`) | migrator | setup Forgejo admin token (required: they run the setup forgejo step); setup Postgres admin DSN not needed; Slack webhooks file (when a group has `slack_channel`) |
 | `kh setup` | one-off container or the panel container | migrator | setup Forgejo admin token (required), setup Postgres admin DSN (optional), Slack webhooks file (when a group has `slack_channel`) |
+| `kh move` | `knowledge-hub`, or the panel container (Pipeline tab, "Move an item") | app | the Forgejo bot token and the S3 secrets, as for `kh serve`; `--by` must be in `admins` |
 | `kh key create\|list\|revoke`, `kh directory plan\|people\|show` | `knowledge-hub` (it has the migrator password) | migrator | none |
 | `kh directory sync` | `knowledge-hub-directory` | indexer | the directory credential; needs migration 0006 and the role `kh_indexer` |
 | `kh panel serve` | `knowledge-hub-panel` | indexer (statistics, health reads, pipeline operations) and migrator (the `migrations` health check); its subprocesses use migrator plus the Forgejo admin token (admin commands, `setup plan`) and app plus indexer (`kh check`) | the example mounts both setup secrets, not the Slack file |

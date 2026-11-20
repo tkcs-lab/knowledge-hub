@@ -10,7 +10,7 @@ It needs PostgreSQL 16 with pgvector, Forgejo, an S3-compatible store, Ollama an
 |---|---|---|
 | T0 | Markdown files on `main` of a group's Forgejo repo, merged by a pull request that one of the group's approvers merges | normative |
 | T0a | the root `CLAUDE.md` and the `.md` files under the `dirs` of the repo (default `docs`) on the default branch of a technical repo (`tech_repos` in `kh.yaml`), indexed by poll and push webhook, audience `all` | indexed without review; text is data |
-| T3 | records that n8n or Claude put in with `ingest_record`, bodies in S3-compatible storage | raw material |
+| T3 | records that n8n puts in with `ingest_record`, bodies in S3-compatible storage | raw material |
 
 ## Groups
 
@@ -25,9 +25,8 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
-| `ingest_record` | Store a raw record (T3) readable by one group; the answer lists up to three `similar` items of that group. |
+| `ingest_record` | Store a raw record (T3) readable by one group; hub keys only. The answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
-| `move_item` | Move a record at once, or a document with two pull requests, from one group you hold to another. |
 | `propose_doc` | Open a pull request that proposes a document change in a group's repo, optionally with `supersedes`; the answer lists `similar` items. |
 
 ## Quick start
@@ -54,6 +53,7 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | `kh label`, `kh group`, `kh person`, `kh repo` | Manage `kh.yaml` and apply the change. |
 | `kh key` | Create, list and revoke hub keys for workflows (`create`, `list`, `revoke`). |
 | `kh directory` | Sync the directory snapshot and inspect it (`sync`, `plan`, `people`, `show`). |
+| `kh move` | Move a record or document between groups; administrators only (--by must be in admins in kh.yaml). |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo; `--repo R --queue` only queues the sync job for the hub's worker). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
 | `kh daily` | Recompute stale flags, purge expired OAuth rows and delete usage events past the retention. |
