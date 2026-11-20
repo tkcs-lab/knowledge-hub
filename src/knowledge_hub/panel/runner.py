@@ -183,7 +183,7 @@ class Runner:
             if valid.kind == "inproc":
                 ok, exit_code, output = await self._run_inproc(valid, secrets)
             else:
-                exit_code, output = await self._run_cli(valid, secrets)
+                exit_code, output = await self._run_cli(valid, secrets, email)
                 ok = exit_code == 0 and LOCK_REFUSAL not in output
         except Exception:
             log.exception("panel op %s failed", valid.name)
@@ -211,8 +211,8 @@ class Runner:
             return False, 1, redact(exc.reason, secrets)[:MAX_OUTPUT]
         return True, 0, redact(str(text), secrets)[:MAX_OUTPUT]
 
-    async def _run_cli(self, valid: ValidatedOp, secrets: list[str]) -> tuple[int, str]:
-        cmd = [sys.executable, "-m", "knowledge_hub.cli", *ops.argv(valid, self.config_file)]
+    async def _run_cli(self, valid: ValidatedOp, secrets: list[str], email: str) -> tuple[int, str]:
+        cmd = [sys.executable, "-m", "knowledge_hub.cli", *ops.argv(valid, self.config_file, email)]
         proc = await self._spawn(
             *cmd,
             stdin=asyncio.subprocess.DEVNULL,

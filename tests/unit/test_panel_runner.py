@@ -355,3 +355,19 @@ async def test_audit_line(capsys):
             "id": job_id,
         }
     ]
+
+
+async def test_item_move_passes_the_session_email_and_expects_no_restart():
+    spawn = FakeSpawn(FakeProc([b"{}\n"], code=0))
+    r = Runner(make_ctx(), env={}, spawn=spawn)
+    valid = validate(
+        "item.move",
+        {"id": "rec:0a1b2c3d-0000-4000-8000-0123456789ab", "from_group": "mgmt", "to_group": "all"},
+        False,
+        None,
+    )
+    job = await run_one(r, valid, email="a@b.test")
+    cmd, _ = spawn.calls[0]
+    assert "--by=a@b.test" in cmd
+    assert job["ok"] is True
+    assert job["restart_expected"] is False
