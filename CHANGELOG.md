@@ -6,7 +6,20 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ### Changed
 
+- **Breaking:** `move_item` is no longer an MCP tool. Move an item with `kh move` or the panel's "Move an item" form; an old OAuth token loses it at its next call, and `kh key create --tools move_item` now gives `key: unknown tool move_item`.
+- **Breaking:** `ingest_record` is for hub keys only (n8n). Claude connectors lose it at their next call and any other caller is refused with `this tool is available to workflows only`. The default OAuth scopes stay `kh:read kh:write`; `kh:write` now covers `propose_doc` and `mark_record_outdated`.
 - Documentation: new `docs/deployment.md` (components and dependencies, secrets, where each command runs, scheduled jobs, first deploy, verify and upgrade). The runbooks, the configuration reference, the design notes and the compose example are corrected against the code, and the one-off rollout notes of 0.4.0 and 0.5.0 are removed from the runbook.
+
+### Added
+
+- `kh move ID --from G --to H --by EMAIL` moves a record or a document between groups; only an administrator (`admins` in `kh.yaml`) may, and exit 3 says a document's removal pull request still has to be opened.
+- The panel's Pipeline tab has a "Move an item" form that runs `kh move` as the signed-in administrator.
+- `kh check` ends the audience-drift line with `; run kh rebuild --repo <repo>`.
+
+### Fixed
+
+- After a repo is reassigned to another group, stored documents kept the old group until the file changed; the next sync or `kh rebuild --repo` now reads them again under the new group.
+- With the http embedder, a search sent its query out even when a group it covered may not be embedded; it now runs on full text only and each `similarity` is null.
 
 ## [0.6.0] - 2026-11-19
 

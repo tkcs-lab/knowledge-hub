@@ -50,6 +50,7 @@ The admin panel is `kh panel serve`, a separate service of the same image (`know
 |---|---|
 | Check the whole environment | `kh setup plan --config kh.yaml`. Exit 0 means no drift. Run it from a scheduler (for example daily) and alert on exit 1 or 2: it catches a branch-protection or team change made in the Forgejo UI. |
 | Re-index after review | `kh rebuild` or `kh rebuild --repo kb-all`. Idempotent. |
+| Reassign a repo to another group | Change `repo` of the group in `kh.yaml`, wait for the restart, then run `kh rebuild --repo <repo>` (or wait for the next push): stored documents of that repo are read again under the new group. `kh check` names the drifted documents (`has audience <a>, config says <b>; run kh rebuild --repo <repo>`). |
 | Look for drift | `kh check`. Exit 1 means drift; read the printed lines. |
 | Daily job | `kh daily`, once a day from a scheduler: recomputes `stale`, purges expired OAuth rows and deletes usage events past `KH_USAGE_RETENTION_DAYS`. |
 | Queue missing embeddings | `kh requeue-embeddings` prints the number queued. It also re-queues a record whose job was left `running` by a worker that stopped mid-job. |
@@ -137,7 +138,7 @@ An n8n agent reads the usage log to find T3 records worth promoting to T0 and qu
 
 `KH_SEARCH_MIN_SIMILARITY` is 0 (off) until it is calibrated for the embedding model, once after the first deploy and again after `KH_EMBED_MODEL` changes.
 
-1. With the floor at 0, run `search` for 10 or more queries that have a known right answer and 10 or more that have none (topics the hub holds nothing about). Use `limit` 50, because hits are ordered by rank and tier weight, not by similarity, so the most similar junk chunk can fall outside the first 10. Note the highest `similarity` among the hits of each query.
+1. With the floor at 0, run `search` for 10 or more queries that have a known right answer and 10 or more that have none (topics the hub holds nothing about). Use `limit` 50, because hits are ordered by rank and tier weight, not by similarity, so the most similar junk chunk can fall outside the first 10. Note the highest `similarity` among the hits of each query. `similarity` is null for every hit when the search runs in full-text-only mode (a group it covers may not be embedded, see `KH_EMBED_HTTP_ALLOWED_AUDIENCES`), so calibrate with a caller whose groups may all be embedded.
 2. Take the lowest of the known-good values and the highest of the no-answer values. If the first is above the second, set the floor between them, nearer the no-answer value; otherwise the model does not separate them and the floor stays 0.
 3. Set `KH_SEARCH_MIN_SIMILARITY` in the `knowledge-hub` service environment and restart `kh serve` (a change of the environment is not a change of `kh.yaml`, so it does not restart by itself). Run the no-answer queries again: they return no hits (a hit that still appears matches the query's words by full text; one whose `similarity` is below the floor and that has no word match would be a bug). If a no-answer query still returns a vector-only hit, raise the floor above that hit's `similarity` and repeat; if a good query loses its answer, set the floor back to 0.
 
@@ -167,7 +168,7 @@ A hidden (superseded) document is still readable with `get_doc` or `search` with
 
 ### Moving an item between groups
 
-Ask Claude to call `move_item` with `id` (`rec:...` or `doc:...`), `from_group` (where the item is now) and `to_group`; you must hold both groups. A record moves at once and keeps its id. A document moves with two pull requests by the bot:
+An administrator (an email in `admins` of `kh.yaml`) moves an item; Claude cannot (the old `move_item` tool is gone). Run `kh move rec:<uuid> --from mgmt --to all --by admin@example.com --config kh.yaml` in the hub container, or use the "Move an item" card on the panel's Pipeline tab (it runs the same command as the signed-in administrator). You need not hold either group. The command prints one JSON line. Exit codes: 0 moved; 1 refused (`move: <text>`, including `move: <email> is not an administrator`); 2 bad arguments or config; 3 the removal pull request of a document could not be opened (run the command again). A record moves at once and keeps its id. A document moves with two pull requests by the bot:
 
 1. Merge the add pull request ("Move in: ...") in the target repo as an approver of the target group.
 2. Then merge the removal pull request ("Move out: ...") in the source repo as an approver of the source group. Until the removal is merged the document is in both groups; if it is merged first it is missing from both.
@@ -176,8 +177,8 @@ The moved document gets a new `doc:` id once the target repo is indexed. A retry
 
 Refusals and what to do:
 
-- `a record with this source and source_ref was moved out of this audience`: an `ingest_record` re-sent a record that was moved; do not re-send it, or move the record back (that clears the tombstone).
-- `another item names this one as its replacement or successor; clear that first`: clear the `replaced_by` of the record, or the `superseded_by` of the document, then call again.
+- `a record with this source and source_ref was moved out of this audience`: a workflow's `ingest_record` re-sent a record that was moved; do not re-send it, or move the record back (that clears the tombstone).
+- `another item names this one as its replacement or successor; clear that first`: clear the `replaced_by` of the record, or the `superseded_by` of the document, then run `kh move` again.
 - `this document cannot be moved by the tool; move it by hand`: the text has something the tool cannot render back unchanged (for example HTML-like text in the body); copy the file between the repos with two pull requests yourself.
 - `the target group already has an item with this source and source_ref, path or id`: rename or remove the item in the target group first.
 
@@ -229,7 +230,7 @@ The change to `.github/workflows/release.yml` that builds and attaches the wheel
 
 ## Accepted risks
 
-- **Two groups, the wider one.** A caller holding two groups can write into the wider one; the hub is the only gate. See [design](design.md), "Accepted residuals".
+- **Two groups, the wider one.** A caller holding two groups can `propose_doc` into the wider one (an approver still merges it) and `mark_record_outdated`; `ingest_record` is for hub keys only and moves are administrator commands. See [design](design.md), "Accepted residuals".
 - **Leaked bot token.** It reads every T0 repo and can open pull requests and push to open pull-request branches, but cannot merge.
 - **Zero required approvals.** The approver must review the final diff.
 - **Scan timing.** Exact vector scans take time in proportion to the number of hidden rows.
