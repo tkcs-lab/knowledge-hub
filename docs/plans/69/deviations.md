@@ -6,7 +6,6 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p1-regroup-sync
 
 - None.
-- None.
 
 ## p2-search-embed-guard
 
@@ -30,7 +29,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- None.
 
 ## Finishing
 
