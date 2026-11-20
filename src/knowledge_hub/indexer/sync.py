@@ -11,7 +11,7 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from knowledge_hub.config import KhConfig
+from knowledge_hub.config import TECH_AUDIENCE, KhConfig
 from knowledge_hub.forgejo.reader import ForgejoError
 from knowledge_hub.indexer.supersede import DocLink, resolve
 from knowledge_hub.indexer.sync_chunks import (
@@ -20,17 +20,24 @@ from knowledge_hub.indexer.sync_chunks import (
     load_stored_chunks,
     plan_chunks,
 )
-from knowledge_hub.indexer.sync_plan import SyncPlan, build_sync_plan, changed_paths
+from knowledge_hub.indexer.sync_plan import SyncPlan, build_sync_plan, changed_paths, mark_regrouped
 from knowledge_hub.indexer.tech_docs import build_tech_plan, changed_tech_paths
 
 
-async def _load(pool: Any, repo: str) -> tuple[str | None, list[tuple[str, str, str]], set[str], dict]:
+async def _load(
+    pool: Any, repo: str
+) -> tuple[str | None, list[tuple[str, str, str, str, str]], set[str], dict]:
     async with pool.connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute("SELECT last_indexed_sha FROM kh.repo_state WHERE repo = %s", (repo,))
             state = await cur.fetchone()
-            await cur.execute("SELECT path, blob_sha, doc_key FROM kh.documents WHERE repo = %s", (repo,))
-            stored = [(r["path"], r["blob_sha"], r["doc_key"]) for r in await cur.fetchall()]
+            await cur.execute(
+                "SELECT path, blob_sha, doc_key, audience, tier FROM kh.documents WHERE repo = %s", (repo,)
+            )
+            stored = [
+                (r["path"], r["blob_sha"], r["doc_key"], r["audience"], r["tier"])
+                for r in await cur.fetchall()
+            ]
             await cur.execute("SELECT name FROM kh.labels")
             labels = {r["name"] for r in await cur.fetchall()}
         chunks = await load_stored_chunks(conn, repo)
@@ -126,7 +133,8 @@ async def _alert(conn: Any, repo: str, path: str, message: str) -> None:
 async def _sync_tech(
     indexer_pool: Any, reader: Any, config: KhConfig, repo: str, embedder: Any, chunker_version: int
 ) -> SyncPlan:
-    _, stored, labels, stored_chunks = await _load(indexer_pool, repo)
+    _, rows, labels, stored_chunks = await _load(indexer_pool, repo)
+    stored = mark_regrouped(rows, TECH_AUDIENCE, "T0a")
     head = await reader.head_sha(repo, await reader.default_branch(repo))
     tree = await reader.list_tree(repo, head)
     texts: dict[str, str | None] = {}
@@ -164,7 +172,8 @@ async def sync_repo(
         raise ValueError(f"repo {repo} is in no group")
     if not config.is_active(audience):
         raise ValueError(f"repo {repo} is archived")
-    last_sha, stored, labels, stored_chunks = await _load(indexer_pool, repo)
+    last_sha, rows, labels, stored_chunks = await _load(indexer_pool, repo)
+    stored = mark_regrouped(rows, audience, "T0")
     head = await reader.head_sha(repo, "main")
     rewritten = bool(last_sha) and not await reader.is_ancestor(repo, last_sha, head)
     tree = await reader.list_tree(repo, head)

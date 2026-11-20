@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from knowledge_hub.config import GroupConfig, KhConfig
-from knowledge_hub.indexer.sync_plan import MAX_FILE_BYTES, build_sync_plan, changed_paths
+from knowledge_hub.indexer.sync_plan import MAX_FILE_BYTES, build_sync_plan, changed_paths, mark_regrouped
 from tests.support.forgejo_fake import blob_sha, md
 
 CFG = KhConfig(
@@ -164,3 +164,18 @@ def test_repo_in_no_group_is_a_value_error():
 def test_supersedes_reaches_the_upsert():
     p = plan({"a.md": md("a", supersedes=["x", "y"])})
     assert p.upserts[0].supersedes == ["x", "y"]
+
+
+def test_mark_regrouped_blanks_only_same_tier_rows_of_another_audience():
+    rows = [
+        ("a.md", "s1", "a", "mgmt", "T0"),
+        ("b.md", "s2", "b", "all", "T0"),
+        ("c.md", "s3", "c", "mgmt", "T0a"),
+        ("d.md", "s4", "d", "ops", "T0"),
+    ]
+    assert mark_regrouped(rows, "all", "T0") == [
+        ("a.md", "", "a"),
+        ("b.md", "s2", "b"),
+        ("c.md", "s3", "c"),
+        ("d.md", "", "d"),
+    ]
