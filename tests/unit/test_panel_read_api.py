@@ -75,6 +75,11 @@ def setup(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(stats, "repo_state", repo_state)
     monkeypatch.setattr(stats, "document_counts_by_repo", counts)
     monkeypatch.setattr(stats, "pipeline", pipeline)
+
+    async def dataset_catalog(pool):
+        return [{"name": "deals", "columns": [{"name": "stage"}], "rows_estimate": None}]
+
+    monkeypatch.setattr(stats, "dataset_catalog", dataset_catalog)
     client = TestClient(build_panel_app(ctx), base_url="http://panel.test")
     return client, state, cfg_file
 
@@ -128,6 +133,14 @@ def test_repos(setup):
     assert rows["svc"]["dirs"] == ["docs"] and rows["svc"]["labels"] == ["ember"]
     assert rows["svc"]["last_indexed_sha"] is None
     assert rows["kb-dir"]["archived"] is True
+
+
+def test_datasets(setup):
+    client, _, _ = setup
+    body = client.get("/api/datasets").json()
+    assert body == {
+        "datasets": [{"name": "deals", "columns": [{"name": "stage"}], "rows_estimate": None}]
+    }
 
 
 def test_pipeline(setup):

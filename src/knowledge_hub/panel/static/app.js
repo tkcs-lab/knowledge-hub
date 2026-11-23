@@ -2,6 +2,7 @@ import { BUSY_MESSAGE } from "/static/ops.js";
 import "/static/labels.js";
 import "/static/groups.js";
 import "/static/repos.js";
+import "/static/datasets.js";
 import "/static/pipeline.js";
 import "/static/health.js";
 
@@ -37,7 +38,7 @@ export async function api(method, path, body) {
 window.api = api;
 window.panelTabs = window.panelTabs || {};
 
-const TABS = ["groups", "labels", "repos", "pipeline", "health"];
+const TABS = ["groups", "labels", "repos", "datasets", "pipeline", "health"];
 const main = document.querySelector("main");
 const buttons = Array.from(document.querySelectorAll("nav button[data-tab]"));
 const sections = {};
