@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-schema-catalog
 
-- pending
+- worker: Worker also updated tests/integration/test_migration_0002.py (one line: expected migration list now includes 0007)
+- scope: scope: tests/integration/test_migration_0002.py
 
 ## p2-dataset-create
 
