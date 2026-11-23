@@ -7,6 +7,7 @@ Every function takes the migrator DSN first, uses one connection and one transac
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 import psycopg
 from psycopg import sql
@@ -280,3 +281,200 @@ def _queue_refresh(conn: psycopg.Connection, name: str) -> None:
         " AND state = 'queued' AND payload ->> 'dataset' = %s::text)",
         (name, name),
     )
+
+
+def _require(conn: psycopg.Connection, dataset: str) -> Dataset:
+    ds = _load(conn, dataset)
+    if ds is None:
+        raise DatasetError(f"unknown dataset {dataset}")
+    return ds
+
+
+def _require_column(ds: Dataset, name: str) -> Column:
+    col = ds.column(name)
+    if col is None:
+        raise DatasetError(f"unknown column {name}")
+    return col
+
+
+def rename_column(dsn: str, dataset: str, old: str, new: str) -> Dataset:
+    with _connect(dsn) as conn:
+        _begin(conn)
+        ds = _require(conn, dataset)
+        col = _require_column(ds, old)
+        rest = replace(ds, columns=tuple(c for c in ds.columns if c.name != old))
+        check_new_column(rest, replace(col, name=new))
+        t = sql.Identifier("kh_data", dataset)
+        # the trigger names the old column in its WHEN clause, so it goes first
+        conn.execute(sql.SQL("DROP TRIGGER IF EXISTS mirror_upd ON {t}").format(t=t))
+        conn.execute(
+            sql.SQL("ALTER TABLE {t} RENAME COLUMN {o} TO {n}").format(
+                t=t, o=sql.Identifier(old), n=sql.Identifier(new)
+            )
+        )
+        conn.execute("UPDATE kh.columns SET name = %s WHERE dataset = %s AND name = %s", (new, dataset, old))
+        if ds.title_column == old:
+            conn.execute("UPDATE kh.datasets SET title_column = %s WHERE name = %s", (new, dataset))
+        ds = _require(conn, dataset)
+        _rebuild_mirror_trigger(conn, ds)
+        if col.embed:
+            _queue_refresh(conn, dataset)
+    return ds
+
+
+def drop_column(dsn: str, dataset: str, name: str) -> Dataset:
+    with _connect(dsn) as conn:
+        _begin(conn)
+        ds = _require(conn, dataset)
+        col = _require_column(ds, name)
+        if ds.title_column == name:
+            raise DatasetError(f"column {name} is the title column")
+        t = sql.Identifier("kh_data", dataset)
+        conn.execute(sql.SQL("DROP TRIGGER IF EXISTS mirror_upd ON {t}").format(t=t))
+        conn.execute(sql.SQL("ALTER TABLE {t} DROP COLUMN {c}").format(t=t, c=sql.Identifier(name)))
+        conn.execute("DELETE FROM kh.columns WHERE dataset = %s AND name = %s", (dataset, name))
+        ds = _require(conn, dataset)
+        _rebuild_mirror_trigger(conn, ds)
+        if col.embed:
+            _queue_refresh(conn, dataset)
+    return ds
+
+
+def set_flags(
+    dsn: str,
+    dataset: str,
+    name: str,
+    *,
+    filterable: bool | None = None,
+    embed: bool | None = None,
+    sensitive: bool | None = None,
+    indexed: bool | None = None,
+    label: str | None = None,
+    source_name: str | None = None,
+) -> Dataset:
+    with _connect(dsn) as conn:
+        _begin(conn)
+        ds = _require(conn, dataset)
+        old = _require_column(ds, name)
+        new = replace(
+            old,
+            filterable=old.filterable if filterable is None else filterable,
+            embed=old.embed if embed is None else embed,
+            sensitive=old.sensitive if sensitive is None else sensitive,
+            indexed=old.indexed if indexed is None else indexed,
+            label=old.label if label is None else label,
+            source_name=old.source_name if source_name is None else source_name,
+        )
+        if new.sensitive and ds.title_column == name:
+            raise DatasetError("the title column cannot be sensitive")
+        rest = replace(ds, columns=tuple(c for c in ds.columns if c.name != name))
+        check_new_column(rest, new)
+        t = sql.Identifier("kh_data", dataset)
+        if new.indexed != old.indexed:
+            ix = sql.Identifier("kh_data", object_name("ix", dataset, name))
+            if new.indexed:
+                conn.execute(
+                    sql.SQL("CREATE INDEX {i} ON {t} ({c})").format(
+                        i=sql.Identifier(object_name("ix", dataset, name)), t=t, c=sql.Identifier(name)
+                    )
+                )
+            else:
+                conn.execute(sql.SQL("DROP INDEX IF EXISTS {i}").format(i=ix))
+        conn.execute(
+            "UPDATE kh.columns SET filterable = %s, embed = %s, sensitive = %s, indexed = %s,"
+            " label = %s, source_name = %s WHERE dataset = %s AND name = %s",
+            (
+                new.filterable,
+                new.embed,
+                new.sensitive,
+                new.indexed,
+                new.label,
+                new.source_name,
+                dataset,
+                name,
+            ),
+        )
+        ds = _require(conn, dataset)
+        if (new.embed, new.sensitive, new.label) != (old.embed, old.sensitive, old.label):
+            _rebuild_mirror_trigger(conn, ds)
+            _queue_refresh(conn, dataset)
+    return ds
+
+
+def set_choices(dsn: str, dataset: str, name: str, choices: Sequence[str]) -> Dataset:
+    with _connect(dsn) as conn:
+        _begin(conn)
+        ds = _require(conn, dataset)
+        col = _require_column(ds, name)
+        if col.type != "choice":
+            raise DatasetError(f"column {name} is not a choice column")
+        choices = tuple(dict.fromkeys(choices))
+        check_new_column(
+            replace(ds, columns=tuple(c for c in ds.columns if c.name != name)),
+            replace(col, choices=choices),
+        )
+        t = sql.Identifier("kh_data", dataset)
+        ck = sql.Identifier(object_name("ck", dataset, name))
+        c = sql.Identifier(name)
+        conn.execute(sql.SQL("ALTER TABLE {t} DROP CONSTRAINT IF EXISTS {ck}").format(t=t, ck=ck))
+        literals = sql.SQL(", ").join(sql.Literal(v) for v in choices)
+        try:
+            conn.execute(
+                sql.SQL(
+                    "ALTER TABLE {t} ADD CONSTRAINT {ck}"
+                    " CHECK ({c} IS NULL OR {c} = ANY (ARRAY[{v}]::text[]))"
+                ).format(t=t, ck=ck, c=c, v=literals)
+            )
+        except psycopg.errors.CheckViolation:
+            raise DatasetError("rows hold values outside the new choices") from None
+        conn.execute(
+            "UPDATE kh.columns SET choices = %s WHERE dataset = %s AND name = %s",
+            (list(choices), dataset, name),
+        )
+        ds = _require(conn, dataset)
+    return ds
+
+
+def set_dataset(
+    dsn: str,
+    dataset: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    title_column: str | None = None,
+    audiences: Sequence[str] | None = None,
+    max_outdated_percent: int | None = None,
+) -> Dataset:
+    with _connect(dsn) as conn:
+        _begin(conn)
+        ds = _require(conn, dataset)
+        if title is not None:
+            check_text(title, "title")
+        if description is not None and "\x00" in description:
+            raise DatasetError("description is not valid")
+        if title_column:
+            col = ds.column(title_column)
+            if col is None or col.type not in ("text", "choice", "ref") or col.sensitive:
+                raise DatasetError("title_column must be a text, choice or ref column that is not sensitive")
+        auds = _check_audiences(conn, audiences) if audiences is not None else ds.audiences
+        if max_outdated_percent is not None and not 0 <= max_outdated_percent <= 100:
+            raise DatasetError("max_outdated_percent must be between 0 and 100")
+        new_title = ds.title if title is None else title
+        new_tc = ds.title_column if title_column is None else title_column
+        conn.execute(
+            "UPDATE kh.datasets SET title = %s, description = %s, title_column = %s, audiences = %s,"
+            " max_outdated_percent = %s, updated_at = now() WHERE name = %s",
+            (
+                new_title,
+                ds.description if description is None else description,
+                new_tc,
+                list(auds),
+                ds.max_outdated_percent if max_outdated_percent is None else max_outdated_percent,
+                dataset,
+            ),
+        )
+        ds2 = _require(conn, dataset)
+        if (new_title, new_tc, tuple(auds)) != (ds.title, ds.title_column, ds.audiences):
+            _rebuild_mirror_trigger(conn, ds2)
+            _queue_refresh(conn, dataset)
+    return ds2
