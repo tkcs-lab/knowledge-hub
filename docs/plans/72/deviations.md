@@ -49,7 +49,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p10-csv-import
 
-- pending
+- worker: Importer adds checks beyond 3.10: malformed --sync-id exits 2, --finish on an empty file is refused, and an audience that is not an active group is refused
 
 ## p11-bi-roles
 
