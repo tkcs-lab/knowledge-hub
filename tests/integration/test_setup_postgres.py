@@ -304,6 +304,36 @@ async def test_remove_group_deletes_documents_and_record_moves(empty, settings):
         assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (1,)
 
 
+async def test_remove_group_refuses_dataset_references(empty, settings):
+    await step(empty, settings, cfg(("all", "extra"))).apply(False)
+    with psycopg.connect(mig(empty), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO kh.datasets (name, title, audiences) VALUES ('deals', 'Deals', ARRAY['extra'])"
+        )
+        conn.execute("CREATE SCHEMA IF NOT EXISTS kh_data")
+        conn.execute("CREATE TABLE kh_data.deals (_audience text NOT NULL REFERENCES kh.groups (name))")
+        conn.execute("INSERT INTO kh_data.deals VALUES ('extra')")
+        conn.execute(
+            "INSERT INTO kh.saved_queries (audience, name, dataset, spec, created_by_sub)"
+            " VALUES ('extra', 'q', 'deals', '{}', 's')"
+        )
+        conn.execute(
+            "INSERT INTO kh.dataset_syncs (dataset, audience, sync_id) VALUES ('deals', 'extra', 's1')"
+        )
+        conn.execute(
+            "INSERT INTO kh.bi_roles (role_name, audience, created_by)"
+            " VALUES ('kh_bi_aaaaaaaaaa', 'extra', 'x')"
+        )
+    s = step(empty, settings)
+    expect = (
+        "! group extra: still used by 1 saved queries, 1 dataset syncs, 1 BI roles, 1 dataset rows"
+    )
+    assert lines([await s.remove_group("extra", write=True)]) == [expect]
+    assert lines([await s.remove_group("extra", write=False)]) == [expect]
+    with psycopg.connect(mig(empty)) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.groups").fetchone() == (2,)
+
+
 async def test_group_usage_counts(empty, settings):
     await step(empty, settings, cfg(("all", "extra"))).apply(False)
     s = step(empty, settings)

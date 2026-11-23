@@ -99,7 +99,7 @@ T0 trust rests entirely on Forgejo, so `plan` checks it and reports any differen
 | `index_jobs`, `repo_state`, `index_alerts` | none | ALL |
 | `record_moves` | none (read only through the definer function `kh.record_moved`, which answers only for a group the caller holds) | none |
 | `usage_events` | INSERT for the caller's own group set (people only); SELECT where every group of the searcher is held | SELECT, DELETE |
-| `datasets`, `columns` | SELECT; changed only by `kh_migrator` (DDL) | SELECT |
+| `datasets`, `columns` | SELECT of the datasets whose audiences overlap the caller's groups (columns follow their dataset); changed only by `kh_migrator` (DDL) | SELECT |
 | `saved_queries` | SELECT where `can_read(audience)`; INSERT and UPDATE for a group the caller holds; no DELETE | none |
 | `dataset_syncs` | SELECT, INSERT and UPDATE where `can_read(audience)` | none |
 | `bi_roles` | none | none |
