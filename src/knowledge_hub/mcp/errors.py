@@ -62,6 +62,7 @@ SYNC_SHRINK = (
     "finish_sync would mark {n} of {live} rows outdated, more than {percent} percent; "
     "repeat with force=true if that is right"
 )
+QUERY_TIMEOUT = "query took too long; narrow it with where or limit"
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 
 
