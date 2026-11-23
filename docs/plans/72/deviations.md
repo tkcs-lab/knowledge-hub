@@ -54,10 +54,12 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## p11-bi-roles
 
 - worker: kh setup apply exits 2 when a BI role has no mapping (steps.run treats any ! line as refused); changing it needs steps.py, outside touches
+- worker: kh dataset bi-role drop without --yes exits 2 with "dataset: add --yes to drop <role>" (text not in the plan)
 
 ## p12-panel-datasets
 
 - worker: Panel Edit flags is one toggle button per flag (opForm has no checkbox support and ops.js is outside touches); add column cannot set flags; choices containing a comma are refused
+- worker: Panel dataset choices allow up to 100 (MAX_CHOICES) instead of the 50 in plan 3.11
 
 ## p13-docs-retirement
 
@@ -67,7 +69,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Final review
 
-- pending
+- final: kh_app could call SECURITY DEFINER kh.dataset_mirror_row directly and write or delete row records of other groups; grant dropped in fix-1 (also the trigger-function grants)
 
 ## Finishing
 
