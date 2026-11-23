@@ -55,6 +55,13 @@ RECORD_MOVED = "a record with this source and source_ref was moved out of this a
 MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
 TOOL_NOT_ALLOWED = "this credential may not call this tool"
 DATASET_RECORD = "this record mirrors a dataset row; change the row instead"
+UNKNOWN_DATASET = "unknown dataset"
+ROW_INVALID = "row {index}: {problem}"
+TOO_MANY_ROWS = "at most 500 rows or keys per call"
+SYNC_SHRINK = (
+    "finish_sync would mark {n} of {live} rows outdated, more than {percent} percent; "
+    "repeat with force=true if that is right"
+)
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 
 
