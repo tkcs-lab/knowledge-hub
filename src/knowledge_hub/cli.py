@@ -163,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.directory.cli import main as directory_main
 
         return directory_main(argv[1:])
+    if argv and argv[0] == "dataset":
+        from knowledge_hub.datasets.cli import main as dataset_main
+
+        return dataset_main(argv[1:])
     if argv and argv[0] == "key":
         from knowledge_hub.auth.keys_cli import main as key_main
 
@@ -180,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--queue", action="store_true")
     sub.add_parser("setup", help="plan or apply the deployment setup (kh setup --help)")
     sub.add_parser("panel", help="run the admin panel (kh panel serve)")
+    sub.add_parser("dataset", help="define datasets and their columns (kh dataset --help)")
     sub.add_parser("lint").add_argument("files", nargs="+", metavar="FILE")
     args = parser.parse_args(argv)
     if args.command == "lint":
