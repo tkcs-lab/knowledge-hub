@@ -57,7 +57,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p12-panel-datasets
 
-- pending
+- worker: Panel Edit flags is one toggle button per flag (opForm has no checkbox support and ops.js is outside touches); add column cannot set flags; choices containing a comma are refused
 
 ## p13-docs-retirement
 
