@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-23
+
 ### Added
 
 - Structured datasets owned by the hub: migration `0007_datasets.sql` (catalog, a typed table per dataset in schema `kh_data` with forced row-level security, saved queries, sync state and BI role mapping) and the `kh dataset` commands (`create`, `add-column`, `rename-column`, `drop-column`, `set-flags`, `set-choices`, `set`, `import`, `list`, `show`, `bi-role`).
