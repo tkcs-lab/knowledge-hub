@@ -49,7 +49,7 @@ def _trigger(dsn):
 def test_rename_title_column(deals, dsn):
     ddl.rename_column(dsn, "deals", "name", "label")
     assert _q(dsn, "SELECT title_column FROM kh.datasets WHERE name = 'deals'")[0][0] == "label"
-    assert "OLD.label IS DISTINCT" in _trigger(dsn)
+    assert "old.label IS DISTINCT" in _trigger(dsn)
     assert _q(dsn, "SELECT count(*) FROM kh.columns WHERE dataset = 'deals' AND name = 'label'")[0][0] == 1
 
 
@@ -61,7 +61,7 @@ def test_drop_title_column_refused(deals, dsn):
 def test_drop_embed_column_rebuilds_trigger_and_queues(deals, dsn):
     _clear_jobs(dsn)
     ddl.drop_column(dsn, "deals", "stage")
-    assert "stage" not in _trigger(dsn)
+    assert "old.stage" not in _trigger(dsn)
     assert _jobs(dsn) == 1
     assert _q(dsn, "SELECT count(*) FROM kh.columns WHERE dataset = 'deals' AND name = 'stage'")[0][0] == 0
 
@@ -117,13 +117,12 @@ def test_set_dataset_audiences_queues_refresh(deals, dsn):
 
 
 def test_cli_create_with_admin(deals, dsn, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(
-        cli,
-        "load_config",
-        lambda path: KhConfig(
-            admins=["admin@example.test"], groups={"all": {"repo": "all"}}
-        ),
+    config = KhConfig(
+        admins=["admin@example.test"],
+        people={"boss": "boss@example.test"},
+        groups={"all": {"repo": "all", "members": ["boss"], "approvers": ["boss"]}},
     )
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
 
     class S:
         def dsn(self, role):
