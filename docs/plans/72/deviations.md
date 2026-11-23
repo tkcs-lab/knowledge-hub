@@ -10,7 +10,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-dataset-create
 
-- pending
+- gate: Policy D uses the ::text[] cast form (plan 3.2/decision 15 text fails in Postgres); owner chose it on board ask a-721c15dc6236a47d
+- worker: model.py adds one refusal text not listed in 3.2: column type <t> is not valid
+- retry: Worker stopped blocked once on the policy defect and was resumed after the owner answer
 
 ## p3-dataset-alter-cli
 
