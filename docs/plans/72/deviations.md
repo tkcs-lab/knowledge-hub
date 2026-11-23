@@ -43,7 +43,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p9-history
 
-- pending
+- worker: test_as_of_is_parsed_but_ignored in tests/unit/test_dataset_query_build.py rewritten as test_as_of_needs_history_and_reads_the_twin (as_of now needs history)
+- scope: scope: tests/unit/test_dataset_query_build.py
+- worker: A plain date as_of means midnight UTC; _rebuild_mirror_trigger also rebuilds history_upd when history is on
 
 ## p10-csv-import
 
