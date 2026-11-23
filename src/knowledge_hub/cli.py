@@ -108,13 +108,17 @@ async def _check(deps: Any) -> int:
 
 
 async def _daily(deps: Any) -> int:
-    from knowledge_hub.jobs.daily import purge_identity, run_daily
+    from knowledge_hub.jobs.daily import purge_dataset_history, purge_identity, run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
     stale = await run_daily(deps.indexer_pool)
     identity = await purge_identity(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
-    print(f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}")
+    history = await purge_dataset_history(deps.indexer_pool, deps.settings.dataset_history_days)
+    print(
+        f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}"
+        f"; dataset history rows purged: {history}"
+    )
     return 0
 
 

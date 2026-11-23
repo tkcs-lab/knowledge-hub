@@ -152,8 +152,6 @@ async def query(
 ) -> dict[str, Any]:
     if audience:
         _require_held(call, audience)
-    if as_of != "":
-        raise _bad("as_of")
     if not saved:
         if not dataset:
             raise _bad("dataset")

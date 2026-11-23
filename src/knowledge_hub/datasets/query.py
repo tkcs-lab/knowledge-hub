@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import sql
@@ -80,6 +80,13 @@ def _names(value: Any, arg: str) -> tuple[str, ...]:
     if len(set(value)) != len(value):
         raise _bad(arg)
     return tuple(value)
+
+
+def _as_of(value: Any) -> datetime:
+    """An ISO date means midnight UTC; anything else must be an ISO datetime with a time zone."""
+    if isinstance(value, str) and len(value) == 10:
+        return datetime.fromisoformat(value).replace(tzinfo=UTC)
+    return _timestamp(value)
 
 
 def _timestamp(value: Any) -> datetime:
@@ -206,9 +213,11 @@ def parse_spec(
     when: datetime | None = None
     if as_of not in (None, ""):
         try:
-            when = _timestamp(as_of)
+            when = _as_of(as_of)
         except ValueError:
             raise _bad("as_of") from None
+        if not ds.history:
+            raise _bad("as_of")
     spec = QuerySpec(
         dataset=ds.name,
         select=select_t,
@@ -284,7 +293,7 @@ def _cond_sql(cond: Cond, params: list[Any]) -> sql.Composable:
 def build_query(
     spec: QuerySpec, ds: Dataset, audiences: list[str]
 ) -> tuple[sql.Composed, list[Any], list[str]]:
-    """The statement, its parameters and the output column names. ``as_of`` is ignored (p9)."""
+    """The statement, its parameters and the output column names; ``as_of`` reads the history twin."""
     outputs = _outputs(spec, ds)
     grouped = bool(spec.metrics or spec.group_by or spec.time_bucket)
     items: list[sql.Composable] = []
@@ -305,12 +314,15 @@ def build_query(
     where: list[sql.Composable] = [sql.SQL("_audience = ANY(%s)")]
     if not spec.include_outdated:
         where.append(sql.SQL('NOT "_outdated"'))
+    if spec.as_of is not None:
+        where.append(sql.SQL('"_valid_from" <= %s AND ("_valid_to" IS NULL OR "_valid_to" > %s)'))
+        params.extend([spec.as_of, spec.as_of])
     where.extend(_cond_sql(c, params) for c in spec.where)
     parts: list[sql.Composable] = [
         sql.SQL("SELECT {} FROM {}.{} WHERE {}").format(
             sql.SQL(", ").join(items),
             sql.Identifier("kh_data"),
-            sql.Identifier(ds.name),
+            sql.Identifier(ds.name + "__h" if spec.as_of is not None else ds.name),
             sql.SQL(" AND ").join(where),
         )
     ]

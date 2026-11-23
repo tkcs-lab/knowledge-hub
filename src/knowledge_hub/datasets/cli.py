@@ -88,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-column")
     p.add_argument("--audiences", type=_csv)
     p.add_argument("--max-outdated-percent", type=int)
+    p.add_argument("--history", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--yes", action="store_true")
 
     for name, help_ in (("list", "list datasets"), ("show", "show a dataset")):
         p = sub.add_parser(name, help=help_)
@@ -162,6 +164,8 @@ def _mutate(args: argparse.Namespace, config: KhConfig, dsn: str) -> str:
         return f"updated choices of {args.column} in {args.dataset}"
     if args.audiences is not None:
         _check_audiences(config, args.audiences)
+    if args.history is False and not args.yes and ddl.get_dataset(dsn, args.dataset).history:
+        raise _Refused(f"add --yes to drop the history of {args.dataset}", 2)
     ddl.set_dataset(
         dsn,
         args.dataset,
@@ -170,6 +174,7 @@ def _mutate(args: argparse.Namespace, config: KhConfig, dsn: str) -> str:
         title_column=args.title_column,
         audiences=args.audiences,
         max_outdated_percent=args.max_outdated_percent,
+        history=args.history,
     )
     return f"updated {args.dataset}"
 

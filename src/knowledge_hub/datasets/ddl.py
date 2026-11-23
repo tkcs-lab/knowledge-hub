@@ -207,6 +207,12 @@ def add_column(dsn: str, dataset: str, col: Column) -> Dataset:
         conn.execute(
             sql.SQL("ALTER TABLE {t} ADD COLUMN {c} {ty}").format(t=t, c=c, ty=sql.SQL(PG_TYPES[col.type]))
         )
+        if ds.history:
+            conn.execute(
+                sql.SQL("ALTER TABLE {h} ADD COLUMN {c} {ty}").format(
+                    h=_twin(dataset), c=c, ty=sql.SQL(PG_TYPES[col.type])
+                )
+            )
         if col.type == "choice":
             literals = sql.SQL(", ").join(sql.Literal(v) for v in col.choices)
             conn.execute(
@@ -271,6 +277,102 @@ def _rebuild_mirror_trigger(conn: psycopg.Connection, ds: Dataset) -> None:
             " EXECUTE FUNCTION kh.dataset_row_sync()"
         ).format(t=t, w=sql.SQL(" OR ").join(parts))
     )
+    if ds.history:
+        _rebuild_history_trigger(conn, ds)
+
+
+def _twin(name: str) -> sql.Identifier:
+    return sql.Identifier("kh_data", name + "__h")
+
+
+def _rebuild_history_trigger(conn: psycopg.Connection, ds: Dataset) -> None:
+    """Recreate ``history_upd`` so it fires only when a user column, the flag or the timestamp changes."""
+    t = sql.Identifier("kh_data", ds.name)
+    parts = [
+        sql.SQL("OLD.{c} IS DISTINCT FROM NEW.{c}").format(c=sql.Identifier(n))
+        for n in ("_outdated", "_source_updated_at", *(c.name for c in ds.columns))
+    ]
+    conn.execute(sql.SQL("DROP TRIGGER IF EXISTS history_upd ON {t}").format(t=t))
+    conn.execute(
+        sql.SQL(
+            "CREATE TRIGGER history_upd AFTER UPDATE ON {t} FOR EACH ROW WHEN ({w})"
+            " EXECUTE FUNCTION kh.dataset_history_row()"
+        ).format(t=t, w=sql.SQL(" OR ").join(parts))
+    )
+
+
+def _create_history(conn: psycopg.Connection, ds: Dataset) -> None:
+    """Create the twin ``kh_data.<n>__h``, its access rules and triggers, and seed it from the table."""
+    name = ds.name
+    t = sql.Identifier("kh_data", name)
+    h = _twin(name)
+    user_cols = sql.SQL("").join(
+        sql.SQL(", {c} {ty}").format(c=sql.Identifier(c.name), ty=sql.SQL(PG_TYPES[c.type]))
+        for c in ds.columns
+    )
+    conn.execute(
+        sql.SQL(
+            "CREATE TABLE {h} (_hid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,"
+            " _row_id uuid NOT NULL, _key text NOT NULL, _audience text NOT NULL,"
+            " _source_updated_at timestamptz NOT NULL, _outdated boolean NOT NULL,"
+            " _valid_from timestamptz NOT NULL, _valid_to timestamptz{u})"
+        ).format(h=h, u=user_cols)
+    )
+    conn.execute(
+        sql.SQL("CREATE INDEX {i} ON {h} (_audience, _valid_from)").format(
+            i=sql.Identifier(object_name("ix", name, "__h_valid")), h=h
+        )
+    )
+    conn.execute(
+        sql.SQL("CREATE INDEX {i} ON {h} (_row_id) WHERE _valid_to IS NULL").format(
+            i=sql.Identifier(object_name("ix", name, "__h_open")), h=h
+        )
+    )
+    conn.execute(sql.SQL("ALTER TABLE {h} ENABLE ROW LEVEL SECURITY").format(h=h))
+    conn.execute(sql.SQL("ALTER TABLE {h} FORCE ROW LEVEL SECURITY").format(h=h))
+    conn.execute(
+        sql.SQL(
+            "CREATE POLICY kh_migrator_all ON {h} FOR ALL TO kh_migrator USING (true) WITH CHECK (true)"
+        ).format(h=h)
+    )
+    conn.execute(sql.SQL("GRANT SELECT ON {h} TO kh_app, kh_bi").format(h=h))
+    d = sql.SQL(
+        "_audience = ANY ((SELECT audiences FROM kh.datasets WHERE name = {n})::text[])"
+    ).format(n=sql.Literal(name))
+    conn.execute(
+        sql.SQL(
+            "CREATE POLICY kh_app_select ON {h} FOR SELECT TO kh_app USING (kh.can_read(_audience) AND {d})"
+        ).format(h=h, d=d)
+    )
+    conn.execute(
+        sql.SQL(
+            "CREATE POLICY kh_bi_select ON {h} FOR SELECT TO kh_bi"
+            " USING (_audience = (SELECT kh.bi_group()) AND {d})"
+        ).format(h=h, d=d)
+    )
+    conn.execute(
+        sql.SQL(
+            "CREATE TRIGGER history_ins AFTER INSERT ON {t}"
+            " FOR EACH ROW EXECUTE FUNCTION kh.dataset_history_row()"
+        ).format(t=t)
+    )
+    _rebuild_history_trigger(conn, ds)
+    cols = sql.SQL(", ").join(
+        sql.Identifier(n)
+        for n in ("_key", "_audience", "_source_updated_at", "_outdated", *(c.name for c in ds.columns))
+    )
+    conn.execute(
+        sql.SQL(
+            "INSERT INTO {h} (_row_id, {cols}, _valid_from) SELECT _id, {cols}, now() FROM {t}"
+        ).format(h=h, t=t, cols=cols)
+    )
+
+
+def _drop_history(conn: psycopg.Connection, name: str) -> None:
+    t = sql.Identifier("kh_data", name)
+    conn.execute(sql.SQL("DROP TRIGGER IF EXISTS history_ins ON {t}").format(t=t))
+    conn.execute(sql.SQL("DROP TRIGGER IF EXISTS history_upd ON {t}").format(t=t))
+    conn.execute(sql.SQL("DROP TABLE IF EXISTS {h}").format(h=_twin(name)))
 
 
 def _queue_refresh(conn: psycopg.Connection, name: str) -> None:
@@ -307,11 +409,13 @@ def rename_column(dsn: str, dataset: str, old: str, new: str) -> Dataset:
         t = sql.Identifier("kh_data", dataset)
         # the trigger names the old column in its WHEN clause, so it goes first
         conn.execute(sql.SQL("DROP TRIGGER IF EXISTS mirror_upd ON {t}").format(t=t))
-        conn.execute(
-            sql.SQL("ALTER TABLE {t} RENAME COLUMN {o} TO {n}").format(
-                t=t, o=sql.Identifier(old), n=sql.Identifier(new)
+        conn.execute(sql.SQL("DROP TRIGGER IF EXISTS history_upd ON {t}").format(t=t))
+        for table in (t, _twin(dataset)) if ds.history else (t,):
+            conn.execute(
+                sql.SQL("ALTER TABLE {t} RENAME COLUMN {o} TO {n}").format(
+                    t=table, o=sql.Identifier(old), n=sql.Identifier(new)
+                )
             )
-        )
         conn.execute("UPDATE kh.columns SET name = %s WHERE dataset = %s AND name = %s", (new, dataset, old))
         if ds.title_column == old:
             conn.execute("UPDATE kh.datasets SET title_column = %s WHERE name = %s", (new, dataset))
@@ -331,7 +435,12 @@ def drop_column(dsn: str, dataset: str, name: str) -> Dataset:
             raise DatasetError(f"column {name} is the title column")
         t = sql.Identifier("kh_data", dataset)
         conn.execute(sql.SQL("DROP TRIGGER IF EXISTS mirror_upd ON {t}").format(t=t))
+        conn.execute(sql.SQL("DROP TRIGGER IF EXISTS history_upd ON {t}").format(t=t))
         conn.execute(sql.SQL("ALTER TABLE {t} DROP COLUMN {c}").format(t=t, c=sql.Identifier(name)))
+        if ds.history:
+            conn.execute(
+                sql.SQL("ALTER TABLE {h} DROP COLUMN {c}").format(h=_twin(dataset), c=sql.Identifier(name))
+            )
         conn.execute("DELETE FROM kh.columns WHERE dataset = %s AND name = %s", (dataset, name))
         ds = _require(conn, dataset)
         _rebuild_mirror_trigger(conn, ds)
@@ -444,6 +553,7 @@ def set_dataset(
     title_column: str | None = None,
     audiences: Sequence[str] | None = None,
     max_outdated_percent: int | None = None,
+    history: bool | None = None,
 ) -> Dataset:
     with _connect(dsn) as conn:
         _begin(conn)
@@ -477,4 +587,11 @@ def set_dataset(
         if (new_title, new_tc, tuple(auds)) != (ds.title, ds.title_column, ds.audiences):
             _rebuild_mirror_trigger(conn, ds2)
             _queue_refresh(conn, dataset)
+        if history is not None and history != ds.history:
+            conn.execute("UPDATE kh.datasets SET history = %s WHERE name = %s", (history, dataset))
+            ds2 = _require(conn, dataset)
+            if history:
+                _create_history(conn, ds2)
+            else:
+                _drop_history(conn, dataset)
     return ds2
