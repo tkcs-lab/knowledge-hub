@@ -16,7 +16,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-dataset-alter-cli
 
-- pending
+- worker: set_flags and set_choices validate through check_new_column on a probe column
+- worker: CLI prints "dataset: audience <g> is not an active group" for an inactive audience
 
 ## p4-row-mirror
 
