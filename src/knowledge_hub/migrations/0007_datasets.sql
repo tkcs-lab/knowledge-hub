@@ -118,10 +118,99 @@ CREATE FUNCTION kh.dataset_mirror_row(ds text, r jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path = kh, pg_temp
     AS $$
-BEGIN NULL; END $$;
+DECLARE
+    dtitle  text;
+    tcol    text;
+    auds    text[];
+    rid     text;
+    ttl     text;
+    body    text;
+    dead    boolean;
+    rec_id  uuid;
+    old_ttl text;
+    old_exc text;
+    old_occ timestamptz;
+    old_out boolean;
+    new_occ timestamptz;
+BEGIN
+    SELECT d.title, d.title_column, d.audiences INTO dtitle, tcol, auds
+      FROM kh.datasets d WHERE d.name = ds;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'unknown dataset %', ds;
+    END IF;
+    rid := 'row:' || ds || ':' || (r ->> '_id');
+    IF (r ->> '_audience') <> ALL (auds) THEN
+        DELETE FROM kh.records WHERE dataset_row = rid;
+        RETURN;
+    END IF;
+    ttl := left(coalesce(nullif(r ->> tcol, ''), r ->> '_key'), 300);
+    body := dtitle || ': ' || ttl;
+    SELECT body || coalesce(string_agg(E'\n' || c.label || ': ' || (r ->> c.name), '' ORDER BY c.ordinal), '')
+      INTO body
+      FROM kh.columns c
+     WHERE c.dataset = ds AND c.embed AND NOT c.sensitive
+       AND coalesce(r ->> c.name, '') <> '';
+    body := left(body, 4000);
+    dead := coalesce((r ->> '_outdated')::boolean, false);
+    new_occ := (r ->> '_source_updated_at')::timestamptz;
+
+    SELECT x.id, x.title, x.excerpt, x.occurred_at, x.outdated
+      INTO rec_id, old_ttl, old_exc, old_occ, old_out
+      FROM kh.records x WHERE x.dataset_row = rid FOR UPDATE;
+    IF NOT FOUND THEN
+        INSERT INTO kh.records (id, audience, source, source_ref, source_url, title, blob_key, excerpt,
+                                content_type, occurred_at, labels, written_by, created_by_sub,
+                                created_by_type, dataset_row, outdated, outdated_at, outdated_by,
+                                outdated_note, replaced_by)
+        VALUES (gen_random_uuid(), r ->> '_audience', 'dataset:' || ds, r ->> '_id', '', ttl, '', body,
+                'text/plain', new_occ, '{}', 'dataset', coalesce(kh.caller_sub(), 'dataset'),
+                'dataset', rid, dead, CASE WHEN dead THEN now() END,
+                CASE WHEN dead THEN 'dataset' ELSE '' END, '', '');
+        RETURN;
+    END IF;
+    IF old_ttl IS DISTINCT FROM ttl OR old_exc IS DISTINCT FROM body
+       OR old_occ IS DISTINCT FROM new_occ OR old_out IS DISTINCT FROM dead THEN
+        UPDATE kh.records
+           SET title = ttl, excerpt = body, occurred_at = new_occ, outdated = dead,
+               outdated_at = CASE WHEN dead THEN coalesce(outdated_at, now()) END,
+               outdated_by = CASE WHEN dead THEN 'dataset' ELSE '' END
+         WHERE id = rec_id;
+        IF old_exc IS DISTINCT FROM body
+           AND NOT EXISTS (SELECT 1 FROM kh.index_jobs
+                            WHERE kind = 'embed_record' AND state = 'queued'
+                              AND payload ->> 'id' = rec_id::text) THEN
+            INSERT INTO kh.index_jobs (kind, payload)
+            VALUES ('embed_record', jsonb_build_object('id', rec_id::text));
+        END IF;
+    END IF;
+END $$;
 
 REVOKE EXECUTE ON FUNCTION kh.dataset_mirror_row(text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION kh.dataset_mirror_row(text, jsonb) TO kh_app;
+
+CREATE FUNCTION kh.dataset_refresh(ds text, after uuid, n int) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path = kh, pg_temp
+    AS $$
+DECLARE
+    r    jsonb;
+    last uuid;
+BEGIN
+    IF ds !~ '^[a-z][a-z0-9_]{0,39}$' OR NOT EXISTS (SELECT 1 FROM kh.datasets WHERE name = ds) THEN
+        RAISE EXCEPTION 'unknown dataset %', ds;
+    END IF;
+    FOR r IN EXECUTE format(
+        'SELECT to_jsonb(t) FROM kh_data.%I t WHERE t._id > $1 ORDER BY t._id LIMIT $2', ds)
+        USING coalesce(after, '00000000-0000-0000-0000-000000000000'::uuid), n
+    LOOP
+        PERFORM kh.dataset_mirror_row(ds, r);
+        last := (r ->> '_id')::uuid;
+    END LOOP;
+    RETURN last;
+END $$;
+
+REVOKE EXECUTE ON FUNCTION kh.dataset_refresh(text, uuid, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION kh.dataset_refresh(text, uuid, int) TO kh_indexer;
 
 CREATE FUNCTION kh.dataset_row_sync() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
