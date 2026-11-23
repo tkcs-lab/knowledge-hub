@@ -253,6 +253,8 @@ DATASET_REFUSALS = [
     ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "text", "filterable": "yes"}),
     ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "choice", "choices": []}),
     ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "choice", "choices": ["a,b"]}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "choice",
+                            "choices": [f"c{i}" for i in range(51)]}),
     ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "ref", "ref": "Bad"}),
     ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "text", "x": 1}),
     ("dataset.rename_column", {"dataset": "deals", "column": "a", "new_name": "--x"}),

@@ -153,6 +153,15 @@ def test_drop_terminates_sessions_and_removes_role_and_row(run, fresh_db, admin_
         _drop_quietly(admin_dsn, role)
 
 
+def test_drop_removes_a_mapping_whose_role_is_gone(run, admin_dsn):
+    role, _ = _create(run)
+    _drop_quietly(admin_dsn, role)  # as after a restore: the mapping stays, the role is gone
+    code, out = run("drop", role, "--by", ADMIN, "--config", "kh.yaml", "--yes")
+    assert (code, out) == (0, f"dataset: dropped {role}")
+    with psycopg.connect(admin_dsn) as conn:
+        assert conn.execute("SELECT count(*) FROM kh.bi_roles").fetchone() == (0,)
+
+
 def test_other_roles_are_not_bi_roles(run):
     for name in ("kh_app", "kh_bi_aaaaaaaaaa"):
         for cmd in ("rotate", "drop"):

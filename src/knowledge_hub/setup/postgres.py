@@ -212,6 +212,31 @@ class PostgresStep:
             row = await cur.fetchone()
             return (int(row[0]), int(row[1])) if row else (0, 0)
 
+    @staticmethod
+    async def _dataset_references(conn: psycopg.AsyncConnection, name: str) -> str:
+        """What of the datasets feature still points at the group (they all reference ``kh.groups``)."""
+        counts: list[tuple[str, int]] = []
+        for label, table in (
+            ("saved queries", "saved_queries"),
+            ("dataset syncs", "dataset_syncs"),
+            ("BI roles", "bi_roles"),
+        ):
+            query = sql.SQL("SELECT count(*) FROM kh.{} WHERE audience = %s").format(sql.Identifier(table))
+            cur = await conn.execute(query, (name,))
+            row = await cur.fetchone()
+            counts.append((label, int(row[0]) if row else 0))
+        rows = 0
+        cur = await conn.execute("SELECT name FROM kh.datasets")
+        for (dataset,) in await cur.fetchall():
+            query = sql.SQL("SELECT count(*) FROM {} WHERE _audience = %s").format(
+                sql.Identifier("kh_data", dataset)
+            )
+            cur = await conn.execute(query, (name,))
+            row = await cur.fetchone()
+            rows += int(row[0]) if row else 0
+        counts.append(("dataset rows", rows))
+        return ", ".join(f"{n} {label}" for label, n in counts if n)
+
     async def _remove_group(
         self, conn: psycopg.AsyncConnection, name: str, repo: str, *, write: bool = True, moves: bool = False
     ) -> Change:
@@ -220,6 +245,9 @@ class PostgresStep:
         records = int(row[0]) if row else 0
         if records:
             return Change("!", f"group {name}: still has {records} records")
+        used = await self._dataset_references(conn, name)
+        if used:
+            return Change("!", f"group {name}: still used by {used}")
         if not write:
             return Change("-", f"group {name}")
         async with conn.transaction():

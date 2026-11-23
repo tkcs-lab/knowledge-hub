@@ -22,6 +22,13 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 - `kh daily` prints one more count: `; dataset history rows purged: N`.
 - Documentation: the panel has six tabs, and the README, design, configuration, runbook and deployment guide describe datasets and BI access.
 
+### Fixed
+
+- `kh group remove` and `kh setup apply --prune` refuse a group that still owns saved queries, dataset syncs, BI roles or dataset rows (`group <g>: still used by ...`) instead of failing with a database error.
+- `kh dataset bi-role drop` removes a mapping whose database role is gone, as after a restore into a new cluster.
+- The panel accepts at most 50 choices for a dataset column.
+- The runbook's restore steps hand the restored `kh_data` tables back to `kh_migrator`, and the design doc describes what `kh_app` sees of `datasets` and `columns`.
+
 ## [0.6.1] - 2026-11-20
 
 ### Changed

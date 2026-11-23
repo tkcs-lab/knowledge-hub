@@ -74,7 +74,8 @@ def drop_bi_role(admin_dsn: str, migrator_dsn: str, role: str) -> None:
     _check_role(migrator_dsn, role)
     with psycopg.connect(admin_dsn, autocommit=True) as admin:
         _terminate(admin, role)
-        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+        # a restore into a new cluster can leave the mapping without its role
+        admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
     with psycopg.connect(migrator_dsn) as conn:
         conn.execute("DELETE FROM kh.bi_roles WHERE role_name = %s", (role,))
 

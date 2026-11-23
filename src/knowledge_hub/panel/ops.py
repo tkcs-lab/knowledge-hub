@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from knowledge_hub.config import DIR_RE, GROUP_RE, LABEL_RE, LOGIN_RE, REPO_RE
-from knowledge_hub.datasets.model import COLUMN_RE, COLUMN_TYPES, DATASET_RE, MAX_CHOICES, MAX_TEXT
+from knowledge_hub.datasets.model import COLUMN_RE, COLUMN_TYPES, DATASET_RE, MAX_TEXT
 
 MAX_LIST = 50
 MAX_IDS = 100
@@ -151,9 +151,12 @@ def _text(key: str) -> Callable[[Any], str]:
     return check
 
 
+PANEL_MAX_CHOICES = 50  # plan 3.11: the panel form takes fewer choices than the model allows
+
+
 def _choices(value: Any) -> list[str]:
     items = _list_of(_text("choices"), "choices")(value)
-    if not 1 <= len(items) <= MAX_CHOICES or any("," in c for c in items):
+    if not 1 <= len(items) <= PANEL_MAX_CHOICES or any("," in c for c in items):
         raise OpError("choices is not valid")
     return items
 
