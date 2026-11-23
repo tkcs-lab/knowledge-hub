@@ -53,7 +53,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p11-bi-roles
 
-- pending
+- worker: kh setup apply exits 2 when a BI role has no mapping (steps.run treats any ! line as refused); changing it needs steps.py, outside touches
 
 ## p12-panel-datasets
 
