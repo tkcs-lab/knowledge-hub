@@ -7,7 +7,7 @@ import uuid
 import psycopg
 import pytest
 
-from knowledge_hub.mcp.errors import BAD_ID, NOT_FOUND
+from knowledge_hub.mcp.errors import BAD_GET_ID, NOT_FOUND
 from tests.support.blobs import MemoryBlobStore
 from tests.support.pg import FRESH_DB
 from tests.support.principals import alice_all, bob_mgmt, dave_none, wf_token
@@ -82,6 +82,7 @@ async def test_get_doc_returns_the_record_body_from_the_blob_store(mcp_client, s
         "outdated_at": "",
         "replaced_by": "",
         "note": "",
+        "row": "",
     }
     assert "outdated_by" not in res.data
 
@@ -118,7 +119,7 @@ async def test_hidden_equals_missing(mcp_client, seeded_db, who):
 )
 async def test_bad_ids(mcp_client, seeded_db, bad):
     res = await mcp_client.call(alice_all, "get_doc", {"id": bad})
-    assert res.is_error and res.text.endswith(BAD_ID)
+    assert res.is_error and res.text.endswith(BAD_GET_ID)
 
 
 async def test_get_doc_shows_the_supersede_marks_of_a_document(mcp_client, seeded_db, fresh_db):
