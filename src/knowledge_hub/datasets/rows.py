@@ -171,8 +171,8 @@ def parse_rows(text: str, ds: Dataset) -> list[RowIn]:
 def _json_row(row: RowIn, names: list[str]) -> dict[str, Any]:
     out: dict[str, Any] = {"_key": row.key, "_source_updated_at": row.source_updated_at.isoformat()}
     for name in names:
-        value = to_json_value(row.values[name])
-        out[name] = str(value) if isinstance(row.values[name], Decimal) else value
+        raw = row.values[name]
+        out[name] = str(raw) if isinstance(raw, Decimal) else to_json_value(raw)
     return out
 
 

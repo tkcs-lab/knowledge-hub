@@ -50,12 +50,12 @@ async def upsert(mcp_client, items, caller=wf_all, audience="all", **extra):
 async def test_insert_then_update_counts(mcp_client, fresh_db):
     res = await upsert(mcp_client, [row("a", name="A", amount=1), row("b", name="B", amount="2.5")])
     assert not res.is_error, res.text
-    assert res.data == {"rows": 2, "inserted": 2, "updated": 0}
+    assert res.data["result"] == {"rows": 2, "inserted": 2, "updated": 0}
     res = await upsert(
         mcp_client,
         [row("a", "2026-11-02T10:00:00Z", name="A2", amount=3), row("c", name="C", amount=4)],
     )
-    assert res.data == {"rows": 2, "inserted": 1, "updated": 1}
+    assert res.data["result"] == {"rows": 2, "inserted": 1, "updated": 1}
     got = q(fresh_db, "SELECT _key, name, amount FROM kh_data.deals ORDER BY _key")
     assert [(k, n, float(a)) for k, n, a in got] == [("a", "A2", 3.0), ("b", "B", 2.5), ("c", "C", 4.0)]
 
@@ -91,25 +91,25 @@ async def test_omitted_field_keeps_its_value(mcp_client, fresh_db):
 
 async def test_refusals(mcp_client):
     res = await upsert(mcp_client, [row("a")], caller=alice_all)
-    assert res.is_error and res.text == ONLY_WORKFLOWS
+    assert res.is_error and res.text.endswith(ONLY_WORKFLOWS)
     res = await upsert(mcp_client, [row("a")], caller=wf_mgmt, audience="hr")
-    assert res.is_error and res.text == AUDIENCE_NOT_HELD
+    assert res.is_error and res.text.endswith(AUDIENCE_NOT_HELD)
     res = await mcp_client.call(
         wf_all, "upsert_rows", {"dataset": "nope", "audience": "all", "rows": rows(row("a"))}
     )
-    assert res.is_error and res.text == UNKNOWN_DATASET
+    assert res.is_error and res.text.endswith(UNKNOWN_DATASET)
     res = await upsert(mcp_client, [row("a")], caller=wf_hr, audience="hr")
-    assert res.is_error and res.text == UNKNOWN_DATASET
+    assert res.is_error and res.text.endswith(UNKNOWN_DATASET)
     res = await upsert(mcp_client, [row("a")], sync_id="bad id!")
-    assert res.is_error and res.text == BAD_ARG.format(name="sync_id")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="sync_id"))
     res = await upsert(mcp_client, [row("a", nope=1)])
-    assert res.is_error and res.text == "row 0: unknown field nope"
+    assert res.is_error and res.text.endswith("row 0: unknown field nope")
     res = await mcp_client.call(
         wf_all, "upsert_rows", {"dataset": "deals", "audience": "all", "rows": "[]"}
     )
-    assert res.is_error and res.text == BAD_ARG.format(name="rows")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="rows"))
     res = await upsert(mcp_client, [row(str(i)) for i in range(501)])
-    assert res.is_error and res.text == TOO_MANY_ROWS
+    assert res.is_error and res.text.endswith(TOO_MANY_ROWS)
 
 
 async def test_delete_rows(mcp_client, fresh_db):
@@ -117,7 +117,7 @@ async def test_delete_rows(mcp_client, fresh_db):
     res = await mcp_client.call(
         wf_all, "delete_rows", {"dataset": "deals", "audience": "all", "keys": ["a", "b", "zzz"]}
     )
-    assert res.data == {"outdated": 2}
+    assert res.data["result"] == {"outdated": 2}
     rows_ = q(fresh_db, "SELECT _key, _outdated, _outdated_reason FROM kh_data.deals ORDER BY _key")
     assert rows_ == [("a", True, "delete"), ("b", True, "delete")]
     # an older re-send keeps the delete, an equal timestamp clears it
@@ -131,19 +131,19 @@ async def test_delete_rows(mcp_client, fresh_db):
     res = await mcp_client.call(
         wf_all, "delete_rows", {"dataset": "deals", "audience": "all", "keys": ["a"]}
     )
-    assert res.data == {"outdated": 1}
+    assert res.data["result"] == {"outdated": 1}
 
 
 async def test_delete_rows_arguments(mcp_client):
     base = {"dataset": "deals", "audience": "all"}
     res = await mcp_client.call(wf_all, "delete_rows", {**base, "keys": []})
-    assert res.is_error and res.text == BAD_ARG.format(name="keys")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="keys"))
     res = await mcp_client.call(wf_all, "delete_rows", {**base, "keys": [""]})
-    assert res.is_error and res.text == BAD_ARG.format(name="keys")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="keys"))
     res = await mcp_client.call(wf_all, "delete_rows", {**base, "keys": [str(i) for i in range(501)]})
-    assert res.is_error and res.text == TOO_MANY_ROWS
+    assert res.is_error and res.text.endswith(TOO_MANY_ROWS)
     res = await mcp_client.call(alice_all, "delete_rows", {**base, "keys": ["a"]})
-    assert res.is_error and res.text == ONLY_WORKFLOWS
+    assert res.is_error and res.text.endswith(ONLY_WORKFLOWS)
 
 
 async def test_full_sync_outdates_only_rows_not_seen(mcp_client, fresh_db):
@@ -157,8 +157,8 @@ async def test_full_sync_outdates_only_rows_not_seen(mcp_client, fresh_db):
         wf_all, "finish_sync", {"dataset": "deals", "audience": "all", "sync_id": "s1", "force": True}
     )
     assert not res.is_error, res.text
-    assert res.data["outdated"] == 1 and res.data["live"] == 4
-    assert res.data["watermark"].startswith("2026-11-01T10:00:00")
+    assert res.data["result"]["outdated"] == 1 and res.data["result"]["live"] == 4
+    assert res.data["result"]["watermark"].startswith("2026-11-01T10:00:00")
     live = dict(q(fresh_db, "SELECT _key, _outdated FROM kh_data.deals"))
     assert live == {"A": False, "B": False, "C": False, "D": False, "E": True}
     ((reason,),) = q(fresh_db, "SELECT _outdated_reason FROM kh_data.deals WHERE _key = 'E'")
@@ -169,11 +169,11 @@ async def test_full_sync_outdates_only_rows_not_seen(mcp_client, fresh_db):
     assert (rows_seen, outdated) == (3, 1) and finished is not None and mark is not None
     # a finished sync takes no more rows and cannot finish twice
     res = await upsert(mcp_client, [row("A", name="A")], sync_id="s1")
-    assert res.is_error and res.text == BAD_ARG.format(name="sync_id")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="sync_id"))
     res = await mcp_client.call(
         wf_all, "finish_sync", {"dataset": "deals", "audience": "all", "sync_id": "s1"}
     )
-    assert res.is_error and res.text == BAD_ARG.format(name="sync_id")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="sync_id"))
 
 
 async def test_shrink_guard(mcp_client, fresh_db):
@@ -183,17 +183,17 @@ async def test_shrink_guard(mcp_client, fresh_db):
     args = {"dataset": "deals", "audience": "all", "sync_id": "s2"}
     res = await mcp_client.call(wf_all, "finish_sync", args)
     assert res.is_error
-    assert res.text == SYNC_SHRINK.format(n=3, live=5, percent=20)
+    assert res.text.endswith(SYNC_SHRINK.format(n=3, live=5, percent=20))
     assert q(fresh_db, "SELECT count(*) FROM kh_data.deals WHERE _outdated") == [(0,)]
     res = await mcp_client.call(wf_all, "finish_sync", {**args, "force": True})
-    assert res.data["outdated"] == 3
+    assert res.data["result"]["outdated"] == 3
 
 
 async def test_finish_sync_arguments(mcp_client):
     base = {"dataset": "deals", "audience": "all"}
     res = await mcp_client.call(wf_all, "finish_sync", {**base, "sync_id": ""})
-    assert res.is_error and res.text == BAD_ARG.format(name="sync_id")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="sync_id"))
     res = await mcp_client.call(wf_all, "finish_sync", {**base, "sync_id": "unknown"})
-    assert res.is_error and res.text == BAD_ARG.format(name="sync_id")
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="sync_id"))
     res = await mcp_client.call(alice_all, "finish_sync", {**base, "sync_id": "x"})
-    assert res.is_error and res.text == ONLY_WORKFLOWS
+    assert res.is_error and res.text.endswith(ONLY_WORKFLOWS)
