@@ -61,7 +61,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p13-docs-retirement
 
-- pending
+- worker: backup-kh.sh dumps kh_data with -t kh_data.* instead of -n kh_data (pg_dump ignores -n when -t is given); the test asserts the -t form
+- worker: Docs now say the panel has six tabs instead of five (README, configuration, runbook)
+- worker: Unverified by the worker: runbook claim that kh setup apply exits 2 for an unmapped BI role, and the design.md policy table rows for kh_data and kh_bi (written from the plan text)
 
 ## Final review
 
