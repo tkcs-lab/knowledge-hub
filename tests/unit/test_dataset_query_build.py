@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -151,7 +152,16 @@ def test_source_updated_at_bucket_uses_utc_and_filter_needs_timezone():
     assert s.where[0].column == "_source_updated_at"
 
 
-def test_as_of_is_parsed_but_ignored():
-    s = spec(as_of="2026-01-01T00:00:00Z")
-    assert s.as_of is not None
-    assert build_query(s, DS, ["all"])[0].as_string(None) == text()[0]
+def test_as_of_needs_history_and_reads_the_twin():
+    refused("as_of", as_of="2026-01-01T00:00:00Z")
+    hist = replace(DS, history=True)
+    args = dict(
+        select=[], where="", group_by=[], metrics=[], time_bucket="", order=[],
+        limit=100, include_outdated=False, as_of="2026-01-01", max_rows=1000,
+    )  # fmt: skip
+    s = parse_spec(hist, **args)
+    assert s.as_of is not None and s.as_of.tzinfo is not None
+    statement, params, _ = build_query(s, hist, ["all"])
+    assert "deals__h" in statement.as_string(None)
+    assert params[-2:] == [s.as_of, s.as_of]
+    refused("as_of", as_of="2026-01-01T00:00:00")

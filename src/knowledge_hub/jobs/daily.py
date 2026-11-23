@@ -25,3 +25,11 @@ async def purge_identity(indexer_pool: Any) -> int:
         cur = await conn.execute("SELECT kh.oauth_purge()")
         row = await cur.fetchone()
         return int(row[0])
+
+
+async def purge_dataset_history(indexer_pool: Any, days: int) -> int:
+    """Delete dataset history versions closed more than ``days`` days ago; return how many went."""
+    async with indexer_pool.connection() as conn, conn.transaction():
+        cur = await conn.execute("SELECT kh.dataset_history_purge(%s::int)", (days,))
+        row = await cur.fetchone()
+        return int(row[0])

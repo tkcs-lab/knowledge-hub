@@ -361,3 +361,58 @@ CREATE POLICY kh_app_update ON kh.dataset_syncs FOR UPDATE TO kh_app
 ALTER TABLE kh.bi_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kh.bi_roles FORCE ROW LEVEL SECURITY;
 CREATE POLICY kh_migrator_all ON kh.bi_roles FOR ALL TO kh_migrator USING (true) WITH CHECK (true);
+
+-- History (p9): versions of a row in kh_data.<n>__h, written by triggers that exist only while history is on.
+
+CREATE FUNCTION kh.dataset_history_row() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path = kh, pg_temp
+    AS $$
+DECLARE
+    h    text := TG_TABLE_NAME || '__h';
+    cols text;
+BEGIN
+    IF TG_TABLE_SCHEMA <> 'kh_data' THEN
+        RAISE EXCEPTION 'dataset_history_row outside kh_data';
+    END IF;
+    SELECT string_agg(format('%I', c), ', ') INTO cols FROM (
+        SELECT unnest(ARRAY['_row_id', '_key', '_audience', '_source_updated_at', '_outdated',
+                            '_valid_from', '_valid_to']) AS c, 0 AS o
+        UNION ALL
+        SELECT name, ordinal FROM kh.columns WHERE dataset = TG_TABLE_NAME
+        ORDER BY o
+    ) s;
+    EXECUTE format('UPDATE kh_data.%I SET _valid_to = now() WHERE _row_id = $1 AND _valid_to IS NULL', h)
+        USING NEW._id;
+    EXECUTE format(
+        'INSERT INTO kh_data.%I (%s) SELECT %s FROM jsonb_populate_record(NULL::kh_data.%I, $1)',
+        h, cols, cols, h)
+        USING to_jsonb(NEW) || jsonb_build_object(
+            '_row_id', NEW._id, '_valid_from', now(), '_valid_to', NULL);
+    RETURN NULL;
+END $$;
+
+REVOKE EXECUTE ON FUNCTION kh.dataset_history_row() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION kh.dataset_history_row() TO kh_app;
+
+CREATE FUNCTION kh.dataset_history_purge(days int) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path = kh, pg_temp
+    AS $$
+DECLARE
+    ds    text;
+    n     bigint;
+    total bigint := 0;
+BEGIN
+    FOR ds IN SELECT name FROM kh.datasets WHERE history ORDER BY name LOOP
+        EXECUTE format(
+            'DELETE FROM kh_data.%I WHERE _valid_to < now() - make_interval(days => $1)', ds || '__h')
+            USING days;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        total := total + n;
+    END LOOP;
+    RETURN total;
+END $$;
+
+REVOKE EXECUTE ON FUNCTION kh.dataset_history_purge(int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION kh.dataset_history_purge(int) TO kh_indexer;

@@ -170,7 +170,7 @@ async def test_query_argument_errors(mcp_client):
     assert res.is_error and res.text.endswith(BAD_ARG.format(name="saved"))
     res = await q(mcp_client, multi)
     assert res.is_error and res.text.endswith(BAD_ARG.format(name="dataset"))
-    res = await q(mcp_client, multi, dataset="deals", as_of="2026-01-01")
+    res = await q(mcp_client, multi, dataset="deals", as_of="2026-01-01")  # no history on deals
     assert res.is_error and res.text.endswith(BAD_ARG.format(name="as_of"))
     res = await q(mcp_client, multi, saved="s")
     assert res.is_error and res.text.endswith(BAD_ARG.format(name="audience"))
