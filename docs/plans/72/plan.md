@@ -16,7 +16,7 @@
 
 ## 1. Goal
 
-Issue [#72](https://github.com/tkcs-lab/knowledge-hub/issues/72). The hub gains structured data that it owns (option B, no Grist). An operator defines datasets with typed columns. Workflows keep rows in sync from a source system, people and agents find rows through `search`, and dashboards read them with a structured `query`. All of it is under the same group rule as documents and records. The owner decided on 2026-11-23 (board ask `a-6c8f7ed1e3f7b281`) that the schema goes in a new `0007_datasets.sql`, and that the `sensitive` flag hides a column from search and the embedder only. The owner also confirmed that nothing in the hub may be Salesforce-specific; only the reference feed is.
+Issue [#72](https://github.com/tkcs-lab/knowledge-hub/issues/72). The hub gains structured data that it owns (option B, no Grist). An operator defines datasets with typed columns. Workflows keep rows in sync from a source system, people and agents find rows through `search`, and dashboards read them with a structured `query`. All of it is under the same group rule as documents and records. The owner decided on 2026-11-23 (board ask `a-6c8f7ed1e3f7b281`) that the schema goes in a new `0007_datasets.sql`, and that the `sensitive` flag hides a column from search and the embedder only.
 
 ## 2. Current state
 
