@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from knowledge_hub.embed.base import FakeEmbedder
-from knowledge_hub.mcp.errors import BAD_ARG, NOT_FOUND
+from knowledge_hub.mcp.errors import BAD_ARG, DATASET_RECORD, NOT_FOUND
 from knowledge_hub.mcp.server import Deps
 from tests.support.bearer import TestBearerResolver
 from tests.support.pg import FRESH_DB
@@ -114,6 +114,15 @@ async def test_hidden_and_missing_record_answer_not_found_identically(mcp_client
     assert hidden.is_error and missing.is_error
     assert hidden.text == missing.text
     assert hidden.text.endswith(NOT_FOUND)
+
+
+async def test_row_record_is_refused(mcp_client, fresh_db, seeded_db):
+    ref = uuid.uuid4().hex
+    with psycopg.connect(fresh_db.dsn("kh_migrator", FRESH_DB)) as conn:
+        rec = add_record(conn, source="dataset:x", source_ref=ref, dataset_row=f"x:{ref}")
+        conn.commit()
+    res = await mark(mcp_client, alice_all, id=f"rec:{rec}")
+    assert res.is_error and res.text.endswith(DATASET_RECORD)
 
 
 async def test_doc_id_is_refused(mcp_client, db):

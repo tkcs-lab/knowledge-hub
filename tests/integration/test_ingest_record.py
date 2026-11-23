@@ -179,6 +179,12 @@ async def test_nul_in_a_text_argument_is_refused(mcp_client, seeded_db, fresh_db
     assert _rows(fresh_db, "SELECT count(*) FROM kh.records WHERE source = 'meet'") == [(0,)]
 
 
+async def test_dataset_source_prefix_is_refused(mcp_client, seeded_db, blobs):
+    res = await mcp_client.call(wf_all, "ingest_record", {**ARGS, "source": "dataset:sales"})
+    assert res.is_error and res.text.endswith(BAD_ARG.format(name="source"))
+    assert not blobs.objects
+
+
 async def test_nul_late_in_the_body_is_refused(mcp_client, seeded_db, blobs):
     res = await mcp_client.call(wf_all, "ingest_record", {**ARGS, "body": "a" * 2500 + "\x00"})
     assert res.is_error and res.text.endswith(BAD_ARG.format(name="body"))

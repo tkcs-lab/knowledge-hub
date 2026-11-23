@@ -27,7 +27,7 @@ EXPECTED = {
     "records": ["id", "audience", "source", "source_ref", "source_url", "title", "blob_key", "excerpt",
                 "content_type", "occurred_at", "labels", "written_by", "created_by_sub",
                 "created_by_type", "ingested_at", "outdated", "outdated_at", "outdated_by", "outdated_note",
-                "replaced_by"],
+                "replaced_by", "dataset_row"],
     "chunks": ["id", "document_id", "record_id", "owner_key", "owner_created_at", "ordinal",
                "heading_path", "text", "content_sha", "embedding", "embedding_model", "tsv", "tier",
                "audience", "labels", "stale"],
@@ -35,6 +35,14 @@ EXPECTED = {
                    "run_after"],
     "repo_state": ["repo", "last_indexed_sha", "indexed_at"],
     "index_alerts": ["id", "repo", "path", "message", "created_at"],
+    "datasets": ["name", "title", "description", "audiences", "title_column", "history",
+                 "max_outdated_percent", "created_at", "updated_at"],
+    "columns": ["dataset", "name", "ordinal", "type", "label", "choices", "ref_dataset", "source_name",
+                "filterable", "embed", "sensitive", "indexed"],
+    "saved_queries": ["audience", "name", "dataset", "spec", "created_by_sub", "updated_at"],
+    "dataset_syncs": ["dataset", "audience", "sync_id", "started_at", "finished_at", "rows_seen",
+                      "outdated", "watermark"],
+    "bi_roles": ["role_name", "audience", "created_by", "created_at"],
 }
 
 
@@ -156,7 +164,9 @@ def test_chunks_cascade_on_owner_delete(conn):
 
 
 def test_index_job_kinds(conn):
-    conn.execute("INSERT INTO kh.index_jobs (kind) VALUES ('git_push'), ('embed_record')")
+    conn.execute(
+        "INSERT INTO kh.index_jobs (kind) VALUES ('git_push'), ('embed_record'), ('dataset_refresh')"
+    )
     for kind in ("embed_raw", "pr_event"):
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute("INSERT INTO kh.index_jobs (kind) VALUES (%s)", [kind])

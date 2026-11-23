@@ -16,6 +16,7 @@ from knowledge_hub.setup.steps import Change
 
 ROLES = ("migrator", "app", "indexer")
 EXTENSION = "vector"
+BI_ROLE = "kh_bi"
 
 
 class PostgresStep:
@@ -54,6 +55,10 @@ class PostgresStep:
         row = await cur.fetchone()
         return roles, (row[0] if row else None)
 
+    async def _has_bi_role(self, conn: psycopg.AsyncConnection) -> bool:
+        cur = await conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (BI_ROLE,))
+        return await cur.fetchone() is not None
+
     async def _has_extension(self, dsn: str) -> bool:
         async with await self._connect(self._db_dsn(dsn)) as conn:
             cur = await conn.execute("SELECT 1 FROM pg_extension WHERE extname = %s", (EXTENSION,))
@@ -88,12 +93,15 @@ class PostgresStep:
             probe = self._admin  # type: ignore[assignment]
         async with conn:
             roles, owner = await self._server_state(conn)
+            has_bi = await self._has_bi_role(conn)
         for role in ROLES:
             name = f"kh_{role}"
             if name not in roles:
                 out.append(Change(mark, f"role {name}"))  # type: ignore[arg-type]
             elif not roles[name][1]:
                 out.append(Change("!" if refuse else "~", f"role {name}: attributes"))
+        if not has_bi:
+            out.append(Change("+", f"role {BI_ROLE}"))
         if owner is None:
             out.append(Change(mark, f"database {db}"))  # type: ignore[arg-type]
         elif owner != "kh_migrator":
@@ -209,6 +217,10 @@ class PostgresStep:
         db = self._settings.db_name
         async with await self._connect(self._admin) as conn:  # type: ignore[arg-type]
             roles, owner = await self._server_state(conn)
+            if not await self._has_bi_role(conn):
+                await conn.execute(
+                    sql.SQL("CREATE ROLE {} NOLOGIN NOSUPERUSER NOBYPASSRLS").format(sql.Identifier(BI_ROLE))
+                )
             for role in ROLES:
                 name = f"kh_{role}"
                 verb = "ALTER" if name in roles else "CREATE"

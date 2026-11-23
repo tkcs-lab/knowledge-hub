@@ -61,6 +61,8 @@ async def ingest_record(
     )
     if bad is not None:
         raise kh_error("bad_arg", errors.BAD_ARG, name=bad)
+    if source.startswith("dataset:"):
+        raise kh_error("bad_arg", errors.BAD_ARG, name="source")
     data = body.encode()
     if len(data) > deps.settings.max_record_bytes:
         raise kh_error("too_large", errors.TOO_LARGE)
