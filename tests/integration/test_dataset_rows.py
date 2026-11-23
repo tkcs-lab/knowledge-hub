@@ -124,7 +124,9 @@ async def test_delete_rows(mcp_client, fresh_db):
     await upsert(mcp_client, [row("a", "2026-11-01T00:00:00Z", name="A")])
     assert q(fresh_db, "SELECT _outdated FROM kh_data.deals WHERE _key = 'a'") == [(True,)]
     await upsert(mcp_client, [row("a", "2026-11-05T00:00:00Z", name="A")])
-    cleared = q(fresh_db, "SELECT _outdated, _outdated_reason, _outdated_at FROM kh_data.deals WHERE _key='a'")
+    cleared = q(
+        fresh_db, "SELECT _outdated, _outdated_reason, _outdated_at FROM kh_data.deals WHERE _key='a'"
+    )
     assert cleared == [(False, "", None)]
     res = await mcp_client.call(
         wf_all, "delete_rows", {"dataset": "deals", "audience": "all", "keys": ["a"]}
