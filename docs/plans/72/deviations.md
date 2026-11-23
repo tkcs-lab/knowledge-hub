@@ -74,4 +74,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- final: Scope disposition: tests/unit/test_dataset_query_build.py (p9) stays accepted in the final diff; second final review approved with no findings
