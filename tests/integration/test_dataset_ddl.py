@@ -10,7 +10,6 @@ from knowledge_hub.datasets import ddl
 from knowledge_hub.datasets.model import Column, DatasetError, object_name
 from knowledge_hub.db.caller_tx import caller_tx
 from tests.support.datasets import make_dataset, migrator_dsn
-from tests.support.pg import FRESH_DB
 from tests.support.principals import wf_all, wf_hr
 
 pytestmark = pytest.mark.integration
@@ -52,7 +51,10 @@ def test_table_rls_policies_triggers(mig, deals):
     assert mig.execute(
         "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'kh_data.deals'::regclass"
     ).fetchone() == (True, True)
-    pols = {r[0] for r in mig.execute("SELECT polname FROM pg_policy WHERE polrelid = 'kh_data.deals'::regclass")}
+    pols = {
+        r[0]
+        for r in mig.execute("SELECT polname FROM pg_policy WHERE polrelid = 'kh_data.deals'::regclass")
+    }
     assert pols == {"kh_migrator_all", "kh_app_select", "kh_app_insert", "kh_app_update", "kh_bi_select"}
     trigs = {r[0] for r in mig.execute(
         "SELECT tgname FROM pg_trigger WHERE tgrelid = 'kh_data.deals'::regclass AND NOT tgisinternal"
@@ -78,7 +80,6 @@ async def test_audience_rules(app_pool, deals):
         assert row == ("key:wf-all", True)
     async with caller_tx(app_pool, wf_hr) as conn:
         with pytest.raises(errors.InsufficientPrivilege):  # hr is held but not in the dataset
-            await conn.execute("SAVEPOINT s")
             await _insert(conn, "k2", "hr")
     async with caller_tx(app_pool, wf_all) as conn:
         with pytest.raises(errors.InsufficientPrivilege):  # mgmt is in the dataset but not held
@@ -95,7 +96,7 @@ async def test_no_delete_no_ddl_and_frozen_identity(app_pool, deals):
         with pytest.raises(errors.InsufficientPrivilege):
             await conn.execute("ALTER TABLE kh_data.deals ADD COLUMN x text")
     async with caller_tx(app_pool, wf_all) as conn:
-        with pytest.raises(errors.RaiseException) as err:
+        with pytest.raises(psycopg.Error) as err:
             await conn.execute("UPDATE kh_data.deals SET _key = 'other'")
         assert err.value.sqlstate == "P0K0D"
 

@@ -165,7 +165,7 @@ CREATE TABLE {t} (
     conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE ON {t} TO kh_app").format(t=t))
     conn.execute(sql.SQL("GRANT SELECT ON {t} TO kh_bi").format(t=t))
     d = sql.SQL(
-        "_audience = ANY ((SELECT audiences FROM kh.datasets WHERE name = {n}))"
+        "_audience = ANY ((SELECT audiences FROM kh.datasets WHERE name = {n})::text[])"
     ).format(n=sql.Literal(name))
     p = sql.SQL("kh.can_read(_audience) AND {d}").format(d=d)
     for stmt in (
