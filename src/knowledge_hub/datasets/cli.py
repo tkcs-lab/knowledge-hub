@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import dataclasses
 import json
 import logging
@@ -14,7 +15,10 @@ import psycopg
 
 from knowledge_hub.config import KhConfig, load_config
 from knowledge_hub.datasets import ddl
-from knowledge_hub.datasets.model import Column, Dataset, DatasetError
+from knowledge_hub.datasets.importer import ImportRefused, import_csv
+from knowledge_hub.datasets.model import SYNC_RE, Column, Dataset, DatasetError
+from knowledge_hub.deps import build_deps, close_deps
+from knowledge_hub.mcp.errors import KhError
 from knowledge_hub.settings import load_settings
 
 log = logging.getLogger(__name__)
@@ -90,6 +94,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-outdated-percent", type=int)
     p.add_argument("--history", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--yes", action="store_true")
+
+    p = mutating("import", "import a CSV file")
+    p.add_argument("dataset")
+    p.add_argument("file", type=Path)
+    p.add_argument("--audience", required=True)
+    p.add_argument("--key-column", default="key")
+    p.add_argument("--updated-column", default="source_updated_at")
+    p.add_argument("--sync-id", default="")
+    p.add_argument("--finish", action="store_true")
+    p.add_argument("--force", action="store_true")
 
     for name, help_ in (("list", "list datasets"), ("show", "show a dataset")):
         p = sub.add_parser(name, help=help_)
@@ -200,6 +214,25 @@ def _read(args: argparse.Namespace, dsn: str) -> int:
     return 0
 
 
+async def _import(args: argparse.Namespace, config: KhConfig, email: str) -> dict[str, int]:
+    deps = await build_deps(load_settings(), config)
+    try:
+        return await import_csv(
+            deps,
+            args.file,
+            args.dataset,
+            args.audience,
+            email,
+            args.key_column,
+            args.updated_column,
+            args.sync_id,
+            args.finish,
+            args.force,
+        )
+    finally:
+        await close_deps(deps)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
@@ -213,10 +246,25 @@ def main(argv: list[str] | None = None) -> int:
         if email not in config.admins:
             print(f"dataset: {email} is not an administrator")
             return 1
+        if args.command == "import":
+            if args.finish and not args.sync_id:
+                raise _Refused("--finish needs --sync-id", 2)
+            if args.sync_id and not SYNC_RE.fullmatch(args.sync_id):
+                raise _Refused("--sync-id is not valid", 2)
+            summary = asyncio.run(_import(args, config, email))
+            log.info("dataset import by=%s dataset=%s rows=%d", email, args.dataset, summary["rows"])
+            print(json.dumps(summary, sort_keys=True))
+            return 0
         done = _mutate(args, config, load_settings().dsn("migrator"))
     except _Refused as exc:
         print(f"dataset: {exc}")
         return exc.code
+    except ImportRefused as exc:
+        print(f"dataset: {exc}")
+        return exc.code
+    except KhError as exc:
+        print(f"dataset: {exc.text}")
+        return 1
     except DatasetError as exc:
         print(f"dataset: {exc}")
         return 1
