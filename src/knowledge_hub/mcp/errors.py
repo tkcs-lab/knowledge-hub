@@ -36,6 +36,7 @@ CURSOR_FOREIGN = "cursor does not belong to this query"
 NORMATIVE = "only T3 records match; repeat with min_tier T3 to see them"
 NORMATIVE_T0A = "only T0a documents or T3 records match; repeat with min_tier T0a or T3 to see them"
 BAD_ID = "id must be doc:<uuid> or rec:<uuid>"
+BAD_GET_ID = "id must be doc:<uuid>, rec:<uuid> or row:<dataset>:<uuid>"
 BAD_LABEL = "unknown label"
 BAD_ARG = "argument {name} is invalid"
 AUDIENCE_NOT_HELD = "audience is not held by this caller or not configured"
@@ -54,6 +55,15 @@ MOVE_LINKED = "another item names this one as its replacement or successor; clea
 RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
 MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
 TOOL_NOT_ALLOWED = "this credential may not call this tool"
+DATASET_RECORD = "this record mirrors a dataset row; change the row instead"
+UNKNOWN_DATASET = "unknown dataset"
+ROW_INVALID = "row {index}: {problem}"
+TOO_MANY_ROWS = "at most 500 rows or keys per call"
+SYNC_SHRINK = (
+    "finish_sync would mark {n} of {live} rows outdated, more than {percent} percent; "
+    "repeat with force=true if that is right"
+)
+QUERY_TIMEOUT = "query took too long; narrow it with where or limit"
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 
 

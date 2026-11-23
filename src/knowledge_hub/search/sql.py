@@ -153,6 +153,7 @@ SELECT p.id, p.owner_key, p.tier, p.stale, p.outdated, p.text, p.score, p.simila
        d.title AS doc_title, d.audience AS doc_audience, d.labels AS doc_labels,
        r.title AS rec_title, r.audience AS rec_audience, r.labels AS rec_labels,
        r.source_url AS rec_source_url, r.occurred_at AS rec_occurred_at,
+       r.dataset_row AS rec_dataset_row,
        meta.total, meta.t0_hits, meta.t0a_hits, meta.t3_hits, meta.t0_fts_hits, meta.t3_fts_hits
   FROM meta
   LEFT JOIN page p ON true

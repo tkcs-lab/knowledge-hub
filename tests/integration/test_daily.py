@@ -95,7 +95,7 @@ async def test_daily_prints_the_usage_purge(world, deps, capsys):
     with conn_for(world) as conn:
         add_usage(conn, at=datetime.now(UTC) - timedelta(days=200))
     assert await _daily(deps) == 0
-    assert capsys.readouterr().out.strip().endswith("usage events purged: 1")
+    assert capsys.readouterr().out.strip().endswith("usage events purged: 1; dataset history rows purged: 0")
 
 
 async def test_purge_identity_removes_expired_oauth_state(world, indexer_pool):

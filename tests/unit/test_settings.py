@@ -29,17 +29,27 @@ def test_defaults():
     assert s.s3_region == "garage"
     assert s.rrf_k == 60 and s.search_pool == 50
     assert s.dev_identity is None and s.db_app_password_file is None
+    assert s.bi_enabled is False
 
 
 def test_usage_settings(monkeypatch):
     s = Settings()
     assert s.usage_log is True and s.usage_retention_days == 180
+    assert s.query_timeout_ms == 3000 and s.query_max_rows == 1000
     monkeypatch.setenv("KH_USAGE_LOG", "false")
     assert Settings().usage_log is False
     for bad in ("0", "3651"):
         monkeypatch.setenv("KH_USAGE_RETENTION_DAYS", bad)
         with pytest.raises(ValidationError):
             Settings()
+
+
+def test_query_settings_refuse_5001(monkeypatch):
+    for var in ("KH_QUERY_TIMEOUT_MS", "KH_QUERY_MAX_ROWS"):
+        monkeypatch.setenv(var, "5001")
+        with pytest.raises(ValidationError):
+            Settings()
+        monkeypatch.delenv(var)
 
 
 def test_prod_refuses_dev_identity(monkeypatch):

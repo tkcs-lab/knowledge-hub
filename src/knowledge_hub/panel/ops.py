@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from knowledge_hub.config import DIR_RE, GROUP_RE, LABEL_RE, LOGIN_RE, REPO_RE
+from knowledge_hub.datasets.model import COLUMN_RE, COLUMN_TYPES, DATASET_RE, MAX_CHOICES, MAX_TEXT
 
 MAX_LIST = 50
 MAX_IDS = 100
@@ -134,6 +135,56 @@ def _ids(value: Any) -> list[int]:
     return list(value)
 
 
+def _text(key: str) -> Callable[[Any], str]:
+    """Free text as ``datasets.model.check_text`` accepts it (1-MAX_TEXT chars, no control character)."""
+
+    def check(value: Any) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > MAX_TEXT
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+        ):
+            raise OpError(f"{key} is not valid")
+        return value
+
+    return check
+
+
+def _choices(value: Any) -> list[str]:
+    items = _list_of(_text("choices"), "choices")(value)
+    if not 1 <= len(items) <= MAX_CHOICES or any("," in c for c in items):
+        raise OpError("choices is not valid")
+    return items
+
+
+def _audiences(value: Any) -> list[str]:
+    items = _list_of(_group_name, "audiences")(value)
+    if not items:
+        raise OpError("audiences must not be empty")
+    return items
+
+
+def _title_column(value: Any) -> str:
+    if value == "":
+        return value
+    return _pattern("column name", COLUMN_RE)(value)
+
+
+def _column_type(value: Any) -> str:
+    if value not in COLUMN_TYPES:
+        raise OpError("type is not valid")
+    return value
+
+
+def _percent(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+        raise OpError("max_outdated_percent must be an integer from 0 to 100")
+    return value
+
+
+_dataset = _pattern("dataset name", DATASET_RE)
+_column = _pattern("column name", COLUMN_RE)
 _item_id = _pattern("item id", ITEM_ID_RE)
 _label = _pattern("label name", LABEL_RE)
 _login = _pattern("login", LOGIN_RE)
@@ -159,6 +210,23 @@ RULES: dict[str, Callable[[Any], Any]] = {
     "id": _item_id,
     "from_group": _group_name,
     "to_group": _group_name,
+    "dataset": _dataset,
+    "ref": _dataset,
+    "column": _column,
+    "new_name": _column,
+    "title_column": _title_column,
+    "type": _column_type,
+    "title": _text("title"),
+    "label": _text("label"),
+    "source_name": _text("source_name"),
+    "choices": _choices,
+    "audiences": _audiences,
+    "max_outdated_percent": _percent,
+    "filterable": _bool,
+    "embed": _bool,
+    "sensitive": _bool,
+    "indexed": _bool,
+    "history": _bool,
 }
 
 # ``name`` means a label, a group or a repo depending on the op.
@@ -202,6 +270,62 @@ def _repo_options(args: dict[str, Any]) -> list[str]:
     if args.get("labels") is not None:
         out.append(f"--labels={_csv(args['labels'])}")
     return out
+
+
+COLUMN_FLAGS = ("filterable", "embed", "sensitive", "indexed")
+
+
+def _dataset_cmd(sub: str, options: Callable[[dict[str, Any]], list[str]], positionals: tuple[str, ...]):
+    def build(args: dict[str, Any]) -> list[str]:
+        return ["dataset", sub, CFG, *options(args), BY, "--", *[args[k] for k in positionals]]
+
+    return build
+
+
+def _opt(args: dict[str, Any], key: str, option: str | None = None, join: bool = False) -> list[str]:
+    if key not in args:
+        return []
+    value = _csv(args[key]) if join else args[key]
+    return [f"--{option or key}={value}"]
+
+
+def _create_options(a: dict[str, Any]) -> list[str]:
+    return [
+        f"--title={a['title']}",
+        f"--audiences={_csv(a['audiences'])}",
+        *_opt(a, "description"),
+    ]
+
+
+def _add_column_options(a: dict[str, Any]) -> list[str]:
+    out = [f"--type={a['type']}"]
+    out += _opt(a, "label")
+    out += _opt(a, "choices", join=True)
+    out += _opt(a, "ref")
+    out += _opt(a, "source_name", "source-name")
+    for flag in COLUMN_FLAGS:
+        out += _flag(a, flag, f"--{flag}")
+    return out
+
+
+def _bool_options(a: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
+    return [f"--{k}" if a[k] else f"--no-{k}" for k in keys if k in a]
+
+
+def _set_flags_options(a: dict[str, Any]) -> list[str]:
+    return [*_bool_options(a, COLUMN_FLAGS), *_opt(a, "label"), *_opt(a, "source_name", "source-name")]
+
+
+def _set_options(a: dict[str, Any]) -> list[str]:
+    out = _opt(a, "title") + _opt(a, "description") + _opt(a, "title_column", "title-column")
+    out += _opt(a, "audiences", join=True)
+    out += _opt(a, "max_outdated_percent", "max-outdated-percent")
+    out += _bool_options(a, ("history",))
+    return out + _flag(a, "confirm", "--yes")
+
+
+def _set_choices(a: dict[str, Any]) -> list[str]:
+    return ["dataset", "set-choices", CFG, BY, "--", a["dataset"], a["column"], _csv(a["choices"])]
 
 
 def _inproc(_args: dict[str, Any]) -> list[str]:
@@ -335,6 +459,62 @@ def _build_ops() -> dict[str, Op]:
                 "--",
                 a["id"],
             ],
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.create",
+            ("dataset", "title", "audiences"),
+            _dataset_cmd("create", _create_options, ("dataset",)),
+            optional=("description",),
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.add_column",
+            ("dataset", "column", "type"),
+            _dataset_cmd("add-column", _add_column_options, ("dataset", "column")),
+            optional=("label", "choices", "ref", "source_name", *COLUMN_FLAGS),
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.rename_column",
+            ("dataset", "column", "new_name"),
+            _dataset_cmd("rename-column", _no_options, ("dataset", "column", "new_name")),
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.drop_column",
+            ("dataset", "column", "confirm"),
+            _dataset_cmd("drop-column", lambda a: _flag(a, "confirm", "--yes"), ("dataset", "column")),
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.set_flags",
+            ("dataset", "column"),
+            _dataset_cmd("set-flags", _set_flags_options, ("dataset", "column")),
+            optional=("label", "source_name", *COLUMN_FLAGS),
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.set_choices",
+            ("dataset", "column", "choices"),
+            _set_choices,
+            config_op=False,
+            needs_by=True,
+        ),
+        _cli(
+            "dataset.set",
+            ("dataset",),
+            _dataset_cmd("set", _set_options, ("dataset",)),
+            optional=(
+                "title", "description", "title_column", "audiences", "max_outdated_percent",
+                "history", "confirm",
+            ),
             config_op=False,
             needs_by=True,
         ),

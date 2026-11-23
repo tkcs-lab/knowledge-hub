@@ -15,7 +15,7 @@ NOW = datetime.now(UTC)
 TABLES = ("schema_migrations", "groups", "labels", "documents", "records", "chunks",
           "index_jobs", "repo_state", "index_alerts", "usage_events", "record_moves",
           "api_keys", "oauth_clients", "oauth_pending", "oauth_codes", "oauth_tokens", "oauth_consents",
-          "directory_snapshot")
+          "directory_snapshot", "datasets", "columns", "saved_queries", "dataset_syncs", "bi_roles")
 
 # role -> table -> commands granted (a role or table not listed has no grant)
 ALL = {"SELECT", "INSERT", "UPDATE", "DELETE"}
@@ -23,12 +23,15 @@ GRANTS = {
     "kh_app": {
         "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": {"SELECT"},
         "records": {"SELECT", "INSERT"}, "chunks": {"SELECT"}, "usage_events": {"SELECT", "INSERT"},
+        "datasets": {"SELECT"}, "columns": {"SELECT"},
+        "saved_queries": {"SELECT", "INSERT", "UPDATE"}, "dataset_syncs": {"SELECT", "INSERT", "UPDATE"},
     },
     "kh_indexer": {
         "groups": {"SELECT"}, "labels": {"SELECT"}, "documents": ALL, "records": {"SELECT"},
         "chunks": ALL, "index_jobs": ALL, "repo_state": ALL, "index_alerts": ALL,
-        "usage_events": {"SELECT", "DELETE"},
+        "usage_events": {"SELECT", "DELETE"}, "datasets": {"SELECT"}, "columns": {"SELECT"},
     },
+    "kh_bi": {"datasets": {"SELECT"}, "columns": {"SELECT"}},
 }
 DEFINERS = ("records_enqueue_embed", "labels_in_use_guard", "mark_record_outdated",
             "move_record", "record_moved",
@@ -36,7 +39,8 @@ DEFINERS = ("records_enqueue_embed", "labels_in_use_guard", "mark_record_outdate
             "oauth_client_authorize", "oauth_client_touch", "oauth_pending_put", "oauth_pending_take",
             "oauth_pending_peek", "oauth_code_put", "oauth_code_take", "oauth_token_put", "oauth_token_get",
             "oauth_refresh_use", "oauth_token_revoke", "oauth_family_revoke", "oauth_consent_has",
-            "oauth_consent_put", "directory_snapshot_get", "directory_snapshot_put", "oauth_purge",)
+            "oauth_consent_put", "directory_snapshot_get", "directory_snapshot_put", "oauth_purge",
+            "bi_group", "dataset_mirror_row", "dataset_row_sync")
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
@@ -144,7 +148,7 @@ def test_policy_texts(fresh_db):
 
 def test_grant_matrix(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn(DB)) as conn:
-        for role in ("kh_app", "kh_indexer"):
+        for role in ("kh_app", "kh_indexer", "kh_bi"):
             for table in TABLES:
                 for priv in sorted(ALL):
                     got = conn.execute(
@@ -158,14 +162,14 @@ def test_grant_matrix(fresh_db):
                         role, table, priv)
 
 
-def test_roles_are_plain_and_there_are_exactly_three(fresh_db):
+def test_roles_are_plain_and_there_are_exactly_four(fresh_db):
     with psycopg.connect(fresh_db.admin_dsn(DB)) as conn:
         rows = conn.execute(
             "SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles"
             " WHERE rolname LIKE 'kh\\_%' ORDER BY 1"
         ).fetchall()
-    assert rows == [("kh_app", False, False, True), ("kh_indexer", False, False, True),
-                    ("kh_migrator", False, False, True)]
+    assert rows == [("kh_app", False, False, True), ("kh_bi", False, False, False),
+                    ("kh_indexer", False, False, True), ("kh_migrator", False, False, True)]
 
 
 def test_definers_are_owned_by_migrator_with_a_pinned_search_path(fresh_db):

@@ -108,13 +108,17 @@ async def _check(deps: Any) -> int:
 
 
 async def _daily(deps: Any) -> int:
-    from knowledge_hub.jobs.daily import purge_identity, run_daily
+    from knowledge_hub.jobs.daily import purge_dataset_history, purge_identity, run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
     stale = await run_daily(deps.indexer_pool)
     identity = await purge_identity(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
-    print(f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}")
+    history = await purge_dataset_history(deps.indexer_pool, deps.settings.dataset_history_days)
+    print(
+        f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}"
+        f"; dataset history rows purged: {history}"
+    )
     return 0
 
 
@@ -163,6 +167,10 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.directory.cli import main as directory_main
 
         return directory_main(argv[1:])
+    if argv and argv[0] == "dataset":
+        from knowledge_hub.datasets.cli import main as dataset_main
+
+        return dataset_main(argv[1:])
     if argv and argv[0] == "key":
         from knowledge_hub.auth.keys_cli import main as key_main
 
@@ -180,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--queue", action="store_true")
     sub.add_parser("setup", help="plan or apply the deployment setup (kh setup --help)")
     sub.add_parser("panel", help="run the admin panel (kh panel serve)")
+    sub.add_parser("dataset", help="define datasets and their columns (kh dataset --help)")
     sub.add_parser("lint").add_argument("files", nargs="+", metavar="FILE")
     args = parser.parse_args(argv)
     if args.command == "lint":

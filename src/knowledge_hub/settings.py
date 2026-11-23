@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     metrics_token_file: Path | None = None
     usage_log: bool = True
     usage_retention_days: int = Field(default=180, ge=1, le=3650)
+    query_timeout_ms: int = Field(3000, ge=100, le=5000)
+    query_max_rows: int = Field(1000, ge=1, le=5000)
+    dataset_history_days: int = Field(730, ge=1, le=36500)
+    bi_enabled: bool = False
 
     public_url: str | None = None
     oidc_issuer: str | None = None

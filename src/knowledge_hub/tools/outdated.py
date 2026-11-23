@@ -15,6 +15,7 @@ log = logging.getLogger("knowledge_hub.tools")
 
 MAX_NOTE_CHARS = 500
 BAD_SUCCESSOR_SQLSTATE = "P0K07"
+DATASET_SQLSTATE = "P0K0B"
 
 
 def _bad(name: str):
@@ -44,6 +45,8 @@ async def mark_record_outdated(
     except psycopg.errors.Error as exc:
         if exc.sqlstate == BAD_SUCCESSOR_SQLSTATE:
             raise _bad("replaced_by") from None
+        if exc.sqlstate == DATASET_SQLSTATE:
+            raise kh_error("dataset_record", errors.DATASET_RECORD) from None
         raise
     if row is None or row[0] is None:
         raise kh_error("not_found", errors.NOT_FOUND)

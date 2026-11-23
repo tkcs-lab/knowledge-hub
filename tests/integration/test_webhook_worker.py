@@ -456,3 +456,25 @@ async def test_worker_syncs_a_tech_repo_with_the_tech_reader(world, indexer_pool
     assert q(world, "SELECT repo, path, tier, audience FROM kh.documents") == [
         (TECH_REPO, "docs/a.md", "T0a", "all")
     ]
+
+
+async def test_dataset_refresh_job_runs(world, make_worker):
+    from tests.support.datasets import make_dataset
+
+    make_dataset(world)
+    with psycopg.connect(world.dsn("kh_migrator", DB), autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO kh_data.deals (_key, _audience, _source_updated_at, name)"
+            " VALUES ('k', 'all', now(), 'A')"
+        )
+        conn.execute("DELETE FROM kh.records")
+        conn.execute("DELETE FROM kh.index_jobs")
+    job_id = add_job(world, "dataset_refresh", payload=json.dumps({"dataset": "deals"}))
+    assert await make_worker().run_once() is True
+    assert job(world, job_id) == ("done", 1, None)
+    assert q(world, "SELECT count(*) FROM kh.records WHERE dataset_row <> ''") == [(1,)]
+    bad = add_job(world, "dataset_refresh")
+    worker = make_worker()
+    while await worker.run_once():
+        pass
+    assert "without a dataset" in job(world, bad)[2]

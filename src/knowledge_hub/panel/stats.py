@@ -135,6 +135,59 @@ async def document_counts_by_repo(pool: Any) -> dict[str, int]:
     return {repo: n for repo, n in rows}
 
 
+async def dataset_catalog(pool: Any) -> list[dict[str, Any]]:
+    """Every dataset with its columns and the planner's row estimate (``None`` when never analysed)."""
+    async with _read(pool) as conn:
+        datasets = await (
+            await conn.execute(
+                "SELECT d.name, d.title, d.description, d.audiences, d.title_column, d.history,"
+                " d.max_outdated_percent, c.reltuples"
+                " FROM kh.datasets d"
+                " LEFT JOIN pg_class c ON c.relname = d.name"
+                "  AND c.relnamespace = 'kh_data'::regnamespace"
+                " ORDER BY d.name"
+            )
+        ).fetchall()
+        columns = await (
+            await conn.execute(
+                "SELECT dataset, name, type, label, choices, ref_dataset, source_name,"
+                " filterable, embed, sensitive, indexed FROM kh.columns ORDER BY dataset, ordinal"
+            )
+        ).fetchall()
+    by_dataset: dict[str, list[dict[str, Any]]] = {}
+    for ds, name, typ, label, choices, ref, source, filt, embed, sens, idx in columns:
+        by_dataset.setdefault(ds, []).append(
+            {
+                "name": name,
+                "type": typ,
+                "label": label,
+                "choices": list(choices or []),
+                "ref_dataset": ref,
+                "source_name": source,
+                "filterable": filt,
+                "embed": embed,
+                "sensitive": sens,
+                "indexed": idx,
+            }
+        )
+    out = []
+    for name, title, description, audiences, title_column, history, percent, tuples in datasets:
+        out.append(
+            {
+                "name": name,
+                "title": title,
+                "description": description,
+                "audiences": list(audiences),
+                "title_column": title_column,
+                "history": history,
+                "max_outdated_percent": percent,
+                "columns": by_dataset.get(name, []),
+                "rows_estimate": None if tuples is None or tuples < 0 else int(tuples),
+            }
+        )
+    return out
+
+
 async def pipeline(pool: Any) -> dict[str, Any]:
     """The ``/api/pipeline`` object."""
     async with _read(pool) as conn:

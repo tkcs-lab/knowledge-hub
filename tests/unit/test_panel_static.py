@@ -103,7 +103,7 @@ def test_labels_js_uses_existing_label_ops():
     assert used <= set(ops.OPS)
 
 
-@pytest.mark.parametrize("script", ["groups.js", "repos.js"])
+@pytest.mark.parametrize("script", ["groups.js", "repos.js", "datasets.js"])
 def test_group_and_repo_scripts_use_existing_ops(script):
     from knowledge_hub.panel import ops
 
@@ -176,6 +176,21 @@ def test_pipeline_notice_survives_reload():
     assert re.search(r"onApplied: \(job\) => \{\s*setNotice\(label, job\);\s*reload\(\);", text)
     assert re.search(r"if \(on && notice\) \{\s*clear\(notice\)", text)
     assert "innerHTML" not in text
+
+
+def test_datasets_script_uses_only_dom_and_ops_helpers():
+    text = _text("datasets.js")
+    imports = re.findall(r'^import \{[^}]*\} from "([^"]+)"', text, re.M)
+    assert sorted(imports) == ["/static/dom.js", "/static/ops.js"]
+    assert "/api/ops" not in text and "dry_run" not in text and "setTimeout" not in text
+    assert 'window.api("GET", "/api/datasets")' in text
+    assert re.search(r"dataset\.drop_column[\s\S]*?confirm: true", text)
+
+
+def test_datasets_tab_is_registered():
+    assert 'data-tab="datasets"' in _text("index.html")
+    assert "/static/datasets.js" in _text("index.html")
+    assert '"datasets"' in _text("app.js")
 
 
 def test_pipeline_has_the_move_form():

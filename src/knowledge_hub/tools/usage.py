@@ -59,7 +59,7 @@ SELECT r.id, r.audience, r.title, r.labels, r.source, r.source_url, r.occurred_a
             JOIN kh.documents dd ON d = 'doc:' || dd.id::text AND dd.tier = 'T0'
            WHERE a.k = ANY(e2.owner_keys)
            ORDER BY d LIMIT 3) x) AS related_docs
-  FROM agg a JOIN kh.records r ON a.k = 'rec:' || r.id::text
+  FROM agg a JOIN kh.records r ON a.k = 'rec:' || r.id::text AND r.dataset_row = ''
  WHERE a.people >= %(min_people)s AND (%(audience)s = '' OR r.audience = %(audience)s)
  ORDER BY a.people DESC, a.opens DESC, a.outranked_t0 DESC, a.searches DESC, r.id
  LIMIT %(n)s

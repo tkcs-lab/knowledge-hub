@@ -1,4 +1,4 @@
-"""Read API of the panel: ``/api/me``, ``/api/labels``, ``/api/groups``, ``/api/repos``, ``/api/pipeline``."""
+"""Read API of the panel: ``/api/me``, labels, groups, repos, datasets and pipeline."""
 
 from __future__ import annotations
 
@@ -121,6 +121,9 @@ def build_read_routes(ctx: PanelContext) -> list[Route]:
         ]
         return {"tech_org": config.tech_org, "repos": rows, "config_sha256": _config_sha256(ctx)}
 
+    async def datasets(request: Request) -> Response:
+        return JSONResponse({"datasets": await stats.dataset_catalog(ctx.pool)})
+
     async def pipeline(request: Request) -> Response:
         return JSONResponse(await stats.pipeline(ctx.pool))
 
@@ -129,5 +132,6 @@ def build_read_routes(ctx: PanelContext) -> list[Route]:
         Route("/api/labels", with_config(labels), methods=["GET"]),
         Route("/api/groups", with_config(groups), methods=["GET"]),
         Route("/api/repos", with_config(repos), methods=["GET"]),
+        Route("/api/datasets", datasets, methods=["GET"]),
         Route("/api/pipeline", pipeline, methods=["GET"]),
     ]

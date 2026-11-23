@@ -155,12 +155,164 @@ INPROC = [
 ]
 
 
-def test_ops_table_has_25_operations():
-    assert len(OPS) == 25
+BY_ = "--by=a@b.test"
+FULL_COLUMN = {
+    "dataset": "deals", "column": "stage", "type": "choice", "label": "Stage", "choices": ["a", "b"],
+    "ref": "accounts", "source_name": "Stage__c", "filterable": True, "embed": True,
+    "sensitive": True, "indexed": True,
+}
+DATASET_EXAMPLES = [
+    (
+        "dataset.create",
+        {"dataset": "deals", "title": "Deals", "audiences": ["all", "mgmt"]},
+        ["dataset", "create", CFG, "--title=Deals", "--audiences=all,mgmt", BY_, "--", "deals"],
+    ),
+    (
+        "dataset.create",
+        {"dataset": "deals", "title": "-x", "audiences": ["all"], "description": "d"},
+        ["dataset", "create", CFG, "--title=-x", "--audiences=all", "--description=d", BY_, "--", "deals"],
+    ),
+    (
+        "dataset.add_column",
+        {"dataset": "deals", "column": "amount", "type": "number"},
+        ["dataset", "add-column", CFG, "--type=number", BY_, "--", "deals", "amount"],
+    ),
+    (
+        "dataset.add_column",
+        FULL_COLUMN,
+        [
+            "dataset", "add-column", CFG, "--type=choice", "--label=Stage", "--choices=a,b",
+            "--ref=accounts", "--source-name=Stage__c", "--filterable", "--embed", "--sensitive",
+            "--indexed", BY_, "--", "deals", "stage",
+        ],
+    ),
+    (
+        "dataset.rename_column",
+        {"dataset": "deals", "column": "a", "new_name": "b"},
+        ["dataset", "rename-column", CFG, BY_, "--", "deals", "a", "b"],
+    ),
+    (
+        "dataset.drop_column",
+        {"dataset": "deals", "column": "a", "confirm": True},
+        ["dataset", "drop-column", CFG, "--yes", BY_, "--", "deals", "a"],
+    ),
+    (
+        "dataset.drop_column",
+        {"dataset": "deals", "column": "a", "confirm": False},
+        ["dataset", "drop-column", CFG, BY_, "--", "deals", "a"],
+    ),
+    (
+        "dataset.set_flags",
+        {"dataset": "deals", "column": "a", "filterable": True, "embed": False},
+        ["dataset", "set-flags", CFG, "--filterable", "--no-embed", BY_, "--", "deals", "a"],
+    ),
+    (
+        "dataset.set_flags",
+        {
+            "dataset": "deals", "column": "a", "filterable": False, "embed": True, "sensitive": False,
+            "indexed": True, "label": "L", "source_name": "S",
+        },
+        [
+            "dataset", "set-flags", CFG, "--no-filterable", "--embed", "--no-sensitive", "--indexed",
+            "--label=L", "--source-name=S", BY_, "--", "deals", "a",
+        ],
+    ),
+    (
+        "dataset.set_choices",
+        {"dataset": "deals", "column": "stage", "choices": ["x", "y"]},
+        ["dataset", "set-choices", CFG, BY_, "--", "deals", "stage", "x,y"],
+    ),
+    ("dataset.set", {"dataset": "deals"}, ["dataset", "set", CFG, BY_, "--", "deals"]),
+    (
+        "dataset.set",
+        {
+            "dataset": "deals", "title": "T", "description": "D", "title_column": "name",
+            "audiences": ["all"], "max_outdated_percent": 5, "history": True, "confirm": True,
+        },
+        [
+            "dataset", "set", CFG, "--title=T", "--description=D", "--title-column=name",
+            "--audiences=all", "--max-outdated-percent=5", "--history", "--yes", BY_, "--", "deals",
+        ],
+    ),
+    (
+        "dataset.set",
+        {"dataset": "deals", "history": False, "title_column": ""},
+        ["dataset", "set", CFG, "--title-column=", "--no-history", BY_, "--", "deals"],
+    ),
+]
+
+DATASET_REFUSALS = [
+    ("dataset.create", {"dataset": "Bad", "title": "T", "audiences": ["all"]}),
+    ("dataset.create", {"dataset": "-x", "title": "T", "audiences": ["all"]}),
+    ("dataset.create", {"dataset": "deals", "title": "T", "audiences": []}),
+    ("dataset.create", {"dataset": "deals", "title": "T", "audiences": ["owners"]}),
+    ("dataset.create", {"dataset": "deals", "title": "", "audiences": ["all"]}),
+    ("dataset.create", {"dataset": "deals", "title": "a\nb", "audiences": ["all"]}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "json"}),
+    ("dataset.add_column", {"dataset": "deals", "column": "A", "type": "text"}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "text", "filterable": "yes"}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "choice", "choices": []}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "choice", "choices": ["a,b"]}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "ref", "ref": "Bad"}),
+    ("dataset.add_column", {"dataset": "deals", "column": "a", "type": "text", "x": 1}),
+    ("dataset.rename_column", {"dataset": "deals", "column": "a", "new_name": "--x"}),
+    ("dataset.drop_column", {"dataset": "deals", "column": "a"}),
+    ("dataset.drop_column", {"dataset": "deals", "column": "a", "confirm": "yes"}),
+    ("dataset.set_flags", {"dataset": "deals", "column": "a", "embed": 1}),
+    ("dataset.set_choices", {"dataset": "deals", "column": "a", "choices": "a,b"}),
+    ("dataset.set", {"dataset": "deals", "max_outdated_percent": 101}),
+    ("dataset.set", {"dataset": "deals", "max_outdated_percent": True}),
+    ("dataset.set", {"dataset": "deals", "max_outdated_percent": -1}),
+    ("dataset.set", {"dataset": "deals", "title_column": "Bad"}),
+    ("dataset.set", {"dataset": "deals", "audiences": []}),
+    ("dataset.set", {"dataset": "deals", "history": "on"}),
+]
+
+
+@pytest.mark.parametrize(("op", "args", "expected"), DATASET_EXAMPLES)
+def test_dataset_op_argv(op, args, expected):
+    valid = validate(op, args, False, None)
+    assert not valid.op.is_config_op and valid.op.needs_by
+    assert argv(valid, "/etc/kh.yaml", "a@b.test") == [
+        "--config=/etc/kh.yaml" if t == CFG else t for t in expected
+    ]
+
+
+@pytest.mark.parametrize(("op", "args"), DATASET_REFUSALS)
+def test_dataset_op_refusals(op, args):
+    with pytest.raises(OpError):
+        validate(op, args, False, None)
+
+
+def test_dataset_ops_refuse_dry_run_and_sha():
+    with pytest.raises(OpError):
+        validate("dataset.set", {"dataset": "deals"}, True, None)
+    with pytest.raises(OpError):
+        validate("dataset.set", {"dataset": "deals"}, False, SHA)
+
+
+def test_dataset_ops_need_the_signed_in_email():
+    with pytest.raises(OpError):
+        argv(validate("dataset.set", {"dataset": "deals"}, False, None), "/etc/kh.yaml")
+
+
+@pytest.mark.parametrize(("op", "args", "expected"), DATASET_EXAMPLES)
+def test_dataset_argv_parses_with_the_dataset_parser(op, args, expected):
+    from knowledge_hub.datasets.cli import build_parser
+
+    out = argv(validate(op, args, False, None), "/etc/kh.yaml", "a@b.test")
+    assert out[0] == "dataset"
+    ns = build_parser().parse_args(out[1:])
+    assert ns.by == "a@b.test"
+    assert str(ns.config) == "/etc/kh.yaml"
+
+
+def test_ops_table_has_32_operations():
+    assert len(OPS) == 32
 
 
 def test_every_op_has_an_example():
-    covered = {e[0] for e in EXAMPLES} | {e[0] for e in INPROC}
+    covered = {e[0] for e in EXAMPLES} | {e[0] for e in INPROC} | {e[0] for e in DATASET_EXAMPLES}
     assert covered == set(OPS)
 
 

@@ -15,7 +15,7 @@ from knowledge_hub.panel.settings import PanelSettings
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "deploy" / "backup-kh.sh"
-TABLES = ["records"]
+TABLES = ["records", "datasets", "columns", "saved_queries", "dataset_syncs", "bi_roles"]
 
 
 def test_example_config_loads():
@@ -42,7 +42,8 @@ def test_backup_script_syntax():
 def test_backup_script_content():
     text = SCRIPT.read_text()
     for t in TABLES:
-        assert re.search(rf"\b{t}\b", text), t
+        assert re.search(rf"-t\s+kh\.{t}\b", text), t
+    assert re.search(r"-t\s+'kh_data\.\*'", text)  # pg_dump ignores -n when -t is given
     assert "--enable-row-security" in text
     assert "--inserts" in text
     assert "set -euo pipefail" in text
