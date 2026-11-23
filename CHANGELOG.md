@@ -4,6 +4,24 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- Structured datasets owned by the hub: migration `0007_datasets.sql` (catalog, a typed table per dataset in schema `kh_data` with forced row-level security, saved queries, sync state and BI role mapping) and the `kh dataset` commands (`create`, `add-column`, `rename-column`, `drop-column`, `set-flags`, `set-choices`, `set`, `import`, `list`, `show`, `bi-role`).
+- Six tools: `list_datasets`, `query`, `save_query`, `upsert_rows`, `delete_rows` and `finish_sync` (the write tools are for hub keys only), with four settings `KH_QUERY_TIMEOUT_MS`, `KH_QUERY_MAX_ROWS`, `KH_DATASET_HISTORY_DAYS` and `KH_BI_ENABLED`.
+- One T3 search hit per dataset row, with a `row` id that `get_doc` opens as `row:<dataset>:<uuid>`; `get_doc` answers `id must be doc:<uuid>, rec:<uuid> or row:<dataset>:<uuid>` for a malformed id.
+- Opt-in dataset history, read with `query(as_of=...)` (a plain date means midnight UTC) and purged by `kh daily`.
+- Read-only per-group BI database logins (`kh dataset bi-role`, off unless `KH_BI_ENABLED=true`), and `kh setup plan` lines for them.
+- The panel's Datasets tab.
+- `docs/feeds.md`, a guide to feeding a dataset from n8n with the Salesforce reference recipe.
+- `deploy/backup-kh.sh` also dumps the dataset catalog, saved queries, sync state, BI mapping and every table of `kh_data`.
+
+### Changed
+
+- Upgrading needs the NOLOGIN role `kh_bi` before `kh migrate`: run `kh setup apply --only postgres` with `KH_SETUP_PG_ADMIN_DSN_FILE`, or create it as an administrator. There is no rollback script for 0007.
+- `ingest_record` refuses a `source` that starts with `dataset:`; `mark_record_outdated` and `kh move` refuse dataset row records.
+- `kh daily` prints one more count: `; dataset history rows purged: N`.
+- Documentation: the panel has six tabs, and the README, design, configuration, runbook and deployment guide describe datasets and BI access.
+
 ## [0.6.1] - 2026-11-20
 
 ### Changed

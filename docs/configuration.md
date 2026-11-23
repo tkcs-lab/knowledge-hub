@@ -146,6 +146,10 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body. |
 | `KH_PROPOSE_MAX_OPEN` | `20` | Open bot pull requests per repo; above it `propose_doc` is refused. |
 | `KH_RATE_LIMIT_PER_MIN` | `120` | Tool calls per minute per caller `sub`. The bucket is in memory, so the limit is per process. |
+| `KH_QUERY_TIMEOUT_MS` | `3000` | 100 to 5000: `statement_timeout` of one `query` call; above it the answer is `query took too long; narrow it with where or limit`. |
+| `KH_QUERY_MAX_ROWS` | `1000` | 1 to 5000: the largest `limit` of `query`; more rows set `truncated`. |
+| `KH_DATASET_HISTORY_DAYS` | `730` | 1 to 36500: days `kh daily` keeps closed row versions of datasets that have `history` on. |
+| `KH_BI_ENABLED` | `false` | `true` allows `kh dataset bi-role` (read-only per-group database logins for BI tools; see the runbook, "BI access"). The command also needs `KH_SETUP_PG_ADMIN_DSN_FILE`. |
 | `KH_METRICS_TOKEN_FILE` | none | Bearer token for `/metrics`. Without it the route does not exist. The file is read on every request, so the token can be rotated. |
 
 ### Usage log
@@ -164,7 +168,7 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | Command | Use |
 |---|---|
 | `kh serve [--port 8080]` | Run the HTTP app and the job worker. Exits with code 75 after finishing running requests and jobs (up to 60 s) when `kh.yaml` changes validly and `KH_CONFIG_WATCH_SECONDS` is above 0; the restart policy of the container starts it again. `/healthz` answers `ok` with the header `X-KH-Config-Digest`. |
-| `kh panel serve [--port 8081]` | Run the admin panel: sign-in, the five tabs and the write path through the admin commands. One process; see "Admin panel" in the runbook. Exit 2 on a settings error. |
+| `kh panel serve [--port 8081]` | Run the admin panel: sign-in, the six tabs and the write path through the admin commands. One process; see "Admin panel" in the runbook. Exit 2 on a settings error. |
 | `kh migrate` | Apply the pending migrations as `kh_migrator`. Refuses a database that predates the baseline. |
 | `kh setup plan\|apply --config kh.yaml` | Check or build the environment; see below. |
 | `kh label add\|rename\|archive\|unarchive\|remove\|list` | Edit the labels of `kh.yaml` and apply the change; see `kh admin commands`. |
@@ -178,10 +182,11 @@ Removed settings: `KH_FORGEJO_ORG` (now `org:` in `kh.yaml`), `KH_MAX_RAW_BYTES`
 | `kh directory plan` | Print group, person and skip counts and one `skip <group> <role> <who>: <reason>` line per skip; exit 1 when the snapshot is missing or stale. |
 | `kh directory people [--json]` | The effective people with `login`, `email`, `source` (`static` or `directory`), `groups` and `approver_of`. |
 | `kh directory show` | The provider and the snapshot's age and size, or `snapshot: none`. |
+| `kh dataset create\|add-column\|rename-column\|drop-column\|set-flags\|set-choices\|set\|import\|list\|show\|bi-role` | Define and change datasets and their columns, load a CSV file, and manage BI logins; administrators only (`--by` must be in `admins`; `list`, `show` and `bi-role list` need no `--by`). `--config` defaults to `KH_CONFIG_FILE`. Prints `dataset: <done>` or `dataset: <reason>`; exit 0 done, 1 refused, 2 bad arguments (a `drop-column` or history removal without `--yes`, `--finish` without `--sync-id`, a malformed `--sync-id`). Details are in the runbook, "Datasets" and "BI access", and in [feeds](feeds.md). |
 | `kh move ID --from G --to H --by EMAIL [--config FILE]` | Move a record (`rec:<uuid>`) at once, or a document (`doc:<uuid>`) with two pull requests, from group G to group H. `--by` must be in `admins` of `kh.yaml` and is attribution only; the administrator need not hold either group. Prints one JSON line. Exit 0 moved; 1 refused (`move: <email> is not an administrator` or the refusal text); 2 bad arguments or config; 3 the removal pull request of a document could not be opened (run it again). |
 | `kh rebuild [--repo R] [--queue]` | Forget the indexed head and sync again. Idempotent. With `--repo R --queue` (without `--repo` it exits 2) it only deletes the head and queues one `git_push` job, which the hub's own worker runs; it prints `queued rebuild of R`, or `rebuild of R is already queued` when a queued job, or a running one younger than an hour, exists. `--queue` needs no answering Ollama or Forgejo server, but `KH_OLLAMA_URL` must be set when `KH_EMBED_PROVIDER` is `ollama` (and `KH_FORGEJO_INDEXER_TOKEN_FILE` when `KH_FORGEJO_URL` is set), as for `kh serve`. |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift (`head of <repo> is <a>, indexed <b>`, `document <path> in <repo> has no chunks`, `record <id> has no chunks`, `document <path> in <repo> has audience <a>, config says <b>; run kh rebuild --repo <repo>`). |
-| `kh daily` | Recompute the `stale` flags, purge expired OAuth rows and delete usage events past `KH_USAGE_RETENTION_DAYS`; it prints `stale flags changed: N; identity rows purged: N; usage events purged: N`. |
+| `kh daily` | Recompute the `stale` flags, purge expired OAuth rows and delete usage events past `KH_USAGE_RETENTION_DAYS` and dataset history versions past `KH_DATASET_HISTORY_DAYS`; it prints `stale flags changed: N; identity rows purged: N; usage events purged: N; dataset history rows purged: N`. |
 | `kh requeue-embeddings` | Queue an `embed_record` job for every record without chunks. |
 | `kh lint FILE...` | Offline frontmatter check, no settings or config needed; exit 1 on a problem. |
 

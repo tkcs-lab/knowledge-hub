@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Backup of the knowledge hub's non-rebuildable data.
 #
-# Dumps only kh.records. Groups and labels come from kh.yaml (`kh setup apply`); documents and chunks
-# are rebuilt from Forgejo with `kh rebuild`. The blob bucket is mirrored.
+# Dumps kh.records, the dataset catalog (kh.datasets, kh.columns, kh.saved_queries, kh.dataset_syncs,
+# kh.bi_roles) and every table of schema kh_data (rows and history). Groups and labels come from kh.yaml
+# (`kh setup apply`). pg_dump ignores -n when -t is given, so the kh_data tables are selected with -t 'kh_data.*'.
+# Documents and chunks are rebuilt from Forgejo with `kh rebuild`. The blob bucket is mirrored.
 #
 # Restore (as the Postgres superuser, after `kh migrate` on an empty database), in this order:
 #   pg_restore --no-owner -d kh kh-t2t3-<date>.dump     (INSERT format, so RLS does not block it)
@@ -38,7 +40,8 @@ export AWS_DEFAULT_REGION="${KH_S3_REGION:-garage}"
 
 pg_dump -Fc --no-owner --enable-row-security --inserts \
   -h "$DB_HOST" -p "$DB_PORT" -U kh_migrator -d "$DB_NAME" \
-  -t kh.records \
+  -t kh.records -t kh.datasets -t kh.columns -t kh.saved_queries -t kh.dataset_syncs -t kh.bi_roles \
+  -t 'kh_data.*' \
   -f "${BACKUP_DIR}/kh-t2t3-${DATE}.dump"
 
 aws s3 sync --endpoint-url "$KH_S3_ENDPOINT" "s3://$KH_S3_BUCKET" "${BACKUP_DIR}/blobs/"

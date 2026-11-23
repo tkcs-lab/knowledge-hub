@@ -24,13 +24,14 @@ The admin panel is `kh panel serve`, a separate service of the same image (`know
 4. Start the `knowledge-hub-panel` service with the `KH_PANEL_*` variables of [configuration](configuration.md#admin-panel-kh-panel-serve-only). Every kh container (`knowledge-hub`, `-directory`, `-panel`, one-off commands) must run the same image tag: an older image refuses a `kh.yaml` that has `admins`.
 5. Open the panel address, sign in, and check that a person who is not in `admins` sees `not an administrator`.
 
-**The five tabs.**
+**The six tabs.**
 
 | Tab | What it does |
 |---|---|
 | Groups | Per group: members, approvers, directory references and the amount of information (documents by tier, records, chunks, stale and outdated counts, last indexing time). Add, archive, unarchive and remove a group; add and remove members and approvers; add and remove people. |
 | Labels | The labels with their document, record and technical repo counts. Add, describe, archive, unarchive and remove a label. |
 | Repos | Group repos and technical repos with the indexed head. Add, change `dirs` and `labels` of, and remove a technical repo. |
+| Datasets | The datasets with title, groups, column count and estimated rows; per dataset its columns with flags. New dataset, Add column, Edit flags (one toggle per flag), Rename and Drop (asks to confirm). Changes run `kh dataset ...` as the signed-in administrator. |
 | Pipeline | The job counts, failed jobs and alerts. Rebuild a repo, Retry a failed job or every dead job, reclaim jobs stuck in `running`, requeue missing embeddings. |
 | Health | Checks for `config`, `database`, `migrations`, `hub`, `queue`, `alerts`, `indexed`, `embeddings` and `directory`, plus the buttons `setup plan` and `kh check`. |
 
@@ -52,10 +53,35 @@ The admin panel is `kh panel serve`, a separate service of the same image (`know
 | Re-index after review | `kh rebuild` or `kh rebuild --repo kb-all`. Idempotent. |
 | Reassign a repo to another group | Change `repo` of the group in `kh.yaml`, wait for the restart, then run `kh rebuild --repo <repo>` (or wait for the next push): stored documents of that repo are read again under the new group. `kh check` names the drifted documents (`has audience <a>, config says <b>; run kh rebuild --repo <repo>`). |
 | Look for drift | `kh check`. Exit 1 means drift; read the printed lines. |
-| Daily job | `kh daily`, once a day from a scheduler: recomputes `stale`, purges expired OAuth rows and deletes usage events past `KH_USAGE_RETENTION_DAYS`. |
+| Daily job | `kh daily`, once a day from a scheduler: recomputes `stale`, purges expired OAuth rows and deletes usage events past `KH_USAGE_RETENTION_DAYS` and dataset history past `KH_DATASET_HISTORY_DAYS`. |
 | Queue missing embeddings | `kh requeue-embeddings` prints the number queued. It also re-queues a record whose job was left `running` by a worker that stopped mid-job. |
 | Change the embedding model or chunker | Change `KH_EMBED_MODEL` or `KH_CHUNKER_VERSION`, restart, run `kh setup apply --only ollama`, `kh rebuild`, then `kh requeue-embeddings`. |
 | Check a document before a pull request | `kh lint path/to/file.md`. |
+
+### Datasets
+
+A dataset is a typed table owned by the hub; a workflow fills it (see [feeds](feeds.md)). All commands need `--by <administrator email>` and run as the panel's Datasets tab does. Datasets cannot be renamed or deleted.
+
+- **Create.** `kh dataset create sf_opportunities --title "Opportunities" --audiences sales --by admin@example.com`. Names are lower case letters, digits and `_`, starting with a letter. Each audience must be an active group.
+- **Add a column.** `kh dataset add-column sf_opportunities amount --type number --filterable --source-name Amount --by ...`. Types: `text`, `number`, `date`, `bool`, `choice` (`--choices a,b`), `ref` (`--ref <dataset>`). Rename with `rename-column`; `drop-column ... --yes` deletes the column and its values.
+- **Flags.** `kh dataset set-flags <dataset> <column> --filterable --no-embed --sensitive --indexed --label L --source-name S`. A `--no-<flag>` clears one. Changing `embed` or `sensitive` refreshes the mirrored search text of every row in the background. A `sensitive` column never reaches search text, the embedder or the title; `query`, `get_doc` and BI logins still return it.
+- **Dataset settings.** `kh dataset set <dataset> --title-column name --max-outdated-percent 20 --audiences sales,mgmt --history`. `--no-history` drops the history table and needs `--yes`. Removing a group from `--audiences` deletes that group's search records for the dataset at once (the rows stay in the table).
+- **Refresh.** After a flag change the indexer's `dataset_refresh` job rewrites the search records; watch it in the Pipeline tab.
+- **Import a file.** `kh dataset import <dataset> file.csv --audience sales --by ... [--key-column key] [--updated-column source_updated_at] [--sync-id S --finish] [--force]`. The first row holds headers: the key column, the timestamp column (the file's modification time when absent) and column names or source names. Batches of 500 are sent as the administrator; a bad row prints `dataset: line <n>: <problem>` and exit 1, and earlier batches stay. `--finish` needs `--sync-id` (exit 2) and refuses an empty file. The last line is a JSON summary `{"inserted", "outdated", "rows", "updated"}`.
+- **Group removal.** Row records count as records, so `kh setup apply --prune` and `kh group remove` cannot remove a group that still has dataset rows (`group <g>: still has N records`).
+- **History.** With `--history` on, `query(as_of=...)` reads old versions: a plain date means midnight UTC. `kh daily` purges versions older than `KH_DATASET_HISTORY_DAYS`.
+
+### BI access
+
+A BI tool (Metabase and the like) can read one group's rows with a read-only Postgres login. It is off by default: set `KH_BI_ENABLED=true` and `KH_SETUP_PG_ADMIN_DSN_FILE` (a superuser, or a role with CREATEROLE and ADMIN OPTION on `kh_bi`) for the process that runs the command, and allow the BI network in `pg_hba`.
+
+- **Create.** `kh dataset bi-role create sales --by admin@example.com` prints `role kh_bi_<10 characters>` and `password <password>`. The password is shown once and never logged. The login sees only the `kh_data` rows of its group (`SET kh.audiences` or `SET ROLE` change nothing, since the group comes from the login), may only `SELECT`, has 5 connections and a 30 s statement timeout.
+- **Rotate.** `kh dataset bi-role rotate kh_bi_<...> --by ...` sets a new password and ends the role's sessions.
+- **Drop.** `kh dataset bi-role drop kh_bi_<...> --by ... --yes`.
+- **List.** `kh dataset bi-role list [--json]`.
+- **Leavers.** When a person who knew a BI password leaves, rotate that role. A group's logins stop working when the role is dropped.
+- `kh setup plan` prints `i bi role <name> for <group>` per mapped role. A cluster role matching `kh_bi_<10 characters>` without a mapping prints `! bi role <name> has no mapping`, and `kh setup apply` then exits 2; drop that role or restore its mapping.
+- Residuals are listed in [design](design.md), "Datasets".
 
 ### Adding a group
 
@@ -186,12 +212,12 @@ A move is not a purge: the old repo's history, past usage queries and backups ke
 
 ## Backup and restore
 
-Documents and chunks are rebuilt from Forgejo, groups and labels from `kh.yaml`, the directory snapshot by the next sync. `deploy/backup-kh.sh` writes `kh-t2t3-<date>.dump` (custom format, INSERT statements) of `kh.records` and mirrors the blob bucket into `<BACKUP_DIR>/blobs/`; back both up off the box (restic).
+Documents and chunks are rebuilt from Forgejo, groups and labels from `kh.yaml`, the directory snapshot by the next sync. `deploy/backup-kh.sh` writes `kh-t2t3-<date>.dump` (custom format, INSERT statements) of `kh.records`, the dataset catalog and saved queries (`kh.datasets`, `kh.columns`, `kh.saved_queries`, `kh.dataset_syncs`, `kh.bi_roles`) and every table of schema `kh_data` (rows and history), and mirrors the blob bucket into `<BACKUP_DIR>/blobs/`; back both up off the box (restic).
 
 **Not in the backup and not rebuildable.** `kh.api_keys`: every hub key is lost; create the keys again with `kh key create` and switch every n8n credential. `kh.oauth_*`: every Claude connector signs in again. `kh.record_moves`: do not re-send a record that was moved, because a re-sent record is accepted again. `kh.usage_events`: lost.
 
 1. Start with an empty database: run `kh setup apply --only postgres --config kh.yaml` when `directory.provider` is set (a plain apply ends with `! directory: snapshot missing` and exit 2), which creates the roles, the database, the schema and the groups; otherwise `kh setup apply --config kh.yaml` (or create the roles and run `kh migrate`), which also creates the labels.
-2. As the Postgres superuser restore the records: `pg_restore --no-owner -d kh kh-t2t3-<date>.dump` (INSERT format, so RLS does not block it).
+2. As the Postgres superuser restore the records and datasets: `pg_restore --no-owner -d kh kh-t2t3-<date>.dump` (INSERT format, so RLS does not block it). It brings back the row records of datasets together with their rows, so search finds them again after step 5 without a refresh. A BI login's role itself is not in the dump: after a restore into a new cluster drop and create the BI roles again (`kh dataset bi-role`); `kh setup plan` shows mappings without a role.
 3. Copy the blobs back: `aws s3 sync "<BACKUP_DIR>/blobs/" s3://<bucket> --endpoint-url <endpoint>`.
 4. If `directory.provider` is set run `kh directory sync --once`, then `kh setup apply --config kh.yaml`, then `kh rebuild` for the git-derived tables.
 5. Run `kh requeue-embeddings`: chunks are not in the dump, so this is required after every restore.
@@ -235,4 +261,4 @@ The change to `.github/workflows/release.yml` that builds and attaches the wheel
 - **Zero required approvals.** The approver must review the final diff.
 - **Scan timing.** Exact vector scans take time in proportion to the number of hidden rows.
 - **Per-process limits.** The rate limiter is not shared between processes.
-- **Backups omit hub keys, OAuth state and move tombstones.** See "Backup and restore"; the dump holds `kh.records` only.
+- **Backups omit hub keys, OAuth state and move tombstones.** See "Backup and restore"; the dump holds `kh.records`, the dataset tables and the dataset catalog only.
