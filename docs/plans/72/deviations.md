@@ -29,7 +29,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p6-query-builder
 
-- pending
+- retry: Worker ended its first turn without a report and was nudged once; it then reported done
+- worker: Worker reported an accidental unpushed ruff format in its own tree; the pushed commit is unaffected
 
 ## p7-query-tools
 
