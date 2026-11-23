@@ -190,6 +190,13 @@ async def test_oauth_write_scope_never_gets_ingest_record(parts):
     assert "ingest_record" not in caller.tools
 
 
+async def test_oauth_write_scope_has_no_row_tools(parts):
+    provider, membership = parts
+    provider.tokens["kha_s"] = access(scopes=["kh:read", "kh:write"])
+    caller, _ = await resolver_for(provider, membership).resolve("kha_s")
+    assert not {"upsert_rows", "delete_rows", "finish_sync"} & set(caller.tools)
+
+
 async def test_no_scope_means_no_tools(parts):
     provider, membership = parts
     provider.tokens["kha_s"] = access(scopes=[])
