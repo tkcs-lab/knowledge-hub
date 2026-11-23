@@ -177,12 +177,13 @@ The search similarity floor is calibrated once after the first deploy: see [runb
 ## Upgrade
 
 1. All kh services (`knowledge-hub`, `knowledge-hub-directory`, `knowledge-hub-panel`, one-off commands) run the same image tag. Pin the digest: `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag.
-2. `kh serve` does not check the schema. Run `kh setup apply --only postgres` (or `kh migrate`) with the new image before you restart anything.
-3. Restart `kh serve`, the sync service and the panel.
-4. `kh setup plan` expects exit 0; then run `kh check`.
-5. `kh migrate` and the postgres step refuse a database that holds a migration the image does not ship, with `database predates the baseline; a fresh install is required` (`kh serve` itself checks nothing). An older image says the same after migration 0006; the rollback is in the [identity runbook](runbook-identity.md), "Moving from PrivacyFence".
-6. The identity release (OIDC sign-in, directory, hub keys): follow the [identity runbook](runbook-identity.md), "Moving from PrivacyFence".
-7. Without Docker: `pip install knowledge_hub-X.Y.Z-py3-none-any.whl`, then `kh setup plan --config kh.yaml`. The wheel does not pin its dependencies.
+2. Migration 0007 (datasets) needs the NOLOGIN role `kh_bi` first: run `kh setup apply --only postgres` with `KH_SETUP_PG_ADMIN_DSN_FILE` set (it creates `kh_bi`), or create it as a Postgres administrator with `CREATE ROLE kh_bi NOLOGIN`. There is no rollback script for 0007 (it is for a fresh deploy). BI logins (`kh dataset bi-role`, off unless `KH_BI_ENABLED=true`) reach Postgres only from the BI network: allow that network in `pg_hba` and keep it closed to the rest.
+3. `kh serve` does not check the schema. Run `kh setup apply --only postgres` (or `kh migrate`) with the new image before you restart anything.
+4. Restart `kh serve`, the sync service and the panel.
+5. `kh setup plan` expects exit 0; then run `kh check`.
+6. `kh migrate` and the postgres step refuse a database that holds a migration the image does not ship, with `database predates the baseline; a fresh install is required` (`kh serve` itself checks nothing). An older image says the same after migration 0006; the rollback is in the [identity runbook](runbook-identity.md), "Moving from PrivacyFence".
+7. The identity release (OIDC sign-in, directory, hub keys): follow the [identity runbook](runbook-identity.md), "Moving from PrivacyFence".
+8. Without Docker: `pip install knowledge_hub-X.Y.Z-py3-none-any.whl`, then `kh setup plan --config kh.yaml`. The wheel does not pin its dependencies.
 
 ## Backup and restore
 
