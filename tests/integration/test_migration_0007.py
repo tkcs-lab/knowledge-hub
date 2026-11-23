@@ -150,3 +150,24 @@ async def test_bi_group_comes_from_the_session_user(mig, fresh_db, app_pool):
 def test_dataset_refresh_jobs_and_the_queued_index(mig):
     mig.execute("INSERT INTO kh.index_jobs (kind, payload) VALUES ('dataset_refresh', '{\"id\": \"x\"}')")
     assert mig.execute("SELECT to_regclass('kh.index_jobs_queued_idx') IS NOT NULL").fetchone() == (True,)
+
+
+@pytest.mark.parametrize("sig", ["dataset_mirror_row(text, jsonb)", "dataset_row_sync()",
+                                 "dataset_row_guard()", "dataset_history_row()"])
+def test_app_holds_no_execute_on_the_dataset_definers(mig, sig):
+    got = mig.execute(
+        "SELECT has_function_privilege('kh_app', %s::regprocedure, 'EXECUTE'),"
+        " has_function_privilege('kh_indexer', %s::regprocedure, 'EXECUTE')",
+        (f"kh.{sig}", f"kh.{sig}"),
+    ).fetchone()
+    assert got == (False, False)
+
+
+async def test_app_cannot_call_the_row_mirror_directly(mig, app_pool):
+    denied = "permission denied for function dataset_mirror_row"
+    with pytest.raises(errors.InsufficientPrivilege, match=denied):
+        async with caller_tx(app_pool, alice_all) as conn:
+            await conn.execute(
+                "SELECT kh.dataset_mirror_row('deals', %s::jsonb)",
+                ('{"id": "00000000-0000-0000-0000-000000000001", "title": "forged"}',),
+            )

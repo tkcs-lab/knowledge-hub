@@ -112,7 +112,6 @@ BEGIN
 END $$;
 
 REVOKE EXECUTE ON FUNCTION kh.dataset_row_guard() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION kh.dataset_row_guard() TO kh_app;
 
 CREATE FUNCTION kh.dataset_mirror_row(ds text, r jsonb) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
@@ -186,7 +185,6 @@ BEGIN
 END $$;
 
 REVOKE EXECUTE ON FUNCTION kh.dataset_mirror_row(text, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION kh.dataset_mirror_row(text, jsonb) TO kh_app;
 
 CREATE FUNCTION kh.dataset_refresh(ds text, after uuid, n int) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
@@ -225,7 +223,6 @@ BEGIN
 END $$;
 
 REVOKE EXECUTE ON FUNCTION kh.dataset_row_sync() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION kh.dataset_row_sync() TO kh_app;
 
 -- Redefined as in 0005, plus the refusal of row records.
 
@@ -393,7 +390,6 @@ BEGIN
 END $$;
 
 REVOKE EXECUTE ON FUNCTION kh.dataset_history_row() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION kh.dataset_history_row() TO kh_app;
 
 CREATE FUNCTION kh.dataset_history_purge(days int) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
