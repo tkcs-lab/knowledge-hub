@@ -38,7 +38,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p8-get-doc-rows
 
-- pending
+- worker: Two existing rec: assertions in test_tool_get_doc.py now expect a row key, since rec: answers gain row (file is in touches)
+- worker: Malformed doc:, rec: and row: ids give BAD_GET_ID; BAD_ID and do_move unchanged
 
 ## p9-history
 
