@@ -54,6 +54,7 @@ MOVE_LINKED = "another item names this one as its replacement or successor; clea
 RECORD_MOVED = "a record with this source and source_ref was moved out of this audience"
 MOVE_TEXT = "this document cannot be moved by the tool; move it by hand"
 TOOL_NOT_ALLOWED = "this credential may not call this tool"
+DATASET_RECORD = "this record mirrors a dataset row; change the row instead"
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 
 

@@ -59,6 +59,7 @@ class Cluster:
 def bootstrap_roles(cluster: Cluster) -> None:
     """Create roles, database ``kh`` and the vector extension as the sandbox superuser."""
     with psycopg.connect(cluster.admin_dsn(), autocommit=True) as conn:
+        conn.execute("CREATE ROLE kh_bi NOLOGIN NOSUPERUSER NOBYPASSRLS")
         for role in LOGIN_ROLES:
             conn.execute(f"CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS")
         conn.execute("CREATE DATABASE kh OWNER kh_migrator")

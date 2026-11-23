@@ -19,6 +19,7 @@ log = logging.getLogger("knowledge_hub.tools")
 NOT_HELD_SQLSTATE = "P0K08"
 WRONG_GROUP_SQLSTATE = "P0K09"
 LINKED_SQLSTATE = "P0K0A"
+DATASET_SQLSTATE = "P0K0C"
 
 TITLE_MAX = 120
 
@@ -39,6 +40,8 @@ async def _move_record(call: ToolCall, key: str, from_group: str, to_group: str)
             raise kh_error("move_wrong_group", errors.MOVE_WRONG_GROUP) from None
         if exc.sqlstate == LINKED_SQLSTATE:
             raise kh_error("move_linked", errors.MOVE_LINKED) from None
+        if exc.sqlstate == DATASET_SQLSTATE:
+            raise kh_error("dataset_record", errors.DATASET_RECORD) from None
         raise
     if row is None or row[0] is None:
         raise kh_error("not_found", errors.NOT_FOUND)
