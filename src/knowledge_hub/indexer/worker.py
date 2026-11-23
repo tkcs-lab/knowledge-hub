@@ -84,14 +84,19 @@ class Worker:
         if not isinstance(record_id, str):
             raise ValueError("embed_record job without an id")
         async with self.pool.connection() as conn:
-            cur = await conn.execute("SELECT audience, blob_key FROM kh.records WHERE id = %s", (record_id,))
+            cur = await conn.execute(
+                "SELECT audience, blob_key, excerpt FROM kh.records WHERE id = %s", (record_id,)
+            )
             row = await cur.fetchone()
         if row is None:
             return  # the record is gone; nothing to index
-        audience, blob_key = row
-        if self.blobs is None:
-            raise RuntimeError("no blob store configured")
-        body = (await self.blobs.get(blob_key)).decode("utf-8", errors="replace")
+        audience, blob_key, excerpt = row
+        if blob_key == "":
+            body = excerpt  # a dataset row mirror has no blob; its text is the excerpt
+        else:
+            if self.blobs is None:
+                raise RuntimeError("no blob store configured")
+            body = (await self.blobs.get(blob_key)).decode("utf-8", errors="replace")
         nul = body.count("\x00")
         if nul:
             body = body.replace("\x00", "")
@@ -122,6 +127,20 @@ class Worker:
                     (record_id, c.ordinal, c.heading_path, c.text, c.content_sha, literal, model),
                 )
 
+    async def _dataset_refresh(self, payload: Any) -> None:
+        """Re-mirror every row of one dataset, 1000 rows per transaction."""
+        ds = payload.get("dataset") if isinstance(payload, dict) else None
+        if not isinstance(ds, str):
+            raise ValueError("dataset_refresh job without a dataset")
+        after: str | None = None
+        while True:
+            async with self.pool.connection() as conn, conn.transaction():
+                cur = await conn.execute("SELECT kh.dataset_refresh(%s, %s::uuid, 1000)", (ds, after))
+                got = await cur.fetchone()
+            after = None if got is None or got[0] is None else str(got[0])
+            if after is None:
+                return
+
     async def _git_push(self, repo: str | None) -> None:
         if repo is None:
             raise ValueError("git_push job without a repo")
@@ -149,6 +168,8 @@ class Worker:
             await self._git_push(repo)
         elif kind == "embed_record":
             await self._embed_record(payload)
+        elif kind == "dataset_refresh":
+            await self._dataset_refresh(payload)
         else:
             raise ValueError(f"unknown job kind {kind}")
 
