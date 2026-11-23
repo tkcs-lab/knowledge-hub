@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     query_timeout_ms: int = Field(3000, ge=100, le=5000)
     query_max_rows: int = Field(1000, ge=1, le=5000)
     dataset_history_days: int = Field(730, ge=1, le=36500)
+    bi_enabled: bool = False
 
     public_url: str | None = None
     oidc_issuer: str | None = None

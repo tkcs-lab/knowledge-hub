@@ -29,6 +29,7 @@ def test_defaults():
     assert s.s3_region == "garage"
     assert s.rrf_k == 60 and s.search_pool == 50
     assert s.dev_identity is None and s.db_app_password_file is None
+    assert s.bi_enabled is False
 
 
 def test_usage_settings(monkeypatch):

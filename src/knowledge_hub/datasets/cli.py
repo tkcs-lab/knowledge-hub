@@ -12,9 +12,10 @@ import sys
 from pathlib import Path
 
 import psycopg
+from psycopg.conninfo import make_conninfo
 
 from knowledge_hub.config import KhConfig, load_config
-from knowledge_hub.datasets import ddl
+from knowledge_hub.datasets import bi, ddl
 from knowledge_hub.datasets.importer import ImportRefused, import_csv
 from knowledge_hub.datasets.model import SYNC_RE, Column, Dataset, DatasetError
 from knowledge_hub.deps import build_deps, close_deps
@@ -104,6 +105,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sync-id", default="")
     p.add_argument("--finish", action="store_true")
     p.add_argument("--force", action="store_true")
+
+    bi_p = sub.add_parser("bi-role", help="read-only database logins for BI tools")
+    bi_sub = bi_p.add_subparsers(dest="bi_command", required=True)
+    for name, arg in (("create", "group"), ("rotate", "role"), ("drop", "role")):
+        p = bi_sub.add_parser(name)
+        p.add_argument(arg)
+        p.add_argument("--by", required=True, help="email of the administrator")
+        p.add_argument("--config", type=Path, default=Path(env) if env else None, help="path of kh.yaml")
+        if name == "drop":
+            p.add_argument("--yes", action="store_true")
+    p = bi_sub.add_parser("list")
+    p.add_argument("--json", action="store_true")
 
     for name, help_ in (("list", "list datasets"), ("show", "show a dataset")):
         p = sub.add_parser(name, help=help_)
@@ -233,9 +246,59 @@ async def _import(args: argparse.Namespace, config: KhConfig, email: str) -> dic
         await close_deps(deps)
 
 
+def _admin_dsn(settings) -> str:
+    file = settings.setup_pg_admin_dsn_file
+    if file is None:
+        raise _Refused("KH_SETUP_PG_ADMIN_DSN_FILE is required")
+    return make_conninfo(file.read_text().strip(), dbname=settings.db_name)
+
+
+def _bi(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    if not settings.bi_enabled:
+        raise _Refused("bi roles are disabled; set KH_BI_ENABLED=true")
+    migrator = settings.dsn("migrator")
+    if args.bi_command == "list":
+        roles = bi.list_bi_roles(migrator)
+        if args.json:
+            print(json.dumps(roles, sort_keys=True))
+        else:
+            for r in roles:
+                print(f"{r['role']}\t{r['group']}\t{r['created_at']}")
+        return 0
+    email = args.by.lower()
+    if args.config is None:
+        print("dataset: --config or KH_CONFIG_FILE is required")
+        return 2
+    config = load_config(args.config)
+    if email not in config.admins:
+        raise _Refused(f"{email} is not an administrator")
+    admin = _admin_dsn(settings)
+    if args.bi_command == "create":
+        if not config.is_active(args.group):
+            raise _Refused(f"{args.group} is not an active group")
+        role, password = bi.create_bi_role(admin, migrator, args.group, email)
+        log.info("dataset bi-role create by=%s role=%s group=%s", email, role, args.group)
+    elif args.bi_command == "rotate":
+        role, password = args.role, bi.rotate_bi_role(admin, migrator, args.role)
+        log.info("dataset bi-role rotate by=%s role=%s", email, role)
+    else:
+        if not args.yes:
+            raise _Refused(f"add --yes to drop {args.role}", 2)
+        bi.drop_bi_role(admin, migrator, args.role)
+        log.info("dataset bi-role drop by=%s role=%s", email, args.role)
+        print(f"dataset: dropped {args.role}")
+        return 0
+    print(f"role {role}")
+    print(f"password {password}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.command == "bi-role":
+            return _bi(args)
         if args.command in ("list", "show"):
             return _read(args, load_settings().dsn("migrator"))
         email = args.by.lower()

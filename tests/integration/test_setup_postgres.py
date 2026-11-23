@@ -314,3 +314,30 @@ async def test_group_usage_counts(empty, settings):
         add_record(conn, audience="extra")
         add_record(conn, audience="all")
     assert await s.group_usage("extra") == (2, 1)
+
+
+async def test_bi_roles_in_plan(empty, settings):
+    await step(empty, settings).apply(False)
+    mapped, stray = "kh_bi_aaaaaaaaaa", "kh_bi_bbbbbbbbbb"
+    try:
+        with psycopg.connect(empty.admin_dsn(), autocommit=True) as conn:
+            for role in (mapped, stray):
+                conn.execute(f"CREATE ROLE {role} NOLOGIN IN ROLE kh_bi")
+        with psycopg.connect(mig(empty), autocommit=True) as conn:
+            conn.execute(
+                "INSERT INTO kh.bi_roles (role_name, audience, created_by)"
+                " VALUES (%s, 'all', 'a@example.test')",
+                (mapped,),
+            )
+        s = step(empty, settings)
+        planned = lines(await s.plan())
+        assert f"i bi role {mapped} for all" in planned
+        assert f"! bi role {stray} has no mapping" in planned
+        # the "!" line does not block: apply still runs the database steps
+        assert await run([s], "apply", False) == 2
+        assert f"! bi role {stray} has no mapping" in lines(await s.apply(False))
+        assert pending(mig(empty)) == []
+    finally:
+        with psycopg.connect(empty.admin_dsn(), autocommit=True) as conn:
+            for role in (mapped, stray):
+                conn.execute(f"DROP ROLE IF EXISTS {role}")

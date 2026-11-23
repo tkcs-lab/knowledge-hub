@@ -59,6 +59,27 @@ class PostgresStep:
         cur = await conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (BI_ROLE,))
         return await cur.fetchone() is not None
 
+    async def _bi_logins(self, conn: psycopg.AsyncConnection) -> list[str]:
+        cur = await conn.execute(
+            "SELECT rolname FROM pg_roles WHERE rolname ~ '^kh_bi_[a-z2-7]{10}$' ORDER BY rolname"
+        )
+        return [r[0] for r in await cur.fetchall()]
+
+    async def _bi_lines(self, names: list[str]) -> list[Change]:
+        """``i`` for a mapped BI login, ``!`` for one without a mapping (not blocking)."""
+        try:
+            async with await self._connect(self._settings.dsn("migrator")) as conn:
+                cur = await conn.execute("SELECT role_name, audience FROM kh.bi_roles")
+                mapped = {r: g for r, g in await cur.fetchall()}
+        except psycopg.Error:  # no database yet, or the table arrives with migration 0007
+            return []
+        return [
+            Change("i", f"bi role {n} for {mapped[n]}")
+            if n in mapped
+            else Change("!", f"bi role {n} has no mapping")
+            for n in names
+        ]
+
     async def _has_extension(self, dsn: str) -> bool:
         async with await self._connect(self._db_dsn(dsn)) as conn:
             cur = await conn.execute("SELECT 1 FROM pg_extension WHERE extname = %s", (EXTENSION,))
@@ -94,6 +115,7 @@ class PostgresStep:
         async with conn:
             roles, owner = await self._server_state(conn)
             has_bi = await self._has_bi_role(conn)
+            bi_names = await self._bi_logins(conn)
         for role in ROLES:
             name = f"kh_{role}"
             if name not in roles:
@@ -110,7 +132,10 @@ class PostgresStep:
             out.append(Change(mark, f"extension {EXTENSION}"))  # type: ignore[arg-type]
         elif not await self._has_extension(probe):
             out.append(Change(mark, f"extension {EXTENSION}"))  # type: ignore[arg-type]
-        return out, not refuse_blocks(out)
+        ready = not refuse_blocks(out)
+        if ready and bi_names and owner is not None:
+            out += await self._bi_lines(bi_names)
+        return out, ready
 
     async def _database_changes(self, prune: bool | None) -> list[Change]:
         """Pending migrations and group sync; ``prune`` None means plan only."""
@@ -241,7 +266,7 @@ class PostgresStep:
 
 def refuse_blocks(changes: list[Change]) -> bool:
     """True when a ``!`` line means the database cannot be used yet."""
-    return any(c.prefix == "!" for c in changes)
+    return any(c.prefix == "!" and not c.text.startswith("bi role") for c in changes)
 
 
 def _shipped() -> list[tuple[str, str]]:
