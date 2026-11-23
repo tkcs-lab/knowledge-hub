@@ -34,7 +34,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p7-query-tools
 
-- pending
+- worker: With saved, limit overrides the stored limit only when it differs from the default 100 (plan does not say how to tell an explicit limit)
 
 ## p8-get-doc-rows
 
