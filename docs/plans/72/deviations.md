@@ -70,6 +70,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Final review
 
 - final: kh_app could call SECURITY DEFINER kh.dataset_mirror_row directly and write or delete row records of other groups; grant dropped in fix-1 (also the trigger-function grants)
+- final: fix-1 merged: kh_app grants on dataset_mirror_row, dataset_row_sync, dataset_row_guard and dataset_history_row removed from 0007; test_rls_policies needed no change
 
 ## Finishing
 
