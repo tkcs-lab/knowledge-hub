@@ -32,6 +32,14 @@ def test_defaults():
     assert s.bi_enabled is False
 
 
+def test_record_purge_days(monkeypatch):
+    assert Settings().record_purge_days == 30
+    for bad in ("0", "3651"):
+        monkeypatch.setenv("KH_RECORD_PURGE_DAYS", bad)
+        with pytest.raises(ValidationError):
+            Settings()
+
+
 def test_usage_settings(monkeypatch):
     s = Settings()
     assert s.usage_log is True and s.usage_retention_days == 180
