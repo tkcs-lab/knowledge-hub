@@ -246,13 +246,13 @@ Garage keeps one version of each object, so the mirror is only as old as the las
 Releases follow the `/tld:release` skill. The version lives only in `src/knowledge_hub/__init__.py`.
 
 1. Run `/tld:release`. It moves the `## [Unreleased]` changelog entries under a `## [X.Y.Z] - <date>` heading, bumps `__version__` and opens a `chore/release-<X-Y-Z>` pull request. Review and merge it.
-2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first, once the `ci` workflow has finished on the merge commit. A dry run checks the changelog heading, that `lint`, `test (3.12)`, `test (3.13)` and `image` are green, builds the arm64 image and the wheel and runs a smoke test. It pushes nothing; look under Artifacts for the item `wheel`.
-3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes the image to GHCR by digest only.
+2. The skill dispatches `.github/workflows/release.yml` on `main` with `dry_run` true first, once the `ci` workflow has finished on the merge commit. A dry run checks the changelog heading, that `lint`, `test (3.12)`, `test (3.13)` and `image` are green, builds the arm64 image, the amd64 image (under QEMU) and the wheel and smoke-tests each. It pushes nothing; look under Artifacts for the item `wheel`.
+3. When the dry run is green, the skill dispatches the workflow again with `dry_run` false. The `build` job pushes one image index for linux/arm64 and linux/amd64 to GHCR by digest only, and fails unless the index holds both platforms.
 4. The `publish` job waits for your approval of the `release` environment in GitHub (Actions, the run, "Review deployments"). After you approve, it tags the digest `X.Y.Z`, creates the annotated tag `vX.Y.Z` and a GitHub release whose notes are the changelog section. The release carries the wheel `knowledge_hub-X.Y.Z-py3-none-any.whl`, `SHA256SUMS` and `deploy/kh.example.yaml`.
-5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`.
+5. The image is `ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. There is no `latest` tag. Check the digest with `docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:X.Y.Z`. The tag is one index for both platforms; Docker pulls the one that matches the host.
 6. To roll out, follow [deployment guide](deployment.md), section "Upgrade".
 
-The change to `.github/workflows/release.yml` that builds and attaches the wheel is a protected path: it reaches `main` as a protected-change pull request, reviewed and merged by a person.
+Changes to `.github/workflows/release.yml` (the wheel, the amd64 image) are a protected path: each reaches `main` as a protected-change pull request, reviewed and merged by a person.
 
 ## Accepted risks
 
