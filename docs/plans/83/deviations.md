@@ -15,7 +15,9 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-removal-purge-cli
 
-- pending
+- worker: worker reported none; ran without tld, orchestrator checked roles (none required)
+- review: none
+- scope: scope: tests/integration/test_directory_sync_db.py (stub deps got blobs=None because the daily line now reads deps.blobs)
 
 ## p4-removal-docs
 
