@@ -145,7 +145,7 @@ The message names the pull request's author, which for `propose_doc` is the bot 
 
 ### Changing T0
 
-People do not push to `main`: direct push is off. They open a pull request (in Forgejo, or through `propose_doc`) and an approver of the group merges it. Required approvals are 0, so an approver may merge their own pull request: review the final diff before merging. After the merge Forgejo calls the webhook and the document is indexed within seconds. A pull request opened by `propose_doc` is on a `bot/propose/<uuid>` branch; closing it unmerged changes nothing.
+People do not push to `main`: direct push is off. They open a pull request (in Forgejo, or through `propose_doc`) and an approver of the group merges it. Required approvals are 0, so an approver may merge their own pull request: review the final diff before merging. After the merge Forgejo calls the webhook and the document is indexed within seconds. A pull request opened by `propose_doc` is on a `bot/propose/<uuid>` branch; one opened by `propose_doc_deletion` is on a `bot/delete/<uuid>` branch and removes the file, so merging it removes the document at the next sync. Closing either unmerged changes nothing.
 
 ### Promotion agent
 
@@ -256,7 +256,7 @@ The change to `.github/workflows/release.yml` that builds and attaches the wheel
 
 ## Accepted risks
 
-- **Two groups, the wider one.** A caller holding two groups can `propose_doc` into the wider one (an approver still merges it) and `mark_record_outdated`; `ingest_record` is for hub keys only and moves are administrator commands. See [design](design.md), "Accepted residuals".
+- **Two groups, the wider one.** A caller holding two groups can `propose_doc` (or `propose_doc_deletion`) into the wider one (an approver still merges it) and `mark_record_outdated`; `ingest_record` is for hub keys only and moves are administrator commands. See [design](design.md), "Accepted residuals".
 - **Leaked bot token.** It reads every T0 repo and can open pull requests and push to open pull-request branches, but cannot merge.
 - **Zero required approvals.** The approver must review the final diff.
 - **Scan timing.** Exact vector scans take time in proportion to the number of hidden rows.

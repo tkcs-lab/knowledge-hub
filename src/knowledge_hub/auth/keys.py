@@ -26,6 +26,7 @@ KEY_TOOLS = (
     "list_stale",
     "mark_record_outdated",
     "propose_doc",
+    "propose_doc_deletion",
     "query",
     "save_query",
     "search",
