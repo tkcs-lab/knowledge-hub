@@ -78,7 +78,7 @@ async def test_daily_prints_identity_rows_purged(indexer_pool, db_settings, caps
 
     from knowledge_hub.cli import _daily
 
-    deps = SimpleNamespace(indexer_pool=indexer_pool, settings=db_settings)
+    deps = SimpleNamespace(indexer_pool=indexer_pool, settings=db_settings, blobs=None)
     assert await _daily(deps) == 0
     out = capsys.readouterr().out.strip()
     assert "; identity rows purged: 0; usage events purged: " in out

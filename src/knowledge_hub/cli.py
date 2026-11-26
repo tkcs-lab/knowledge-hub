@@ -108,17 +108,27 @@ async def _check(deps: Any) -> int:
 
 
 async def _daily(deps: Any) -> int:
-    from knowledge_hub.jobs.daily import purge_dataset_history, purge_identity, run_daily
+    from knowledge_hub.jobs.daily import purge_dataset_history, purge_identity, purge_records, run_daily
     from knowledge_hub.jobs.usage import purge_usage
 
     stale = await run_daily(deps.indexer_pool)
     identity = await purge_identity(deps.indexer_pool)
     usage = await purge_usage(deps.indexer_pool, deps.settings.usage_retention_days)
     history = await purge_dataset_history(deps.indexer_pool, deps.settings.dataset_history_days)
-    print(
+    line = (
         f"stale flags changed: {stale}; identity rows purged: {identity}; usage events purged: {usage}"
         f"; dataset history rows purged: {history}"
     )
+    if deps.blobs is None:
+        line += "; records purged: skipped (no blob store)"
+    else:
+        purged, blob_failures = await purge_records(
+            deps.indexer_pool, deps.blobs, deps.settings.record_purge_days
+        )
+        line += f"; records purged: {purged}"
+        if blob_failures:
+            line += f"; record blobs failed: {blob_failures}"
+    print(line)
     return 0
 
 
@@ -159,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         from knowledge_hub.panel.cli import main as panel_main
 
         return panel_main(argv[1:])
-    if argv and argv[0] in ("label", "group", "person", "repo", "move"):
+    if argv and argv[0] in ("label", "group", "person", "repo", "move", "records"):
         from knowledge_hub.admin.cli import main as admin_main
 
         return admin_main(argv)
