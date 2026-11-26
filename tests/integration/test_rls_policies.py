@@ -40,7 +40,8 @@ DEFINERS = ("records_enqueue_embed", "labels_in_use_guard", "mark_record_outdate
             "oauth_pending_peek", "oauth_code_put", "oauth_code_take", "oauth_token_put", "oauth_token_get",
             "oauth_refresh_use", "oauth_token_revoke", "oauth_family_revoke", "oauth_consent_has",
             "oauth_consent_put", "directory_snapshot_get", "directory_snapshot_put", "oauth_purge",
-            "bi_group", "dataset_mirror_row", "dataset_row_sync")
+            "bi_group", "dataset_mirror_row", "dataset_row_sync",
+            "delete_records", "restore_records", "records_purge_claim", "records_purge_delete")
 HELPERS = ("caller_audiences", "caller_sub", "caller_type", "can_read")
 
 
