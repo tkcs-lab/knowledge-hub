@@ -3,7 +3,7 @@
 # `kh serve` exits with code 75 when kh.yaml changes; `restart: unless-stopped` brings it back.
 services:
   knowledge-hub:
-    # The release image (linux/arm64). Pin the digest in the stack:
+    # The release image (one tag for linux/arm64 and linux/amd64). Pin the digest in the stack:
     #   docker buildx imagetools inspect ghcr.io/tkcs-lab/knowledge-hub:0.6.0
     image: ghcr.io/tkcs-lab/knowledge-hub:0.6.0
     restart: unless-stopped

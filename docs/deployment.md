@@ -32,7 +32,7 @@ This guide is a contract with that stack: this repository cannot test how you ru
 
 | Component | Version | Where pinned | How verified |
 |---|---|---|---|
-| Python | `>=3.12`; image base `python:3.13-slim`; the release image is `linux/arm64` only | `pyproject.toml` `requires-python`, `Dockerfile`, `.github/workflows/release.yml` | CI runs 3.12 and 3.13 (`.github/workflows/ci.yml`) |
+| Python | `>=3.12`; image base `python:3.13-slim`; the release image is `linux/arm64` and `linux/amd64` under one tag | `pyproject.toml` `requires-python`, `Dockerfile`, `.github/workflows/release.yml` | CI runs 3.12 and 3.13 (`.github/workflows/ci.yml`) |
 | Python libraries | `mcp==2.3.0`, `ruamel.yaml>=0.18,<0.19`; the others are not pinned and there is no lockfile | `pyproject.toml` | CI installs current versions on each run |
 | PostgreSQL | 16 with pgvector (extension `vector`); roles `kh_migrator`, `kh_app`, `kh_indexer`, none superuser, none `BYPASSRLS`; vector search is exact, no index. Other majors: not verified | `scripts/ensure_test_pg.sh`, `.github/workflows/ci.yml` | CI tests against it; `kh setup plan` (postgres step) |
 | Forgejo | not pinned, minimum not confirmed | not pinned | `kh setup plan` reads back teams, branch protection, webhook and token identity |

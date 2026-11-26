@@ -4,6 +4,10 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- Releases: the GHCR image is also built for linux/amd64 (under QEMU on the arm64 runner), and one tag `X.Y.Z` serves both platforms. The release dry run smoke-tests both images, and the real run checks that the pushed index holds both. The `release.yml` change reaches `main` as a protected-change pull request.
+
 ## [0.7.0] - 2026-11-23
 
 ### Added
