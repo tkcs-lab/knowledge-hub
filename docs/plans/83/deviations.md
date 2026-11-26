@@ -5,7 +5,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p1-removal-sql
 
-- pending
+- worker: none; worker ran without tld, orchestrator ran the role check (no roles required)
+- review: none
 
 ## p2-removal-tools
 
