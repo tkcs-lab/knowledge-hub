@@ -21,7 +21,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p4-removal-docs
 
-- pending
+- worker: worker reported none; ran without tld, orchestrator checked roles (none required)
+- review: none
 
 ## Final review
 
