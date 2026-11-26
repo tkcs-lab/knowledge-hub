@@ -29,6 +29,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
 | `delete_records` | Hide the records of a source that the source no longer has, by source_ref or prefix (hub keys only); they are deleted after KH_RECORD_PURGE_DAYS. |
 | `propose_doc` | Open a pull request that proposes a document change in a group's repo, optionally with `supersedes`; the answer lists `similar` items. |
+| `propose_doc_deletion` | Open a pull request that deletes a T0 document; the answer lists documents that become current again. |
 | `list_datasets` | The datasets you may see with their columns, the watermark and the last syncs. |
 | `query` | Read a dataset for a table or chart: select, filter, group, metrics, time bucket, `as_of` for history, or a saved query. |
 | `save_query` | Save a query under a name for one group you hold. |

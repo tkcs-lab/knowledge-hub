@@ -143,8 +143,8 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_SIMILAR_MIN_SCORE` | `0.5` | Smallest `similarity` (0 to 1) an item needs to be listed as similar. |
 | `KH_SEARCH_MAX_OFFSET` | `100` | Largest offset a `search` cursor may carry; above it `CURSOR_FOREIGN`. |
 | `KH_MAX_RECORD_BYTES` | `1048576` | Largest `ingest_record` body (was `KH_MAX_RAW_BYTES`). |
-| `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body. |
-| `KH_PROPOSE_MAX_OPEN` | `20` | Open bot pull requests per repo; above it `propose_doc` is refused. |
+| `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body and `propose_doc_deletion` summary. |
+| `KH_PROPOSE_MAX_OPEN` | `20` | Open bot pull requests per repo; above it `propose_doc` and `propose_doc_deletion` are refused. |
 | `KH_RATE_LIMIT_PER_MIN` | `120` | Tool calls per minute per caller `sub`. The bucket is in memory, so the limit is per process. |
 | `KH_QUERY_TIMEOUT_MS` | `3000` | 100 to 5000: `statement_timeout` of one `query` call; above it the answer is `query took too long; narrow it with where or limit`. |
 | `KH_QUERY_MAX_ROWS` | `1000` | 1 to 5000: the largest `limit` of `query`; more rows set `truncated`. |

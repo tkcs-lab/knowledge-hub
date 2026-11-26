@@ -38,6 +38,7 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
         labels,
         outdated,
         propose,
+        propose_deletion,
         record_delete,
         records,
         rows,
@@ -52,6 +53,7 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
     record_delete.register(server, deps)
     outdated.register(server, deps)
     propose.register(server, deps)
+    propose_deletion.register(server, deps)
     usage.register(server, deps)
     rows.register(server, deps)
     datasets.register(server, deps)
