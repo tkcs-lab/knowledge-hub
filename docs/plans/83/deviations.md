@@ -10,7 +10,8 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p2-removal-tools
 
-- pending
+- worker: worker reported none; ran without tld, orchestrator checked roles (none required)
+- review: none
 
 ## p3-removal-purge-cli
 
