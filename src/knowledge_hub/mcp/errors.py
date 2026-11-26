@@ -65,6 +65,9 @@ SYNC_SHRINK = (
 )
 QUERY_TIMEOUT = "query took too long; narrow it with where or limit"
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
+DELETE_NOT_T0 = "only T0 documents can be deleted this way"
+DELETE_LINKED = "another item names this document as its replacement or successor; clear that first"
+DELETE_PENDING = "a deletion pull request for this document is already open"
 
 
 class KhError(Exception):
