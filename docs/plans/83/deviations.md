@@ -32,3 +32,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 - final: scope: tests/integration/test_directory_sync_db.py accepted (one-line stub fix)
 - final: fix round: 1 fixed, 2 declined
+- conflict: merged origin/main after propose_doc_deletion landed: resolved server.py, bearer.py, CHANGELOG.md and design.md by keeping both sides; design.md now says Sixteen tools
