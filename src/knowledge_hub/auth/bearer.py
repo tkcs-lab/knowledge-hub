@@ -11,7 +11,15 @@ __all__ = ["KEY_ONLY_TOOLS", "READ_TOOLS", "WRITE_TOOLS", "BearerResolver"]
 
 READ_TOOLS = frozenset({"search", "get_doc", "list_stale", "list_labels", "usage", "list_datasets", "query"})
 WRITE_TOOLS = frozenset({"mark_record_outdated", "propose_doc", "save_query"})
-KEY_ONLY_TOOLS = frozenset({"ingest_record", "upsert_rows", "delete_rows", "finish_sync"})
+KEY_ONLY_TOOLS = frozenset(
+    {
+        "ingest_record",
+        "upsert_rows",
+        "delete_rows",
+        "delete_records",
+        "finish_sync",
+    }
+)
 
 UNKNOWN = "bearer_unknown"
 RESOURCE = "bearer_resource"
