@@ -78,21 +78,37 @@ jobs:
             exit 1
           fi
 
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64
+
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Build image (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
           load: true
           push: false
-          tags: knowledge-hub:release-test
+          tags: knowledge-hub:release-test-arm64
+
+      - name: Build image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: knowledge-hub:release-test-amd64
 
       - name: Smoke test
         run: |
           set -euo pipefail
-          docker run --rm knowledge-hub:release-test --help
+          for arch in arm64 amd64; do
+            docker run --rm --platform "linux/$arch" "knowledge-hub:release-test-$arch" --help
+            test "$(docker image inspect --format '{{.Architecture}}' "knowledge-hub:release-test-$arch")" = "$arch"
+          done
 
       - name: Build and smoke-test the wheel
         run: |
@@ -125,8 +141,30 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
+          platforms: linux/arm64,linux/amd64
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Verify image platforms
+        if: inputs.dry_run == false
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" > "$RUNNER_TEMP/index.json"
+          python3 - "$RUNNER_TEMP/index.json" <<'PY'
+          import json, sys
+          index = json.load(open(sys.argv[1]))
+          found = {
+              m["platform"]["os"] + "/" + m["platform"]["architecture"]
+              for m in index.get("manifests", [])
+              if "platform" in m
+          }
+          missing = {"linux/arm64", "linux/amd64"} - found
+          print("platforms:", " ".join(sorted(found)))
+          if missing:
+              sys.exit("image index lacks " + " ".join(sorted(missing)))
+          PY
 
   publish:
     needs: build
