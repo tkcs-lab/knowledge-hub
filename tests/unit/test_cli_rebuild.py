@@ -101,7 +101,8 @@ def test_daily_and_requeue(monkeypatch, capsys, stubs):
     assert cli.main(["daily"]) == 0
     assert cli.main(["requeue-embeddings"]) == 0
     out = capsys.readouterr().out
-    assert out.splitlines()[0].endswith(
+    assert out.splitlines()[0] == (
+        "stale flags changed: 3; identity rows purged: 2; usage events purged: 5"
         "; dataset history rows purged: 7; records purged: skipped (no blob store)"
     )
     assert "stale flags changed: 3" in out and "queued 4 embed_record jobs" in out
