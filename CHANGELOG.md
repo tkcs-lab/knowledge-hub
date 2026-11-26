@@ -4,6 +4,17 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- The tool `delete_records` (hub keys only) hides the records of a source that the source no longer has, by `source_ref` or prefix; sending a hidden record again with `ingest_record` restores it.
+- `kh records restore` makes records that `delete_records` hid live again (administrators only).
+- The setting `KH_RECORD_PURGE_DAYS` (default 30) and the purge in `kh daily`, which deletes hidden records, their chunks and S3 bodies after that time.
+
+### Changed
+
+- Migration `0008_record_delete.sql`: a new column `outdated_reason`; `kh.mark_record_outdated` and `kh.move_record` are redefined, and a person's mark cancels the purge; `kh move` refuses a record that was removed from its source.
+- `kh daily` prints `; records purged: N`. Upgrading needs `kh migrate`, and there is no rollback script for 0008.
+
 ## [0.7.1] - 2026-11-26
 
 ### Added

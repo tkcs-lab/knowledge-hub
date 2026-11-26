@@ -27,6 +27,7 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group; hub keys only. The answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
+| `delete_records` | Hide the records of a source that the source no longer has, by source_ref or prefix (hub keys only); they are deleted after KH_RECORD_PURGE_DAYS. |
 | `propose_doc` | Open a pull request that proposes a document change in a group's repo, optionally with `supersedes`; the answer lists `similar` items. |
 | `list_datasets` | The datasets you may see with their columns, the watermark and the last syncs. |
 | `query` | Read a dataset for a table or chart: select, filter, group, metrics, time bucket, `as_of` for history, or a saved query. |
@@ -61,9 +62,10 @@ The `ci` workflow (`.github/workflows/ci.yml`) runs on every pull request and ev
 | `kh directory` | Sync the directory snapshot and inspect it (`sync`, `plan`, `people`, `show`). |
 | `kh dataset` | Define datasets and columns, import a CSV file, and manage read-only BI logins (`create`, `add-column`, `set`, `import`, `bi-role`, `list`, `show` and more); administrators only. |
 | `kh move` | Move a record or document between groups; administrators only (--by must be in admins in kh.yaml). |
+| `kh records` | Undo a wrong removal: `kh records restore` makes records that `delete_records` hid live again; administrators only. |
 | `kh rebuild` | Forget the indexed head and sync Forgejo again (`--repo R` for one repo, which may be a technical repo; `--repo R --queue` only queues the sync job for the hub's worker). |
 | `kh check` | Compare the index with Forgejo; exit 1 on drift. |
-| `kh daily` | Recompute stale flags, purge expired OAuth rows, delete usage events past the retention and purge old dataset history. |
+| `kh daily` | Recompute stale flags, purge expired OAuth rows, delete usage events past the retention and purge old dataset history and the records that `delete_records` hid more than `KH_RECORD_PURGE_DAYS` ago. |
 | `kh requeue-embeddings` | Queue embedding jobs for records without chunks. |
 | `kh lint FILE...` | Offline frontmatter check of Markdown files; exit 1 on a problem. |
 

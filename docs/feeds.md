@@ -22,6 +22,8 @@ Create a hub key for the workflow. It holds one group and only the tools the fee
 kh key create --group sales --tools list_datasets,upsert_rows,finish_sync,delete_rows --name sf-opportunities-feed --out feed.key
 ```
 
+A feed of T3 records adds `ingest_record,delete_records` to `--tools`.
+
 The file holds the line `key: khk_<id>.<secret>`; store the part after `key: ` as a header credential in n8n (see [identity runbook](runbook-identity.md), "Hub keys"). The three write tools are for hub keys only: any other caller gets `this tool is available to workflows only`.
 
 ## The tools
@@ -67,6 +69,28 @@ A full run re-sends every row and then removes the ones the source no longer has
 
 A finished `sync_id` cannot be reused. `finish_sync` refuses when it would outdate more than the dataset's `max_outdated_percent` (default 20) of the live rows: `finish_sync would mark N of M rows outdated, more than P percent; repeat with force=true if that is right`. Check the export first; a truncated export is the usual cause. Repeat with `force=true` only when the loss is real, and raise the limit with `kh dataset set <dataset> --max-outdated-percent N` when the source legitimately shrinks.
 
+## Removing what the source removed (T3 records)
+
+Records (documents ingested with `ingest_record`) are removed with `delete_records`. It is for hub keys only.
+
+`delete_records(audience, source, source_refs, prefix=false, force=false)` hides the records of one `source` whose `source_ref` is in `source_refs` (an exact match, or with `prefix=true` the start of the `source_ref`; the match is literal, so `_` is not a wildcard). The reply is `{"outdated": n}`, the number of records hidden by this call. A call:
+
+- only touches records of the key's group and the given `source`, and never a record that mirrors a dataset row;
+- hides what is still live; a record that it already hid counts as `0`, and sending the same call again never restarts the 30-day clock;
+- takes at most 500 `source_refs`, and hides at most 500 records;
+- refuses to hide more than the larger of 50 and a fifth of the source within 24 hours, unless `force=true`.
+
+Hidden records leave search at once. `kh daily` deletes them for good (row, chunks and S3 body) after `KH_RECORD_PURGE_DAYS` (30 by default). Sending the `source_ref` again with `ingest_record` restores a hidden record (`{"existed": true, "restored": true}`), and the administrator can undo a wrong removal with `kh records restore`.
+
+Rules for a folder feed (the Drive feed is the example; its `source_ref` is `<fileId>@<modified_time>`, with `#pNofM` for parts):
+
+1. Work from the feed's own manifest, never from a partial picture. When any folder listing of the run failed, or the listing is empty, send no deletion.
+2. For a file that is gone from the listing, send the prefix `<fileId>@<modified_time>` of each manifest version exactly as stored (it also matches the `#pNofM` parts), with `prefix: true`, then append a manifest row with status `deleted`.
+3. For a changed file, after the new version went in, send the prefix of each older version the same way. Never send the bare `<fileId>@`, which also matches the new version.
+4. `deleted` is not a skip status: a key whose newest manifest row is `deleted` counts as new, so a file that returns is sent again and the hub restores it.
+5. A call that the hub refuses with the shrink text is a stop sign, not something to retry with `force`. Look at the listing first.
+6. `kh key create --tools` must list `delete_records`.
+
 ## Reference recipe: Salesforce to `sf_opportunities`
 
 Two workflows (or one with two schedule triggers): hourly incremental and weekly full. Each has the same four steps.
@@ -87,5 +111,8 @@ Salesforce is only steps 3 and 4. The dataset, the key, the batching, the waterm
 | `row <i>: <problem>` | Row `i` of the call (counted from 0) is invalid; fix it and resend the batch. |
 | `argument sync_id is invalid` | The `sync_id` is empty for `finish_sync`, malformed, already finished or not started. |
 | `finish_sync would mark ...` | The shrink guard; see above. |
+| `this call would hide more than 500 records; split it` | The `source_refs` of `delete_records` match more than 500 records; send them in smaller calls. |
+| `delete_records would hide ... repeat with force=true if that is right` | The shrink guard of `delete_records`: it would hide too large a share of the source within 24 hours; check the listing, and repeat with `force=true` only if the loss is real. |
+| `this record is being deleted; send it again after the next kh daily` | The purge has claimed the record and could not finish deleting it yet; `ingest_record` works again once `kh daily` has removed it. |
 
 Search finds a row as a T3 hit with a `row` id; `get_doc` opens `row:<dataset>:<uuid>`; `query` and `save_query` build tables and charts; `query(as_of=...)` reads history when the dataset keeps it (`kh dataset set <dataset> --history`).
