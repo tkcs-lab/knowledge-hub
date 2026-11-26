@@ -1,4 +1,4 @@
-# Multi-stage, architecture-neutral image (built natively on arm64 in the release workflow).
+# Multi-stage, architecture-neutral image (the release workflow builds linux/arm64 natively and linux/amd64 under QEMU).
 FROM python:3.13-slim AS build
 WORKDIR /src
 RUN python -m pip install --no-cache-dir build
