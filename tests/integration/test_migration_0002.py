@@ -98,7 +98,8 @@ def test_upgrade_from_baseline_adds_columns_and_resets_blob_sha(migrated_db):
         conn.execute("INSERT INTO kh.groups (name, repo) VALUES ('all', 'kb-all')")
         did = _document(conn, blob_sha="b1")
         rid = _record(conn)
-    assert migrate(dsn) == [SUPERSEDE, TECH_TIER, MOVE, IDENTITY, "0007_datasets.sql"]
+    rest = [SUPERSEDE, TECH_TIER, MOVE, IDENTITY, "0007_datasets.sql", "0008_record_delete.sql"]
+    assert migrate(dsn) == rest
     with psycopg.connect(migrated_db.admin_dsn("kh_upgrade")) as conn:
         assert conn.execute("SELECT supersedes, superseded_by, blob_sha FROM kh.documents WHERE id = %s",
                             (did,)).fetchone() == ([], None, "")

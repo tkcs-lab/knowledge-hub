@@ -27,7 +27,7 @@ EXPECTED = {
     "records": ["id", "audience", "source", "source_ref", "source_url", "title", "blob_key", "excerpt",
                 "content_type", "occurred_at", "labels", "written_by", "created_by_sub",
                 "created_by_type", "ingested_at", "outdated", "outdated_at", "outdated_by", "outdated_note",
-                "replaced_by", "dataset_row"],
+                "replaced_by", "dataset_row", "outdated_reason"],
     "chunks": ["id", "document_id", "record_id", "owner_key", "owner_created_at", "ordinal",
                "heading_path", "text", "content_sha", "embedding", "embedding_model", "tsv", "tier",
                "audience", "labels", "stale"],
