@@ -30,4 +30,5 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## Finishing
 
-- pending
+- final: scope: tests/integration/test_directory_sync_db.py accepted (one-line stub fix)
+- final: fix round: 1 fixed, 2 declined
