@@ -32,7 +32,7 @@ Today a T0 document one day past `review_by` and one five years past it get the 
 ## 2. Current state
 
 - `src/knowledge_hub/search/sql.py:118-127`, the `scored` CTE: `m.rrf * tier_weight * CASE WHEN c.stale OR h.owner_key IS NOT NULL THEN %(stale_weight)s ELSE 1 END`. `c.stale` is the chunk's copy of `kh.documents.stale`. `SearchFilters` (sql.py:17-42) carries `stale_weight` (default 0.5); `build_search_query` (sql.py:166-194) binds it.
-- `kh.chunks.stale` is copied from the owner by `kh.chunks_inherit_owner` on insert and pushed by `kh.owner_propagate_to_chunks` on `UPDATE OF audience, labels, stale, tier` (`migrations/0004_tech_tier.sql:10-41`). `kh.chunks` has no `review_by`.
+- `kh.chunks.stale` is copied from the owner by `kh.chunks_inherit_owner` on insert and pushed by `kh.owner_propagate_to_chunks` on `UPDATE OF audience, labels, stale, tier` (`src/knowledge_hub/migrations/0004_tech_tier.sql:10-41`). `kh.chunks` has no `review_by`.
 - `src/knowledge_hub/jobs/daily.py` `run_daily`: `UPDATE kh.documents SET stale = (review_by < current_date) WHERE stale IS DISTINCT FROM ...`. The indexer also sets `stale` on upsert (`indexer/sync.py:84`, `u.review_by < date.today()`).
 - `src/knowledge_hub/tools/search.py:64-130` builds `SearchFilters` from settings (`settings.stale_weight`, sql.py tier weights) and pages with `decode_cursor`/`encode_cursor` (`search/cursor.py`): a 32-byte HMAC over `sub|audiences hash|scope hash|offset` plus an 8-byte offset, 40 bytes, base64url. The scope (`_cursor_scope`, search.py:29-32) is the query and the filters, not the server knobs.
 - Ties are broken by chunk id at every ORDER BY (sql.py:86, 97, 129, 132, 162), so for fixed data, settings and date the order is deterministic.
@@ -172,6 +172,7 @@ The indexer, `kh lint`, `move.py` and `tech_docs.py` are not changed.
   - `KH_REVIEW_OVERDUE_FLOOR` | `0.5` | 0 to 1: the weight a T0 hit approaches as it gets further overdue. `0.5` keeps every overdue document at or above today's stale weight and above an equal T3 match.
   - after `KH_PROPOSE_MAX_OPEN`: `KH_DEFAULT_REVIEW_DAYS` | `365` | 1 to 3650: days after the proposal date that `propose_doc` writes as `review_by` when the caller leaves it empty.
 - `docs/runbook.md`, "Changing T0": add "`propose_doc` writes `review_by` one year (`KH_DEFAULT_REVIEW_DAYS`) after the proposal date when the caller leaves it empty, also for an edit; check the date in the diff before merging. A file written by hand still needs `review_by`." Add a subsection "### Enabling the graduated overdue weight" with: ship with `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS=0`; per environment set it to `180` (and `KH_REVIEW_OVERDUE_FLOOR`, default `0.5`), restart `kh serve`; compare a few known queries before and after with `search`; set it back to `0` to undo. Say that search cursors issued before the upgrade answer `CURSOR_FOREIGN` once and the caller repeats the search.
+- `deploy/compose.example.yaml`, next to `KH_SEARCH_MIN_SIMILARITY` (pattern commit `9dec0ff` also added its line there): add `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS: "0"   # off; see docs/runbook.md "Enabling the graduated overdue weight"`, `KH_REVIEW_OVERDUE_FLOOR: "0.5"` and, after `KH_PROPOSE_MAX_OPEN`, `KH_DEFAULT_REVIEW_DAYS: "365"`.
 - `README.md`: the tools table does not change (its `propose_doc` and `search` rows do not mention `review_by` or weights).
 - `CHANGELOG.md` under `## [Unreleased]`: `### Added`: "The settings `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS` (default 0, off) and `KH_REVIEW_OVERDUE_FLOOR` (default 0.5): `search` can weight a T0 document by how long it is past its `review_by`, decaying toward the floor, instead of the flat `KH_STALE_WEIGHT`; T0a, T3, superseded and outdated hits are unchanged. Once enabled, a document a few days overdue ranks almost as if it were current, where today it is halved at once." and "The setting `KH_DEFAULT_REVIEW_DAYS` (default 365)." `### Changed`: "`propose_doc`'s `review_by` is optional: left empty, the file gets the proposal date plus `KH_DEFAULT_REVIEW_DAYS`, also when it edits an existing document." and "Search cursors carry the search's reference date; cursors issued before the upgrade answer `CURSOR_FOREIGN` once."
 
@@ -179,12 +180,15 @@ The indexer, `kh lint`, `move.py` and `tech_docs.py` are not changed.
 
 ### Before implementation
 
-None.
+1. **mb1-confirm-open-questions** (about 5 minutes).
+   1. Read the "Open questions" section at the top of this plan (Q1 to Q6), each with its recommendation.
+   2. Answer on https://github.com/tkcs-lab/knowledge-hub/issues/86 with one line per question: `Q1 ok`, or `Q4 keep the stored date`, and so on. If you change an answer, ask for a plan revision before implement starts.
+   3. Done when every question has an answer; implement asks this as one confirm question before the first phase.
 
 ### After implementation
 
 1. **ma1-t0-feed-skill** (about 5 minutes). The `knowledge-hub-t0-feed` skill that agents use with `propose_doc` lives outside this repository.
-   1. Open the skill's source where you maintain it (Claude settings, Skills, `knowledge-hub-t0-feed`).
+   1. Open https://claude.ai/customize/skills and select `knowledge-hub-t0-feed` (or the repository or folder where you keep its `SKILL.md`).
    2. Search it for `review_by`. If it says the argument is required, change it to: "`review_by` is optional; left empty it becomes one year after the proposal date. To keep an existing document's date pass the `review_by` that `get_doc` returned."
    3. Report back in the pull request: `ma1: skill updated` or `ma1: skill did not mention review_by`.
 
@@ -192,11 +196,11 @@ The rollout of the weight itself (half-life 0 at release, then 180 per environme
 
 ## 5. Risks and open questions
 
-- The open questions Q1 to Q6 above. If the owner picks another answer, the brief of the affected phase is wrong; implement must not start before they are confirmed.
+- The open questions Q1 to Q6 above. If the owner picks another answer, the brief of the affected phase is wrong; implement asks for the confirmation first (`mb1-confirm-open-questions`).
 - **The mcp test client must run the app in process** (`tests/support/mcp_client.py` says it does), so `monkeypatch.setattr("knowledge_hub.tools.search._today", ...)` reaches the tool. A worker who sees the patched date ignored stops with `status=blocked`.
 - **Bit-identical half-life 0.** If an existing test in `test_search_ranking.py` or `test_search_outdated.py` that compares exact scores fails with the new CASE at default settings, the CASE is not equivalent: stop with `status=blocked` rather than loosening the assertion.
 - **RRF ties in new ordering tests.** Weights near 1 (a document 1 day overdue at half-life 180 weighs 0.998) are smaller than the RRF gap between neighbouring ranks (about 1.6%), so the ordering test uses half-life 1 and the 180-day values are checked by score ratio, as step 6 of p1's brief says. A worker who finds an ordering test flaky stops rather than adding sleeps or retries.
-- **`power` in Postgres.** The exponent cap at 64 avoids an underflow error; if the floor test with 100000 days overdue raises `value out of range`, the cap is missing.
+- **`power` in Postgres.** The exponent cap at 64 avoids an underflow error; if the floor test (review_by 1900-01-01) raises `value out of range`, the cap is missing.
 - **Not taken from the architect review (adhoc run).** (1) Deriving the hit's `stale` field from the reference date when the weight is on: the owner asked to keep `stale` as it is, so the field stays the stored flag and the docs say it can lag the weight by up to a day. (2) Refusing cursors whose reference date is older than yesterday: the date only changes the weights of the caller's own search, so a time limit would add a failure without protecting anything. (3) A test that runs the old SQL text next to the new one: the unchanged existing ranking and outdated tests plus test g of p1 cover the half-life-0 equivalence. Also noted from that review: with the recommended values a T0 document one day overdue scores about 1.0 instead of 0.5, and a fresh T0a (0.7) outranks an overdue T0 only after about 238 days. This softening is intended and the changelog says so.
 - **Deploy.** Agents holding a cursor across the upgrade get `CURSOR_FOREIGN` once (documented in the changelog and runbook).
 
@@ -207,7 +211,11 @@ plan_slug: t0-overdue-review-defaults
 feature_branch: feat/t0-overdue-review-defaults
 tracking_issue: 86
 max_parallel: 2
-manual_before: []
+manual_before:
+  - id: mb1-confirm-open-questions
+    title: Confirm or change the answers to open questions Q1 to Q6
+    why: p1 to p4 are written for the recommended answers; another answer makes their briefs wrong.
+    done_when: The owner has answered "go" or named a different answer for each of Q1 to Q6 on issue 86 or in the start question.
 manual_after:
   - id: ma1-t0-feed-skill
     title: Check the knowledge-hub-t0-feed skill text for a required review_by
@@ -267,15 +275,18 @@ phases:
             `stale=False`; order is fresh, 1 day, 400 days.
          b. `test_weight_follows_days_overdue_at_recommended_values`: one doc per offset 1 and 400 days overdue,
             `stale=False`; read each score at half-life 0, then at half-life 180 floor 0.5; each ratio equals
-            `overdue_weight(days, 180, 0.5)` (approx 1e-9).
-         c. `test_floor_is_respected_for_very_old_documents`: review_by `date(1990, 1, 1)`, half-life 1, floor 0.3;
+            `overdue_weight(days, 180, 0.5)` (`pytest.approx(..., rel=1e-9)`).
+         c. `test_floor_is_respected_for_very_old_documents`: review_by `date(1900, 1, 1)` (about 46000 days before
+            as_of, far past the 64-half-life cap at half-life 1), half-life 1, floor 0.3;
             ratio to the half-life-0 score equals approx 0.3 and is >= 0.3; the call does not error.
-         d. `test_not_yet_flagged_document_is_weighted_without_kh_daily`: a doc 400 days overdue with `stale=False`:
-            at half-life 0 its ratio to a fresh baseline is 1 (today's behaviour depends on the flag); at half-life
-            180 the ratio is `overdue_weight(400, 180, 0.5)`; the hit's `stale` field stays False.
-         e. `test_t0a_and_t3_scores_are_unchanged`: a T0a doc (`tier="T0a"`, `repo` a tech repo of the test config or
-            any repo; review_by as_of - 400, stale True) and a T3 record; their scores at half-life 180 floor 0.2 equal
-            their scores at half-life 0 exactly.
+         d. `test_not_yet_flagged_document_is_weighted_without_kh_daily`: one doc 400 days overdue with `stale=False`
+            (the flag kh daily has not set yet); read its score at half-life 0 and at half-life 180 floor 0.5; the
+            ratio of the second to the first is `overdue_weight(400, 180, 0.5)`; the hit's `stale` field is False in
+            both reads.
+         e. `test_t0a_and_t3_scores_are_unchanged`: `add_chunked_doc(db, "...", tier="T0a", review_by=as_of - 400
+            days, stale=True)` with the default repo (as tests/integration/test_search_tech_tier.py does) and an
+            `add_chunked_record`; each one's score at half-life 180 floor 0.2 equals its score at half-life 0 exactly
+            (`==`).
          f. `test_hidden_hits_keep_the_flat_stale_weight`: a superseded T0 doc 400 days overdue with
             `include_outdated=true`: its score at half-life 180 equals its score at half-life 0.
          g. `test_half_life_zero_matches_the_stale_flag_exactly`: a stale doc (stale=True, 400 days overdue) and a
@@ -350,20 +361,22 @@ phases:
          `knowledge_hub.tools.propose._today` to `date(2026, 11, 27)`. Add:
          `test_omitted_review_by_is_one_year_after_the_proposal_date` (ARGS without review_by; the file on the branch
          holds `review_by: "2027-11-27"`), `test_empty_review_by_is_the_default` (`review_by=""`, same date),
-         `test_default_review_days_follows_the_setting` (set `deps.settings.default_review_days = 30` the way the
-         module's other tests change settings; date `2026-12-27`), `test_explicit_review_by_is_kept`
+         `test_default_review_days_follows_the_setting` (set `deps.settings = deps.settings.model_copy(update={"default_review_days": 30})`
+         as the module's other tests do; date `2026-12-27`), `test_explicit_review_by_is_kept`
          (`2027-06-30` is written), `test_past_and_distant_review_by_are_accepted` (parametrize `2020-01-01` and
          `9999-12-31`; each is written as given), `test_edit_without_review_by_resets_to_the_default` (like
          `test_edit_with_base_blob`, old file has `review_by: 2099-01-01` via `md(...)`; the proposed file holds
-         `review_by: "2027-11-27"`). Add `({"review_by": " "}, "review_by")` to the `test_bad_args` parameters;
+         `review_by: "2027-11-27"`). Omit the key by calling
+         `mcp_client.call(alice_all, "propose_doc", {k: v for k, v in ARGS.items() if k != "review_by"})`
+         (the `call()` helper cannot drop a key). Add `({"review_by": " "}, "review_by")` to the `test_bad_args` parameters;
          keep the existing ones.
       4. tests/unit/test_tool_schemas.py: add `test_propose_doc_review_by_is_optional`: the propose_doc schema has
          `review_by` with default `""`, `review_by` is not in `required`, and the description contains
          `review_by is YYYY-MM-DD and optional`. The existing flat-schema tests must still pass.
       5. tests/unit/test_settings.py: extend `test_defaults` with `s.default_review_days == 365`; add
          `test_default_review_days_is_bounded` (0 and 3651 raise `ValidationError`).
-      6. `rg -n "review_by" src tests docs README.md` and confirm no text outside docs/ says propose_doc requires it
-         (docs are p4's). Run `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q`.
+      6. `rg -n "review_by" src tests README.md` and confirm no text says propose_doc requires it; if one does,
+         fix that text in this phase (docs/ is p4's; if the text is under docs/, leave it and list it in your report). Run `.venv/bin/python -m ruff check .` and `.venv/bin/python -m pytest -q`.
       If the tool guard refuses a call that omits review_by (`internal error`), stop with status=blocked: the default
       handling of mcp/errors.py differs from plan section 2.
     acceptance:
@@ -381,6 +394,7 @@ phases:
       - docs/configuration.md
       - docs/runbook.md
       - CHANGELOG.md
+      - deploy/compose.example.yaml
     brief: |
       Read first: docs/plans/86/plan.md section 3.4 and docs/plans/86/deviations.md (if it exists).
       1. Apply every docs/design.md change of plan 3.4 (Search paragraph, Indexer frontmatter line, Tools propose_doc
@@ -390,12 +404,14 @@ phases:
          "### Enabling the graduated overdue weight" right after "Changing T0").
       4. CHANGELOG.md: add the entries of plan 3.4 under `## [Unreleased]`, merging into the existing `### Added` and
          `### Changed` lists; open no version heading.
-      5. README.md is not changed (plan 3.4 says why); do not edit it.
-      6. Run `.venv/bin/python -m pytest -q tests/unit/test_docs_links.py` and `.venv/bin/python -m ruff check .`.
+      5. deploy/compose.example.yaml: add the three lines of plan 3.4.
+      6. README.md is not changed (plan 3.4 says why); do not edit it.
+      7. Run `.venv/bin/python -m pytest -q tests/unit/test_docs_links.py tests/unit/test_deploy_files.py` and `.venv/bin/python -m ruff check .`.
     acceptance:
       - grep -n "KH_REVIEW_OVERDUE_HALF_LIFE_DAYS" docs/configuration.md docs/design.md docs/runbook.md CHANGELOG.md matches in each file
       - grep -n "KH_DEFAULT_REVIEW_DAYS" docs/configuration.md docs/design.md CHANGELOG.md matches in each file
       - grep -n "Enabling the graduated overdue weight" docs/runbook.md matches
       - grep -n "overdue_days" docs/design.md matches (the rejected alternative row)
-      - .venv/bin/python -m pytest tests/unit/test_docs_links.py -q passes
+      - grep -n "KH_REVIEW_OVERDUE_HALF_LIFE_DAYS" deploy/compose.example.yaml matches
+      - .venv/bin/python -m pytest tests/unit/test_docs_links.py tests/unit/test_deploy_files.py -q passes
 ```
