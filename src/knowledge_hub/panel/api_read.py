@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from knowledge_hub.config import TECH_AUDIENCE, ConfigError, KhConfig
+from knowledge_hub.config import ConfigError, KhConfig
 from knowledge_hub.panel import stats
 from knowledge_hub.panel.context import PanelContext
 
@@ -115,7 +115,7 @@ def build_read_routes(ctx: PanelContext) -> list[Route]:
             for g in config.groups
         ]
         rows += [
-            row(r, kind="tech", group=TECH_AUDIENCE, dirs=config.tech_dirs(r),
+            row(r, kind="tech", group=config.tech_audience(r), dirs=config.tech_dirs(r),
                 labels=config.tech_labels(r), archived=False)
             for r in config.tech_repo_names
         ]

@@ -11,7 +11,7 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from knowledge_hub.config import TECH_AUDIENCE, KhConfig
+from knowledge_hub.config import KhConfig
 from knowledge_hub.forgejo.reader import ForgejoError
 from knowledge_hub.indexer.supersede import DocLink, resolve
 from knowledge_hub.indexer.sync_chunks import (
@@ -134,7 +134,7 @@ async def _sync_tech(
     indexer_pool: Any, reader: Any, config: KhConfig, repo: str, embedder: Any, chunker_version: int
 ) -> SyncPlan:
     _, rows, labels, stored_chunks = await _load(indexer_pool, repo)
-    stored = mark_regrouped(rows, TECH_AUDIENCE, "T0a")
+    stored = mark_regrouped(rows, config.tech_audience(repo), "T0a")
     head = await reader.head_sha(repo, await reader.default_branch(repo))
     tree = await reader.list_tree(repo, head)
     texts: dict[str, str | None] = {}

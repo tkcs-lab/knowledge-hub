@@ -44,6 +44,13 @@ def plan(files: dict, stored=(), labels=("ember",), texts=None, cfg=CFG):
     return build_tech_plan(cfg, REPO, "h1", tree, list(stored), texts, labels, TODAY)
 
 
+def test_plan_uses_the_configured_audience():
+    tech = {"ember-core": TechRepoConfig(labels=["ember"], audience="mgmt")}
+    cfg = CFG.model_copy(update={"tech_repos": tech})
+    result = plan({"docs/a.md": "# A"}, cfg=cfg)
+    assert result.upserts and all(u.audience == "mgmt" for u in result.upserts)
+
+
 def test_included_paths():
     for path in ("docs/a.md", "docs/x/y.md", "CLAUDE.md"):
         assert is_tech_included(entry(path)), path

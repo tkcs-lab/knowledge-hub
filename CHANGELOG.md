@@ -4,6 +4,14 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+### Added
+
+- `tech_repos.<repo>.audience` (default `all`) sets the group that reads a tech repo's T0a documents; `kh repo add|set --audience` sets it, and the panel's Repos tab shows it. Changing it on an indexed repo moves its documents in place on the next sync (their ids are kept; chunks and vectors are kept when the embedder treats both groups alike).
+
+### Changed
+
+- `kh move` refuses a T0a document (`a T0a document moves with its repo; run kh repo set <repo> --audience <group>`); the config check of `tech_repos` names the repo whose audience is missing or archived instead of `tech_repos needs the group all`.
+
 ## [0.8.0] - 2026-11-27
 
 ### Added

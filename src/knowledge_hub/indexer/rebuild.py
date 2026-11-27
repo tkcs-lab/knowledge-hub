@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from knowledge_hub.config import TECH_AUDIENCE
 from knowledge_hub.forgejo import ForgejoError
 from knowledge_hub.indexer.sync import sync_repo
 from knowledge_hub.indexer.sync_plan import SyncPlan
@@ -92,7 +91,7 @@ async def check(deps: Any) -> list[str]:
         cur = await conn.execute("SELECT repo, path, audience, tier FROM kh.documents ORDER BY repo, path")
         for repo, path, audience, tier in await cur.fetchall():
             is_tech = deps.config.is_tech_repo(repo)
-            wanted = TECH_AUDIENCE if is_tech else deps.config.group_for_repo(repo)
+            wanted = deps.config.tech_audience(repo) if is_tech else deps.config.group_for_repo(repo)
             if wanted != audience:
                 says = wanted or "no group"
                 fix = f"; run kh rebuild --repo {repo}" if wanted is not None else ""

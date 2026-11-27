@@ -25,9 +25,10 @@ def _config() -> KhConfig:
         labels={"ember": "Ember", "old": "Old"},
         archived_labels=["old"],
         tech_org="tech",
-        tech_repos={"svc": TechRepoConfig(labels=["ember"], dirs=["docs"])},
+        tech_repos={"svc": TechRepoConfig(labels=["ember"], dirs=["docs"], audience="ops")},
         groups={
             "all": GroupConfig(members=["alice"], approvers=["alice"], slack_channel="#all"),
+            "ops": GroupConfig(members=["alice"], approvers=["alice"]),
             "dir": GroupConfig(
                 archived=True,
                 directory={"keycloak": GroupDirectoryConfig(members=["eng"], approvers=["leads"])},
@@ -129,7 +130,7 @@ def test_repos(setup):
         "archived": False, "documents": 4, "last_indexed_sha": "abc",
         "indexed_at": "2026-01-01T00:00:00+00:00",
     }
-    assert rows["svc"]["kind"] == "tech"
+    assert rows["svc"]["kind"] == "tech" and rows["svc"]["group"] == "ops"
     assert rows["svc"]["dirs"] == ["docs"] and rows["svc"]["labels"] == ["ember"]
     assert rows["svc"]["last_indexed_sha"] is None
     assert rows["kb-dir"]["archived"] is True

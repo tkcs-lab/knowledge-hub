@@ -5,6 +5,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from knowledge_hub.config import TechRepoConfig
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.forgejo import ForgejoError, ForgejoReader
 from knowledge_hub.indexer.sync import sync_repo
@@ -45,10 +46,20 @@ def q(world, sql, *args):
         return conn.execute(sql, args).fetchall()
 
 
-async def sync(pool, reader, repo=TECH_REPO, config=CFG):
+async def sync(pool, reader, repo=TECH_REPO, config=CFG, embedder=None):
     return await sync_repo(
-        pool, None, config, repo, FakeEmbedder(1024), chunker_version=1, tech_reader=reader
+        pool, None, config, repo, embedder or FakeEmbedder(1024), chunker_version=1, tech_reader=reader
     )
+
+
+MGMT = CFG.model_copy(
+    update={"tech_repos": {TECH_REPO: TechRepoConfig(labels=["ember"], audience="mgmt")}}
+)
+
+
+class NoMgmtEmbedder(FakeEmbedder):
+    def may_embed(self, audience: str) -> bool:
+        return audience != "mgmt"
 
 
 async def test_tech_repo_indexes_docs_and_root_claude_md_only(world, fake, reader, indexer_pool):
@@ -187,3 +198,28 @@ async def test_dirs_setting_selects_the_indexed_directories(world, fake, reader,
     assert [r[0] for r in q(world, "SELECT path FROM kh.documents ORDER BY path")] == ["adr/a.md"]
     await sync(indexer_pool, reader, config=with_dirs(["docs"]))
     assert [r[0] for r in q(world, "SELECT path FROM kh.documents ORDER BY path")] == ["docs/b.md"]
+
+
+async def test_audience_change_moves_documents_and_chunks_in_place(world, fake, reader, indexer_pool):
+    fake.commit(TECH_REPO, {"docs/a.md": "# Alpha\n\nText here.\n"})
+    await sync(indexer_pool, reader)
+    docs = q(world, "SELECT id, blob_sha FROM kh.documents ORDER BY id")
+    chunks = q(world, "SELECT id, embedding IS NOT NULL FROM kh.chunks ORDER BY id")
+    assert docs and chunks and all(c[1] for c in chunks)
+    await sync(indexer_pool, reader, config=MGMT)
+    assert q(world, "SELECT id, blob_sha FROM kh.documents ORDER BY id") == docs
+    assert q(world, "SELECT DISTINCT audience FROM kh.documents") == [("mgmt",)]
+    assert q(world, "SELECT id, embedding IS NOT NULL FROM kh.chunks ORDER BY id") == chunks
+    assert q(world, "SELECT DISTINCT audience FROM kh.chunks") == [("mgmt",)]
+
+
+async def test_audience_change_into_a_group_that_may_not_embed_drops_vectors(
+    world, fake, reader, indexer_pool
+):
+    fake.commit(TECH_REPO, {"docs/a.md": "# Alpha\n\nText here.\n"})
+    await sync(indexer_pool, reader, embedder=NoMgmtEmbedder(1024))
+    assert q(world, "SELECT bool_and(embedding IS NOT NULL) FROM kh.chunks") == [(True,)]
+    await sync(indexer_pool, reader, config=MGMT, embedder=NoMgmtEmbedder(1024))
+    assert q(world, "SELECT audience, bool_and(embedding IS NULL) FROM kh.chunks GROUP BY 1") == [
+        ("mgmt", True)
+    ]

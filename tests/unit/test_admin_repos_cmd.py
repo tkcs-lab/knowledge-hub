@@ -84,14 +84,14 @@ def test_list_text_and_json(tmp_path, monkeypatch, capsys):
     cfg = write(tmp_path, monkeypatch, TECH)
     assert main("repo", "list", "--config", str(cfg)) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "NAME  DIRS  LABELS",
-        "core  docs  -",
-        "ember-core  docs,adr  product:ember",
+        "NAME  AUDIENCE  DIRS  LABELS",
+        "core  all  docs  -",
+        "ember-core  all  docs,adr  product:ember",
     ]
     assert main("repo", "list", "--json", "--config", str(cfg)) == 0
     assert json.loads(capsys.readouterr().out) == [
-        {"name": "core", "dirs": ["docs"], "labels": []},
-        {"name": "ember-core", "dirs": ["docs", "adr"], "labels": ["product:ember"]},
+        {"name": "core", "audience": "all", "dirs": ["docs"], "labels": []},
+        {"name": "ember-core", "audience": "all", "dirs": ["docs", "adr"], "labels": ["product:ember"]},
     ]
 
 
@@ -148,6 +148,16 @@ def test_set_edits_only_and_prints_the_rebuild_note(tmp_path, monkeypatch, capsy
     assert "kh rebuild --repo ember-core" in capsys.readouterr().out
 
 
+def test_set_audience_edits_only_and_prints_the_rebuild_note(tmp_path, monkeypatch, capsys):
+    text = TECH.replace("groups:\n", "groups:\n  mgmt:\n    members: [alice]\n    approvers: [alice]\n")
+    cfg = write(tmp_path, monkeypatch, text)
+    steps = use(monkeypatch)
+    assert main("repo", "set", "ember-core", "--audience", "mgmt", "--config", str(cfg)) == 0
+    assert "    dirs: [docs, adr]\n    audience: mgmt\n" in cfg.read_text()
+    assert steps.calls == []
+    assert "kh rebuild --repo ember-core" in capsys.readouterr().out
+
+
 def test_set_on_a_flow_entry(tmp_path, monkeypatch):
     cfg = write(tmp_path, monkeypatch, TECH)
     use(monkeypatch)
@@ -158,7 +168,7 @@ def test_set_on_a_flow_entry(tmp_path, monkeypatch):
 def test_set_without_flags_is_refused(tmp_path, monkeypatch, capsys):
     cfg = write(tmp_path, monkeypatch, TECH)
     assert main("repo", "set", "core", "--config", str(cfg)) == 2
-    assert "admin: nothing to set: pass --dirs or --labels" in capsys.readouterr().out
+    assert "admin: nothing to set: pass --dirs, --labels or --audience" in capsys.readouterr().out
 
 
 def test_remove_with_documents_needs_yes(tmp_path, monkeypatch, capsys):

@@ -143,6 +143,7 @@ class TechRepoConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     labels: list[str] = []
     dirs: list[str] = Field(default_factory=lambda: ["docs"])
+    audience: str = TECH_AUDIENCE
 
 
 class KhConfig(BaseModel):
@@ -274,15 +275,15 @@ class KhConfig(BaseModel):
         if self.tech_repos:
             if not self.tech_org:
                 raise ValueError("tech_repos needs tech_org")
-            if TECH_AUDIENCE not in self.groups:
-                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE}")
-            if self.groups[TECH_AUDIENCE].archived:
-                raise ValueError(f"tech_repos needs the group {TECH_AUDIENCE} to be active")
             for repo_name, tech in self.tech_repos.items():
                 if not REPO_RE.fullmatch(repo_name):
                     raise ValueError(f"tech repo {repo_name!r} is not a valid repository name")
                 if repo_name in repos:
                     raise ValueError(f"tech repo {repo_name} is also the repo of group {repos[repo_name]}")
+                if tech.audience not in self.groups:
+                    raise ValueError(f"tech repo {repo_name} audience {tech.audience!r} is not a group")
+                if self.groups[tech.audience].archived:
+                    raise ValueError(f"tech repo {repo_name} audience {tech.audience} is archived")
                 seen_tech: set[str] = set()
                 for label in tech.labels:
                     if label not in self.labels:
@@ -311,6 +312,9 @@ class KhConfig(BaseModel):
 
     def tech_dirs(self, repo: str) -> list[str]:
         return list(self.tech_repos[repo].dirs)
+
+    def tech_audience(self, repo: str) -> str:
+        return self.tech_repos[repo].audience
 
     @property
     def tech_repo_names(self) -> list[str]:

@@ -11,6 +11,7 @@ from typing import Any
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from knowledge_hub.admin.yamledit import Doc
+from knowledge_hub.config import TECH_AUDIENCE
 
 
 class OpError(ValueError):
@@ -275,28 +276,38 @@ def _tech_repos(doc: Doc) -> Any:
     return doc.data.get("tech_repos") or {}
 
 
-def repo_add(doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None) -> bool:
+def repo_add(
+    doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None, audience: str | None = None
+) -> bool:
     if not doc.data.get("tech_org"):
         raise OpError("tech_org is not set; add it to kh.yaml first")
     if name in _tech_repos(doc):
         raise OpError(f"tech repo {name} already exists")
     for label in labels or []:
         _check_label(doc, label)
+    if audience is not None:
+        _group(doc, audience)
     entry = CommentedMap()
     if labels is not None:
         entry["labels"] = _flow(labels)
     if dirs is not None:
         entry["dirs"] = _flow(dirs)
+    if audience is not None:
+        entry["audience"] = audience
     _map(doc, "tech_repos")[name] = entry
     return True
 
 
-def repo_set(doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None) -> bool:
+def repo_set(
+    doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | None, audience: str | None = None
+) -> bool:
     repos = _tech_repos(doc)
     if name not in repos:
         raise OpError(f"unknown tech repo {name}")
     for label in labels or []:
         _check_label(doc, label)
+    if audience is not None:
+        _group(doc, audience)
     entry = repos[name]
     if entry is None:
         entry = CommentedMap()
@@ -305,12 +316,13 @@ def repo_set(doc: Doc, name: str, dirs: list[str] | None, labels: list[str] | No
     for key, value, current in (
         ("dirs", dirs, list(entry.get("dirs", ["docs"]))),
         ("labels", labels, list(entry.get("labels", []))),
+        ("audience", audience, entry.get("audience", TECH_AUDIENCE)),
     ):
         if value is None or value == current:
             continue
         if entry.fa.flow_style():
             entry.fa.set_block_style()
-        entry[key] = _flow(value)
+        entry[key] = value if key == "audience" else _flow(value)
         changed = True
     return changed
 

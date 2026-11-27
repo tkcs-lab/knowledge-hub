@@ -99,7 +99,7 @@ A group's repo cannot change: a changed `repo` is a `!` line. Remove the group (
 ### Adding a technical repo
 
 1. In `tech_org` (by hand; `kh setup` creates nothing there) create the pull mirror or fork of the upstream repo. Its default branch is the one indexed.
-2. Command form: `kh repo add <repo> [--dirs docs,adr] [--labels product:ember]` (`tech_org` must be set; `dirs` defaults to `docs`; the root `CLAUDE.md` is always indexed). It edits `kh.yaml` and runs the forgejo step for that repo. File-edit form: add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` and `dirs` if wanted; the group `all` must exist and be active.
+2. Command form: `kh repo add <repo> [--dirs docs,adr] [--labels product:ember] [--audience GROUP]` (`tech_org` must be set; `dirs` defaults to `docs`; the root `CLAUDE.md` is always indexed). It edits `kh.yaml` and runs the forgejo step for that repo. File-edit form: add `tech_org` (once) and the repo under `tech_repos` in `kh.yaml`, with `labels` and `dirs` if wanted; the group named by `audience` (default `all`) must exist and be active.
 3. `kh migrate` (migration `0004_tech_tier.sql`, first time only). With the file-edit form, run `kh setup plan` and `kh setup apply` too. The setup gives the indexer read access, reports the repo's collaborators and adds the tech org webhook.
 4. Wait for `kh serve` to restart itself (within `KH_CONFIG_WATCH_SECONDS` plus the debounce; by hand when the watch is off), because the config is read at start; the first sync is queued as soon as `kh serve` starts, then again every `KH_TECH_POLL_MINUTES` (0 switches the poll off); or run `kh rebuild --repo <repo>`.
 5. `kh check`. Exit 0 means the head is indexed and every document has tier T0a.
@@ -108,9 +108,9 @@ Anyone with push access to the repo puts unreviewed text in front of every calle
 
 ### Changing the labels or dirs of a technical repo
 
-1. Command form: `kh repo set <repo> --labels a,b` and/or `--dirs docs,adr` (`--labels ""` clears the labels). File-edit form: edit `labels` or `dirs` of the repo in `kh.yaml` (new labels go under `labels` first).
+1. Command form: `kh repo set <repo> --labels a,b` and/or `--dirs docs,adr` and/or `--audience <group>` (`--labels ""` clears the labels). File-edit form: edit `labels` or `dirs` of the repo in `kh.yaml` (new labels go under `labels` first).
 2. Let `kh serve` restart first (it does itself within `KH_CONFIG_WATCH_SECONDS` plus the debounce; by hand when the watch is off): its worker keeps the old config until then and would undo the change. With the file-edit form run `kh setup apply` too.
-3. After the restart, wait for the next push or poll, or run `kh rebuild --repo <repo>`. A label change fetches no file again; a new directory fetches its files, and the documents of a directory that left `dirs` are deleted.
+3. After the restart, wait for the next push or poll, or run `kh rebuild --repo <repo>`. A label change fetches no file again; a new directory fetches its files, and the documents of a directory that left `dirs` are deleted. To move an indexed tech repo to another group later: `kh repo set <repo> --audience <group>`, restart `kh serve`, then `kh rebuild --repo <repo>` or wait for the poll; `kh check` exits 0 once it moved.
 
 ### Removing a technical repo
 
