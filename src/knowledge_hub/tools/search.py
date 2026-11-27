@@ -1,5 +1,6 @@
 """``search``: hybrid vector and full-text search under the caller's row-level security (plan 3.8)."""
 
+import datetime as dt
 import hashlib
 from pathlib import Path
 from typing import Any, Literal
@@ -17,6 +18,11 @@ from knowledge_hub.usage import UsageEvent
 
 MAX_LIMIT = 50
 SNIPPET_CHARS = 400
+
+
+def _today() -> dt.date:
+    """The reference date of a new search (UTC); tests replace it."""
+    return dt.datetime.now(dt.UTC).date()
 
 
 def _cursor_key(deps: Deps) -> bytes:
@@ -89,6 +95,7 @@ async def search(
     covered = ({audience} & call.caller.audiences) if audience else call.caller.audiences
     embed = bool(covered) and all(deps.embedder.may_embed(g) for g in covered)
     vector = (await deps.embedder.embed([query]))[0] if embed else None
+    as_of = _today()
     filters = SearchFilters(
         query=query,
         query_vector=vector,
@@ -103,6 +110,9 @@ async def search(
         rrf_k=settings.rrf_k,
         tier_weights=parse_tier_weights(settings.tier_weights),
         stale_weight=settings.stale_weight,
+        overdue_half_life_days=settings.review_overdue_half_life_days,
+        overdue_floor=settings.review_overdue_floor,
+        as_of=as_of,
         include_outdated=include_outdated,
     )
     sql, params = build_search_query(filters)
