@@ -147,7 +147,18 @@ The message names the pull request's author, which for `propose_doc` is the bot 
 
 ### Changing T0
 
-People do not push to `main`: direct push is off. They open a pull request (in Forgejo, or through `propose_doc`) and an approver of the group merges it. Required approvals are 0, so an approver may merge their own pull request: review the final diff before merging. After the merge Forgejo calls the webhook and the document is indexed within seconds. A pull request opened by `propose_doc` is on a `bot/propose/<uuid>` branch; one opened by `propose_doc_deletion` is on a `bot/delete/<uuid>` branch and removes the file, so merging it removes the document at the next sync. Closing either unmerged changes nothing.
+People do not push to `main`: direct push is off. They open a pull request (in Forgejo, or through `propose_doc`) and an approver of the group merges it. Required approvals are 0, so an approver may merge their own pull request: review the final diff before merging. After the merge Forgejo calls the webhook and the document is indexed within seconds. A pull request opened by `propose_doc` is on a `bot/propose/<uuid>` branch; one opened by `propose_doc_deletion` is on a `bot/delete/<uuid>` branch and removes the file, so merging it removes the document at the next sync. Closing either unmerged changes nothing. `propose_doc` writes `review_by` one year (`KH_DEFAULT_REVIEW_DAYS`) after the proposal date when the caller leaves it empty, also for an edit; check the date in the diff before merging. A file written by hand still needs `review_by`.
+
+### Enabling the graduated overdue weight
+
+By default a T0 document past its `review_by` is weighted by the flat `KH_STALE_WEIGHT` once `kh daily` has marked it stale. The graduated weight grows with the days overdue and does not wait for `kh daily`.
+
+1. Ship with `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS=0` (off).
+2. Per environment, set `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS=180` (and `KH_REVIEW_OVERDUE_FLOOR`, default `0.5`) and restart `kh serve`.
+3. Compare a few known queries before and after with `search`.
+4. To undo, set `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS` back to `0`.
+
+Search cursors issued before the upgrade answer `CURSOR_FOREIGN` once; the caller repeats the search.
 
 ### Promotion agent
 

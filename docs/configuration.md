@@ -138,13 +138,16 @@ A partial S3 setting is a startup error. With no S3 setting `ingest_record` and 
 | `KH_SEARCH_POOL` | `50` | Candidates per list (vector and full text) before fusion. |
 | `KH_SEARCH_MIN_SIMILARITY` | `0` | Smallest cosine similarity (0 to 1) between the query and a chunk for the chunk to enter `search`'s vector list; `0` switches the floor off. A full-text match is kept whatever its similarity. Calibrate it as the runbook says ("Calibrating the search similarity floor"). |
 | `KH_TIER_WEIGHTS` | `T0:1.0,T0a:0.7,T3:0.4` | Score multiplier per tier. `T0` and `T3` are required, `T0a` is optional (missing, it is the midpoint of T0 and T3, so `T0:1.0,T3:0.4` still starts); no other name; every weight positive and `T0 >= T0a >= T3`. |
-| `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit or an included outdated hit. |
+| `KH_STALE_WEIGHT` | `0.5` | Multiplier for a stale hit (while `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS` is 0) or an included outdated or superseded hit. |
+| `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS` | `0` | 0 to 36500. Above 0, a T0 search hit past its `review_by` is weighted `floor + (1 - floor) * 0.5^(days overdue / half-life)` instead of `KH_STALE_WEIGHT`; 0 switches this off. T0a and T3 are not weighted by age; superseded and outdated hits keep `KH_STALE_WEIGHT`. Start with `180`. |
+| `KH_REVIEW_OVERDUE_FLOOR` | `0.5` | 0 to 1: the weight a T0 hit approaches as it gets further overdue. `0.5` keeps every overdue document at or above today's stale weight and above an equal T3 match. |
 | `KH_SIMILAR_LIMIT` | `3` | Most `similar` items `ingest_record` and `propose_doc` return, 0 to 10; 0 switches the lookup off. |
 | `KH_SIMILAR_MIN_SCORE` | `0.5` | Smallest `similarity` (0 to 1) an item needs to be listed as similar. |
 | `KH_SEARCH_MAX_OFFSET` | `100` | Largest offset a `search` cursor may carry; above it `CURSOR_FOREIGN`. |
 | `KH_MAX_RECORD_BYTES` | `1048576` | Largest `ingest_record` body (was `KH_MAX_RAW_BYTES`). |
 | `KH_PROPOSE_MAX_BYTES` | `131072` | Largest `propose_doc` body and `propose_doc_deletion` summary. |
 | `KH_PROPOSE_MAX_OPEN` | `20` | Open bot pull requests per repo; above it `propose_doc` and `propose_doc_deletion` are refused. |
+| `KH_DEFAULT_REVIEW_DAYS` | `365` | 1 to 3650: days after the proposal date that `propose_doc` writes as `review_by` when the caller leaves it empty. |
 | `KH_RATE_LIMIT_PER_MIN` | `120` | Tool calls per minute per caller `sub`. The bucket is in memory, so the limit is per process. |
 | `KH_QUERY_TIMEOUT_MS` | `3000` | 100 to 5000: `statement_timeout` of one `query` call; above it the answer is `query took too long; narrow it with where or limit`. |
 | `KH_QUERY_MAX_ROWS` | `1000` | 1 to 5000: the largest `limit` of `query`; more rows set `truncated`. |
