@@ -7,11 +7,20 @@ caller's pool holds only chunks that caller may see.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from dataclasses import dataclass, field
 from typing import Any
 
 TIERS = ("T0", "T0a", "T3")
+OVERDUE_MAX_HALF_LIVES = 64
+
+
+def overdue_weight(days_overdue: int, half_life_days: int, floor: float) -> float:
+    """The score multiplier of a T0 hit ``days_overdue`` days past review_by; the SQL computes the same."""
+    if half_life_days <= 0 or days_overdue <= 0:
+        return 1.0
+    return floor + (1.0 - floor) * 0.5 ** min(days_overdue / half_life_days, OVERDUE_MAX_HALF_LIVES)
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,9 @@ class SearchFilters:
     rrf_k: int = 60
     tier_weights: dict[str, float] = field(default_factory=lambda: {"T0": 1.0, "T0a": 0.7, "T3": 0.4})
     stale_weight: float = 0.5
+    overdue_half_life_days: int = 0
+    overdue_floor: float = 0.5
+    as_of: dt.date | None = None  # the reference date; None means today in UTC
     include_outdated: bool = False
 
     def max_distance(self) -> float:
@@ -119,11 +131,19 @@ scored AS (
   SELECT c.id, c.owner_key, c.tier, c.stale, c.text, c.document_id, c.record_id,
          (h.owner_key IS NOT NULL) AS outdated,
          m.rrf * (%(tier_weights)s::jsonb ->> c.tier)::float8
-               * CASE WHEN c.stale OR h.owner_key IS NOT NULL THEN %(stale_weight)s ELSE 1 END AS score,
+               * CASE WHEN h.owner_key IS NOT NULL THEN %(stale_weight)s
+                      WHEN %(half_life)s::int > 0 AND c.tier = 'T0' AND od.review_by IS NOT NULL
+                      THEN %(overdue_floor)s::float8 + (1 - %(overdue_floor)s::float8)
+                           * power(0.5::float8,
+                                   least(greatest(%(as_of)s::date - od.review_by, 0)::float8
+                                         / greatest(%(half_life)s::int, 1), 64))
+                      WHEN c.stale THEN %(stale_weight)s
+                      ELSE 1 END AS score,
          CASE WHEN c.embedding IS NOT NULL AND c.embedding_model = %(model)s
               THEN 1 - (c.embedding <=> %(qvec)s::vector) END AS similarity
     FROM main_fused m JOIN kh.chunks c ON c.id = m.id
     LEFT JOIN hidden h ON h.owner_key = c.owner_key
+    LEFT JOIN kh.documents od ON od.id = c.document_id
 ),
 best AS (
   SELECT DISTINCT ON (owner_key) * FROM scored ORDER BY owner_key, score DESC, id
@@ -189,6 +209,9 @@ def build_search_query(filters: SearchFilters) -> tuple[str, dict[str, Any]]:
         "offset": filters.offset,
         "tier_weights": json.dumps(filters.tier_weights),
         "stale_weight": filters.stale_weight,
+        "half_life": filters.overdue_half_life_days,
+        "overdue_floor": filters.overdue_floor,
+        "as_of": filters.as_of or dt.datetime.now(dt.UTC).date(),
         "include_outdated": filters.include_outdated,
     }
     return sql, params

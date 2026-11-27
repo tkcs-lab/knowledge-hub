@@ -23,6 +23,11 @@ TITLE_MAX = 120
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
+def _today() -> dt.date:
+    """The proposal date (UTC); tests replace it."""
+    return dt.datetime.now(dt.UTC).date()
+
+
 def _bad(name: str) -> Exception:
     return kh_error("bad_arg", errors.BAD_ARG, name=name)
 
@@ -33,8 +38,8 @@ async def propose_doc(
     path: str,
     id: str,  # noqa: A002 - the tool argument is named id
     title: str,
-    review_by: str,
     body: str,
+    review_by: str = "",
     labels: list[str] = [],  # noqa: B006 - the guard reads the default; it is never mutated
     summary: str = "",
     base_blob: str = "",
@@ -51,6 +56,8 @@ async def propose_doc(
         raise _bad("path")
     if not ID_RE.fullmatch(id):
         raise _bad("id")
+    if review_by == "":
+        review_by = (_today() + dt.timedelta(days=deps.settings.default_review_days)).isoformat()
     try:
         if not _DATE_RE.fullmatch(review_by):
             raise ValueError
@@ -144,8 +151,10 @@ def register(server: MCPServer, deps: Deps) -> None:
         description=(
             "Propose a new or changed document in the repository of a group you hold, as a pull request "
             "that its approvers review. To change an existing file pass its current blob_sha as "
-            "base_blob; leave it empty to create a new file. review_by is YYYY-MM-DD. "
-            "To change an existing document keep its supersedes list: "
+            "base_blob; leave it empty to create a new file. review_by is YYYY-MM-DD and optional: "
+            "left empty it is set to the proposal date plus the server's review period (365 days by "
+            "default), also when you change an existing document; to keep a document's date pass the "
+            "review_by that get_doc returned. To change an existing document keep its supersedes list: "
             "pass the supersedes that get_doc returned."
         ),
     )(tool_guard("propose_doc", deps)(propose_doc))

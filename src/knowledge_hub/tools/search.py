@@ -1,5 +1,6 @@
 """``search``: hybrid vector and full-text search under the caller's row-level security (plan 3.8)."""
 
+import datetime as dt
 import hashlib
 from pathlib import Path
 from typing import Any, Literal
@@ -17,6 +18,11 @@ from knowledge_hub.usage import UsageEvent
 
 MAX_LIMIT = 50
 SNIPPET_CHARS = 400
+
+
+def _today() -> dt.date:
+    """The reference date of a new search (UTC); tests replace it."""
+    return dt.datetime.now(dt.UTC).date()
 
 
 def _cursor_key(deps: Deps) -> bytes:
@@ -76,9 +82,9 @@ async def search(
     if set(labels) & deps.config.archived_label_set:
         return {"hits": [], "next_cursor": ""}
     scope = _cursor_scope(query, min_tier, labels, audience, include_outdated)
-    offset = 0
+    offset, as_of = 0, _today()
     if cursor:
-        offset = decode_cursor(
+        offset, as_of = decode_cursor(
             _cursor_key(deps),
             call.caller.sub,
             call.caller.audiences,
@@ -103,6 +109,9 @@ async def search(
         rrf_k=settings.rrf_k,
         tier_weights=parse_tier_weights(settings.tier_weights),
         stale_weight=settings.stale_weight,
+        overdue_half_life_days=settings.review_overdue_half_life_days,
+        overdue_floor=settings.review_overdue_floor,
+        as_of=as_of,
         include_outdated=include_outdated,
     )
     sql, params = build_search_query(filters)
@@ -125,7 +134,7 @@ async def search(
     next_offset = offset + limit
     if next_offset < meta["total"] and next_offset <= settings.search_max_offset:
         next_cursor = encode_cursor(
-            _cursor_key(deps), call.caller.sub, call.caller.audiences, scope, next_offset
+            _cursor_key(deps), call.caller.sub, call.caller.audiences, scope, next_offset, as_of
         )
     return {"hits": hits, "next_cursor": next_cursor}
 

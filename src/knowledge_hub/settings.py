@@ -64,12 +64,15 @@ class Settings(BaseSettings):
     search_min_similarity: float = Field(0.0, ge=0.0, le=1.0)
     tier_weights: str = "T0:1.0,T0a:0.7,T3:0.4"
     stale_weight: float = 0.5
+    review_overdue_half_life_days: int = Field(0, ge=0, le=36500)
+    review_overdue_floor: float = Field(0.5, ge=0.0, le=1.0)
     similar_limit: int = Field(3, ge=0, le=10)
     similar_min_score: float = Field(0.5, ge=0.0, le=1.0)
     search_max_offset: int = 100
     max_record_bytes: int = 1048576
     propose_max_bytes: int = 131072
     propose_max_open: int = 20
+    default_review_days: int = Field(365, ge=1, le=3650)
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
     usage_log: bool = True
