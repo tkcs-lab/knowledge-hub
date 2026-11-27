@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     max_record_bytes: int = 1048576
     propose_max_bytes: int = 131072
     propose_max_open: int = 20
+    default_review_days: int = Field(365, ge=1, le=3650)
     rate_limit_per_min: int = 120
     metrics_token_file: Path | None = None
     usage_log: bool = True
