@@ -82,9 +82,9 @@ async def search(
     if set(labels) & deps.config.archived_label_set:
         return {"hits": [], "next_cursor": ""}
     scope = _cursor_scope(query, min_tier, labels, audience, include_outdated)
-    offset = 0
+    offset, as_of = 0, _today()
     if cursor:
-        offset = decode_cursor(
+        offset, as_of = decode_cursor(
             _cursor_key(deps),
             call.caller.sub,
             call.caller.audiences,
@@ -95,7 +95,6 @@ async def search(
     covered = ({audience} & call.caller.audiences) if audience else call.caller.audiences
     embed = bool(covered) and all(deps.embedder.may_embed(g) for g in covered)
     vector = (await deps.embedder.embed([query]))[0] if embed else None
-    as_of = _today()
     filters = SearchFilters(
         query=query,
         query_vector=vector,
@@ -135,7 +134,7 @@ async def search(
     next_offset = offset + limit
     if next_offset < meta["total"] and next_offset <= settings.search_max_offset:
         next_cursor = encode_cursor(
-            _cursor_key(deps), call.caller.sub, call.caller.audiences, scope, next_offset
+            _cursor_key(deps), call.caller.sub, call.caller.audiences, scope, next_offset, as_of
         )
     return {"hits": hits, "next_cursor": next_cursor}
 

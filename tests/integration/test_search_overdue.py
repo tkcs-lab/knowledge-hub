@@ -147,3 +147,39 @@ async def test_half_life_zero_matches_the_stale_flag_exactly(mcp_client, db, app
     app_settings.stale_weight = 1.0
     plain = await score(mcp_client, app_settings, key, 0, query="kookaburra")
     assert flagged["score"] == weight * plain["score"]
+
+
+async def _page_all(mcp_client, monkeypatch, shift_before_page):
+    """Page "wombat" with limit 2; ``shift_before_page`` pages get the date moved first."""
+    seen, cursor, page = [], "", 1
+    while True:
+        if page in shift_before_page:
+            monkeypatch.setattr(
+                "knowledge_hub.tools.search._today", lambda: AS_OF + timedelta(days=200)
+            )
+        res = await mcp_client.call(alice_all, "search", {"query": "wombat", "limit": 2, "cursor": cursor})
+        assert not res.is_error, res.text
+        seen += [h["id"] for h in res.data["hits"]]
+        cursor, page = res.data["next_cursor"], page + 1
+        if not cursor:
+            return seen
+
+
+async def _paging_case(mcp_client, db, app_settings, monkeypatch, half_life, shift):
+    for n in range(5):
+        add_chunked_doc(db, f"wombat {n}", review_by=ago(n), stale=False)
+    db.commit()
+    app_settings.review_overdue_half_life_days = half_life
+    app_settings.review_overdue_floor = 0.2
+    reference = [h["id"] for h in await hits(mcp_client, query="wombat", limit=5)]
+    assert len(reference) == 5
+    paged = await _page_all(mcp_client, monkeypatch, shift)
+    assert paged == reference and len(set(paged)) == 5
+
+
+async def test_paging_is_stable_across_a_day_change(mcp_client, db, app_settings, as_of, monkeypatch):
+    await _paging_case(mcp_client, db, app_settings, monkeypatch, 1, {2, 3})
+
+
+async def test_paging_without_day_change_is_stable(mcp_client, db, app_settings, as_of, monkeypatch):
+    await _paging_case(mcp_client, db, app_settings, monkeypatch, 180, set())
