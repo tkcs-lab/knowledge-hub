@@ -26,3 +26,4 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 ## Finishing
 
 - None.
+- final: fix round: 1 fixed, 1 declined
