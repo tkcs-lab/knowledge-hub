@@ -33,6 +33,7 @@ class Deps:
 def register_tools(server: MCPServer, deps: Deps) -> None:
     """Register every tool; later phases add their modules here."""
     from knowledge_hub.tools import (
+        catalog,
         datasets,
         docs,
         labels,
@@ -49,6 +50,7 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
     search.register(server, deps)
     docs.register(server, deps)
     labels.register(server, deps)
+    catalog.register(server, deps)
     records.register(server, deps)
     record_delete.register(server, deps)
     outdated.register(server, deps)

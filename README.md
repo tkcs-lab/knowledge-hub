@@ -24,6 +24,8 @@ A group is a name such as `all` or `mgmt`. Each group has one T0 repo, a list of
 | `get_doc` | One document (`doc:<uuid>`), record (`rec:<uuid>`) or dataset row (`row:<dataset>:<uuid>`). |
 | `list_stale` | Documents past their `review_by` date. |
 | `list_labels` | The labels of `kh.yaml`. |
+| `list_groups` | The groups with their repo, Slack channel, approvers (login and email) and the directory groups the approvers come from. Any signed-in caller, also one in no group. |
+| `list_repos` | The indexed repos with kind (group or tech), audience, the directories and labels of tech repos and the index state (documents, last indexed commit and time). Any signed-in caller. |
 | `usage` | Which records people find and open most, and which queries no T0 document answers; for the promotion agent. |
 | `ingest_record` | Store a raw record (T3) readable by one group; hub keys only. The answer lists up to three `similar` items of that group. |
 | `mark_record_outdated` | Mark a raw record outdated (hidden from search) or current again. |
