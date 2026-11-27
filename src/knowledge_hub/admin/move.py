@@ -73,7 +73,7 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
         raise kh_error("not_configured", errors.NOT_CONFIGURED)
     async with call.conn.cursor() as cur:
         await cur.execute(
-            "SELECT id, repo, path, doc_key, audience, title, body, labels, review_by, blob_sha, "
+            "SELECT id, tier, repo, path, doc_key, audience, title, body, labels, review_by, blob_sha, "
             "supersedes, superseded_by FROM kh.documents WHERE id = %s",
             (key,),
         )
@@ -82,6 +82,7 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
             raise kh_error("not_found", errors.NOT_FOUND)
         (
             _,
+            tier,
             from_repo,
             path,
             doc_key,
@@ -94,6 +95,8 @@ async def _move_document(call: ToolCall, key: str, from_group: str, to_group: st
             supersedes,
             superseded_by,
         ) = row
+        if tier == "T0a":
+            raise kh_error("move_tech", errors.MOVE_TECH)
         if audience != from_group:
             raise kh_error("move_wrong_group", errors.MOVE_WRONG_GROUP)
         doc_id = f"doc:{key}"

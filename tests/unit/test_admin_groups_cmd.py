@@ -163,7 +163,7 @@ def test_group_remove_of_all_with_tech_repos_is_refused_by_validation(cfg, monke
     steps = use(monkeypatch)
     before = cfg.read_text()
     assert main("group", "remove", "all", "--yes", "--config", str(cfg)) == 2
-    assert "config: tech_repos needs the group all" in capsys.readouterr().out
+    assert "config: tech repo core audience 'all' is not a group" in capsys.readouterr().out
     assert cfg.read_text() == before
     assert steps.calls == []
 

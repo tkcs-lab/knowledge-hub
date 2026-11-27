@@ -270,20 +270,33 @@ def test_tech_repo_cannot_be_a_group_repo():
     )
 
 
-def test_tech_repos_need_group_all():
+def test_tech_repo_audience_must_be_a_group():
     groups = {"mgmt": GROUPS["mgmt"]}
     refused(
         {"people": PEOPLE, "groups": groups, "tech_org": "t", "tech_repos": {"r": {}}},
-        "config: tech_repos needs the group all",
+        "config: tech repo r audience 'all' is not a group",
     )
 
 
-def test_tech_repos_need_active_group_all():
+def test_tech_repo_audience_must_be_active():
     groups = {**GROUPS, "all": {**GROUPS["all"], "archived": True}}
     refused(
         {"people": PEOPLE, "groups": groups, "tech_org": "t", "tech_repos": {"r": {}}},
-        "config: tech_repos needs the group all to be active",
+        "config: tech repo r audience all is archived",
     )
+
+
+def test_tech_repo_audience_defaults_to_all():
+    c = tech_cfg(tech_repos={"r": {}})
+    assert c.tech_audience("r") == "all"
+
+
+def test_tech_repo_audience_may_be_another_group():
+    groups = {"mgmt": GROUPS["mgmt"]}
+    c = KhConfig.model_validate(
+        {"people": PEOPLE, "groups": groups, "tech_org": "t", "tech_repos": {"r": {"audience": "mgmt"}}}
+    )
+    assert c.tech_audience("r") == "mgmt"
 
 
 def test_tech_repo_label_must_exist():

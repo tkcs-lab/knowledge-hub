@@ -5,7 +5,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from knowledge_hub.config import GroupConfig, KhConfig
+from knowledge_hub.config import GroupConfig, KhConfig, TechRepoConfig
 from knowledge_hub.embed.base import FakeEmbedder
 from knowledge_hub.forgejo import ForgejoReader
 from knowledge_hub.indexer.rebuild import check, rebuild
@@ -244,6 +244,18 @@ async def test_check_accepts_audience_all_for_tech_documents(tworld, fake, tdeps
     await tech_synced(tdeps, fake)
     assert q(tworld, "SELECT audience, tier FROM kh.documents WHERE repo = %s", TECH_REPO) == [("all", "T0a")]
     assert await check(tdeps) == []
+
+
+async def test_check_flags_a_tech_audience_change_not_yet_synced(tworld, fake, tdeps):
+    await tech_synced(tdeps, fake)
+    mgmt = TECH_CONFIG.model_copy(
+        update={"tech_repos": {TECH_REPO: TechRepoConfig(labels=["ember"], audience="mgmt")}}
+    )
+    got = await check(replace(tdeps, config=mgmt))
+    assert got == [
+        f"document docs/a.md in {TECH_REPO} has audience all, config says mgmt; "
+        f"run kh rebuild --repo {TECH_REPO}"
+    ]
 
 
 async def test_check_flags_tier_mismatch(tworld, fake, tdeps):

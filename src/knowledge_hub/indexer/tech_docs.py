@@ -8,7 +8,7 @@ import re
 from collections.abc import Collection, Iterable, Mapping
 from typing import Any
 
-from knowledge_hub.config import TECH_AUDIENCE, KhConfig
+from knowledge_hub.config import KhConfig
 from knowledge_hub.indexer.frontmatter import strip_frontmatter
 from knowledge_hub.indexer.sync_plan import MAX_FILE_BYTES, DocUpsert, SyncPlan
 
@@ -84,6 +84,7 @@ def build_tech_plan(
     present: set[str] = set()
     unreadable: set[str] = set()
     dirs = config.tech_dirs(repo)
+    audience = config.tech_audience(repo)
     for entry in tree:
         if not is_tech_included(entry, dirs):
             continue
@@ -102,7 +103,7 @@ def build_tech_plan(
         body = strip_frontmatter(text).replace("\x00", "")
         plan.upserts.append(
             DocUpsert(
-                repo, path, tech_doc_key(path), TECH_AUDIENCE, tech_title(repo, path, body), body,
+                repo, path, tech_doc_key(path), audience, tech_title(repo, path, body), body,
                 list(labels), review_by, head_sha, sha, supersedes=[], tier=TECH_TIER,
             )
         )  # fmt: skip

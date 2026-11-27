@@ -154,6 +154,13 @@ async def test_result_lists_dropped_supersedes_and_revived(deps, db, forgejo):
     assert "supersedes" not in forgejo.files("kb-mgmt", add["head"]["ref"])["guides/g.md"]
 
 
+async def test_tech_document_is_refused(deps, db, forgejo):
+    doc = add_doc(db, repo="ember-core", path="docs/a.md", doc_key="docs/a.md", tier="T0a")
+    db.commit()
+    assert await refused(deps, f"doc:{doc}") == errors.MOVE_TECH
+    assert not pulls(forgejo, "kb-mgmt") and not pulls(forgejo, "kb-all")
+
+
 async def test_wrong_from_group(deps, db, forgejo):
     doc, _ = make_doc(db, forgejo)
     assert await refused(deps, f"doc:{doc}", from_group="mgmt", to_group="all") == errors.MOVE_WRONG_GROUP

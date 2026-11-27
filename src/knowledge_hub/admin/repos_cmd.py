@@ -24,13 +24,14 @@ def _given(value: str | None) -> list[str] | None:
 def _add(args: argparse.Namespace) -> int:
     name = args.name
     dirs, labels = _given(args.dirs), _given(args.labels)
+    audience = args.audience
 
     async def after(steps: Steps, write: bool) -> list[Change]:
         return await steps.forgejo().sync_tech_repo(name, write=write)
 
     return run(
         args,
-        lambda d: ops.repo_add(d, name, dirs, labels),
+        lambda d: ops.repo_add(d, name, dirs, labels, audience),
         after=after,
         target=f"tech repo {name}",
     )
@@ -38,13 +39,14 @@ def _add(args: argparse.Namespace) -> int:
 
 def _set(args: argparse.Namespace) -> int:
     name = args.name
-    if args.dirs is None and args.labels is None:
-        print("admin: nothing to set: pass --dirs or --labels")
+    if args.dirs is None and args.labels is None and args.audience is None:
+        print("admin: nothing to set: pass --dirs, --labels or --audience")
         return 2
     dirs, labels = _given(args.dirs), _given(args.labels)
+    audience = args.audience
     return run(
         args,
-        lambda d: ops.repo_set(d, name, dirs, labels),
+        lambda d: ops.repo_set(d, name, dirs, labels, audience),
         notes=[
             "restart kh serve first (its worker keeps the old config and would undo the change); "
             f"then its first poll applies it, or run kh rebuild --repo {name} after the restart"
@@ -87,15 +89,21 @@ def _list(args: argparse.Namespace) -> int:
         print(str(exc))
         return 2
     rows = [
-        {"name": name, "dirs": config.tech_dirs(name), "labels": config.tech_labels(name)}
+        {
+            "name": name,
+            "audience": config.tech_audience(name),
+            "dirs": config.tech_dirs(name),
+            "labels": config.tech_labels(name),
+        }
         for name in config.tech_repo_names
     ]
     if args.json:
         print(json.dumps(rows))
     else:
-        print("NAME  DIRS  LABELS")
+        print("NAME  AUDIENCE  DIRS  LABELS")
         for r in rows:
-            print(f"{r['name']}  {','.join(r['dirs']) or '-'}  {','.join(r['labels']) or '-'}")
+            dirs, labels = ",".join(r["dirs"]) or "-", ",".join(r["labels"]) or "-"
+            print(f"{r['name']}  {r['audience']}  {dirs}  {labels}")
     return 0
 
 
@@ -111,13 +119,18 @@ def register(sub: Any) -> None:
     p.add_argument("name")
     p.add_argument("--dirs", help="comma separated directories to index (default docs)")
     p.add_argument("--labels", help="comma separated labels")
+    p.add_argument("--audience", help="group whose members read its documents (default all)")
     add_common(p, mutating=True)
     p.set_defaults(func=_add)
 
-    p = cmds.add_parser("set", help="change the dirs or labels of a technical repo")
+    p = cmds.add_parser("set", help="change the dirs, labels or audience of a technical repo")
     p.add_argument("name")
     p.add_argument("--dirs", help="comma separated directories to index")
     p.add_argument("--labels", help="comma separated labels; an empty value clears them")
+    p.add_argument(
+        "--audience",
+        help="group whose members read its documents; moves the indexed documents on the next sync",
+    )
     add_common(p, mutating=True)
     p.set_defaults(func=_set)
 

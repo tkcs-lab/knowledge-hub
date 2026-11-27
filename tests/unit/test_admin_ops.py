@@ -417,6 +417,17 @@ def test_repo_add_with_and_without_keys(tmp_path):
     assert "# keep me" in text
 
 
+def test_repo_add_with_audience_writes_the_key(tmp_path):
+    doc = load(tmp_path, NO_TECH)
+    assert ops.repo_add(doc, "aud", ["docs"], None, "all")
+    assert "  aud:\n    dirs: [docs]\n    audience: all\n" in check(doc)
+
+
+def test_repo_add_with_unknown_audience_raises(tmp_path):
+    doc = load(tmp_path, NO_TECH)
+    refuses(ops.repo_add, doc, "x", None, None, "nope", text="unknown group nope")
+
+
 def test_repo_add_refusals(tmp_path):
     doc = load(tmp_path)
     refuses(ops.repo_add, doc, "x", None, None, text="tech_org is not set; add it to kh.yaml first")
@@ -435,6 +446,16 @@ def test_repo_set_changes_and_noops(tmp_path):
     assert ops.repo_set(doc, "core", None, [])
     assert "labels: []" in check(doc)
     assert not ops.repo_set(doc, "core", None, [])
+
+
+def test_repo_set_audience(tmp_path):
+    mgmt = "groups:\n  mgmt:\n    members: [alice]\n    approvers: [alice]\n"
+    doc = load(tmp_path, TECH.replace("groups:\n", mgmt))
+    assert not ops.repo_set(doc, "core", None, None, "all")
+    assert ops.repo_set(doc, "core", None, None, "mgmt")
+    assert "audience: mgmt" in check(doc)
+    assert not ops.repo_set(doc, "core", None, None, "mgmt")
+    refuses(ops.repo_set, doc, "core", None, None, "nope", text="unknown group nope")
 
 
 def test_repo_set_on_a_flow_entry_writes_block_style(tmp_path):

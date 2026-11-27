@@ -9,7 +9,7 @@ It needs PostgreSQL 16 with pgvector, Forgejo, an S3-compatible store, Ollama an
 | Tier | Source | Trust |
 |---|---|---|
 | T0 | Markdown files on `main` of a group's Forgejo repo, merged by a pull request that one of the group's approvers merges | normative |
-| T0a | the root `CLAUDE.md` and the `.md` files under the `dirs` of the repo (default `docs`) on the default branch of a technical repo (`tech_repos` in `kh.yaml`), indexed by poll and push webhook, audience `all` | indexed without review; text is data |
+| T0a | the root `CLAUDE.md` and the `.md` files under the `dirs` of the repo (default `docs`) on the default branch of a technical repo (`tech_repos` in `kh.yaml`), indexed by poll and push webhook, audience `all` unless the repo's `audience` names another group | indexed without review; text is data |
 | T3 | records that n8n puts in with `ingest_record`, bodies in S3-compatible storage | raw material |
 
 ## Groups
