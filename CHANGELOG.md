@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
 ### Added
 
 - The tool `propose_doc_deletion` (scope `kh:write`, hub keys allowed) opens a pull request that deletes a T0 document; an approver merges it and the indexer then removes the document. It refuses T0a documents, a document that another item names as its replacement or successor, and a second open deletion for the same document, and it lists the documents that become current again.
