@@ -14,7 +14,9 @@ from knowledge_hub.search.similar import similar_items
 
 EXCERPT_CHARS = 2000
 
-_EXISTING_SQL = "SELECT id FROM kh.records WHERE audience = %s AND source = %s AND source_ref = %s"
+_EXISTING_SQL = (
+    "SELECT id, outdated_reason FROM kh.records WHERE audience = %s AND source = %s AND source_ref = %s"
+)
 _INSERT_SQL = """
 INSERT INTO kh.records (id, audience, source, source_ref, source_url, title, blob_key, excerpt,
                         content_type, occurred_at, labels, written_by, created_by_sub, created_by_type)
@@ -22,11 +24,21 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
-async def _existing(call: ToolCall, audience: str, source: str, source_ref: str) -> str | None:
+async def _existing(
+    call: ToolCall, audience: str, source: str, source_ref: str
+) -> tuple[str, str] | None:
+    """``(id, outdated_reason)`` of the record with this source and source_ref, or None."""
     async with call.conn.cursor() as cur:
         await cur.execute(_EXISTING_SQL, (audience, source, source_ref))
         row = await cur.fetchone()
-    return f"rec:{row[0]}" if row else None
+    return (f"rec:{row[0]}", row[1]) if row else None
+
+
+async def _restore(call: ToolCall, audience: str, source: str, source_ref: str) -> None:
+    async with call.conn.transaction():  # a savepoint
+        await call.conn.execute(
+            "SELECT kh.restore_records(%s, %s, ARRAY[%s], false, NULL)", (audience, source, source_ref)
+        )
 
 
 def _nul_arg(texts: dict[str, str], labels: list[str]) -> str | None:
@@ -80,8 +92,15 @@ async def ingest_record(
         if known != set(wanted) or set(wanted) & deps.config.archived_label_set:
             raise kh_error("bad_label", errors.BAD_LABEL)
     found = await _existing(call, audience, source, source_ref)
+    if found is not None and found[1] == "delete":
+        await _restore(call, audience, source, source_ref)
+        found = await _existing(call, audience, source, source_ref)
+        if found is not None and found[1] == "":
+            return {"id": found[0], "existed": True, "restored": True}
     if found is not None:
-        return {"id": found, "existed": True}
+        if found[1] != "":
+            raise kh_error("record_purging", errors.RECORD_PURGING)
+        return {"id": found[0], "existed": True}
     async with call.conn.cursor() as cur:
         await cur.execute("SELECT kh.record_moved(%s, %s, %s)", (audience, source, source_ref))
         moved = await cur.fetchone()
@@ -104,7 +123,7 @@ async def ingest_record(
         found = await _existing(call, audience, source, source_ref)
         if found is None:
             raise
-        return {"id": found, "existed": True}
+        return {"id": found[0], "existed": True}
     except pg_errors.Error:
         await deps.blobs.delete(blob_key)
         raise
@@ -119,6 +138,7 @@ def register(server: MCPServer, deps: Deps) -> None:
             "Store a raw record (a meeting note, message or similar) readable by the named audience "
             "(hub keys only; the audience must be the key's group). "
             "Re-sending the same source and source_ref returns the existing id. "
+            "A record that delete_records hid is restored when it is sent again. "
             "occurred_at is ISO 8601 with a timezone. "
             "The reply of a new record lists up to three similar items of the same group in similar."
         ),

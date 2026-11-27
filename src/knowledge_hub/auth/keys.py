@@ -17,6 +17,7 @@ KEY_RE = re.compile(r"^khk_([a-z2-7]{10})\.([A-Za-z0-9_-]{43})$")
 
 # The tools registered by build_mcp (a unit test compares this with build_mcp).
 KEY_TOOLS = (
+    "delete_records",
     "delete_rows",
     "finish_sync",
     "get_doc",

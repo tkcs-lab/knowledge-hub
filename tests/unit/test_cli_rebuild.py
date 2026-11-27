@@ -18,8 +18,8 @@ def stubs(monkeypatch):
     for k in [k for k in __import__("os").environ if k.startswith("KH_")]:
         monkeypatch.delenv(k)
     state = SimpleNamespace(closed=0, calls=[])
-    settings = SimpleNamespace(usage_retention_days=180, dataset_history_days=730)
-    deps = SimpleNamespace(indexer_pool="pool", settings=settings)
+    settings = SimpleNamespace(usage_retention_days=180, dataset_history_days=730, record_purge_days=30)
+    deps = SimpleNamespace(indexer_pool="pool", settings=settings, blobs=None)
 
     async def build_deps(settings, config):
         return deps
@@ -71,7 +71,7 @@ def test_check_exit_code_follows_drift(monkeypatch, capsys, lines, code):
     assert capsys.readouterr().out == "".join(f"{x}\n" for x in lines)
 
 
-def test_daily_and_requeue(monkeypatch, capsys):
+def test_daily_and_requeue(monkeypatch, capsys, stubs):
     async def run_daily(pool):
         assert pool == "pool"
         return 3
@@ -101,8 +101,21 @@ def test_daily_and_requeue(monkeypatch, capsys):
     assert cli.main(["daily"]) == 0
     assert cli.main(["requeue-embeddings"]) == 0
     out = capsys.readouterr().out
-    assert out.splitlines()[0].endswith("; usage events purged: 5; dataset history rows purged: 7")
+    assert out.splitlines()[0] == (
+        "stale flags changed: 3; identity rows purged: 2; usage events purged: 5"
+        "; dataset history rows purged: 7; records purged: skipped (no blob store)"
+    )
     assert "stale flags changed: 3" in out and "queued 4 embed_record jobs" in out
+
+    stubs.deps.blobs = object()
+
+    async def purge_records(pool, blobs, days):
+        assert pool == "pool" and blobs is stubs.deps.blobs and days == 30
+        return 3, 0
+
+    monkeypatch.setattr(daily_mod, "purge_records", purge_records)
+    assert cli.main(["daily"]) == 0
+    assert capsys.readouterr().out.splitlines()[0].endswith("; records purged: 3")
 
 
 def test_settings_error_exits_2(monkeypatch, capsys):

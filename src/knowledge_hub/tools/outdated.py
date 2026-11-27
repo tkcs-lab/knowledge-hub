@@ -16,6 +16,7 @@ log = logging.getLogger("knowledge_hub.tools")
 MAX_NOTE_CHARS = 500
 BAD_SUCCESSOR_SQLSTATE = "P0K07"
 DATASET_SQLSTATE = "P0K0B"
+PURGING_SQLSTATE = "P0K0F"
 
 
 def _bad(name: str):
@@ -47,6 +48,8 @@ async def mark_record_outdated(
             raise _bad("replaced_by") from None
         if exc.sqlstate == DATASET_SQLSTATE:
             raise kh_error("dataset_record", errors.DATASET_RECORD) from None
+        if exc.sqlstate == PURGING_SQLSTATE:
+            raise kh_error("record_purging", errors.RECORD_PURGING) from None
         raise
     if row is None or row[0] is None:
         raise kh_error("not_found", errors.NOT_FOUND)

@@ -15,7 +15,7 @@ from knowledge_hub.admin import apply
 from knowledge_hub.admin.ops import OpError
 from knowledge_hub.admin.yamledit import Doc
 
-COMMAND_MODULES = ("labels_cmd", "persons_cmd", "groups_cmd", "repos_cmd", "move_cmd")
+COMMAND_MODULES = ("labels_cmd", "persons_cmd", "groups_cmd", "repos_cmd", "move_cmd", "records_cmd")
 
 
 def _sha256_arg(value: str) -> str:

@@ -64,6 +64,13 @@ SYNC_SHRINK = (
     "repeat with force=true if that is right"
 )
 QUERY_TIMEOUT = "query took too long; narrow it with where or limit"
+RECORDS_CAP = "this call would hide more than 500 records; split it"
+RECORDS_SHRINK = (
+    "delete_records would hide {n} records of this source within 24 hours, more than the limit of {limit};"
+    " repeat with force=true if that is right"
+)
+RECORD_PURGING = "this record is being deleted; send it again after the next kh daily"
+MOVE_REMOVED = "the record was removed from its source; restore it first (kh records restore)"
 MOVE_PARTIAL = "the removal pull request could not be opened; run kh move again to open it"
 DELETE_NOT_T0 = "only T0 documents can be deleted this way"
 DELETE_LINKED = "another item names this document as its replacement or successor; clear that first"

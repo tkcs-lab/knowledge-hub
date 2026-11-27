@@ -39,6 +39,7 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
         outdated,
         propose,
         propose_deletion,
+        record_delete,
         records,
         rows,
         search,
@@ -49,6 +50,7 @@ def register_tools(server: MCPServer, deps: Deps) -> None:
     docs.register(server, deps)
     labels.register(server, deps)
     records.register(server, deps)
+    record_delete.register(server, deps)
     outdated.register(server, deps)
     propose.register(server, deps)
     propose_deletion.register(server, deps)
