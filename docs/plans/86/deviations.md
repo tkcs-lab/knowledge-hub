@@ -13,7 +13,7 @@ Every deviation from the plan is listed under its phase. "None." means the phase
 
 ## p3-propose-review-default
 
-- pending
+- None.
 
 ## p4-docs-changelog
 
