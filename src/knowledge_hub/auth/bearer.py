@@ -9,7 +9,19 @@ from knowledge_hub.auth.keys import verify_key
 
 __all__ = ["KEY_ONLY_TOOLS", "READ_TOOLS", "WRITE_TOOLS", "BearerResolver"]
 
-READ_TOOLS = frozenset({"search", "get_doc", "list_stale", "list_labels", "usage", "list_datasets", "query"})
+READ_TOOLS = frozenset(
+    {
+        "search",
+        "get_doc",
+        "list_stale",
+        "list_labels",
+        "list_groups",
+        "list_repos",
+        "usage",
+        "list_datasets",
+        "query",
+    }
+)
 WRITE_TOOLS = frozenset({"mark_record_outdated", "propose_doc", "propose_doc_deletion", "save_query"})
 KEY_ONLY_TOOLS = frozenset(
     {
