@@ -151,7 +151,7 @@ People do not push to `main`: direct push is off. They open a pull request (in F
 
 ### Enabling the graduated overdue weight
 
-By default a T0 document past its `review_by` is weighted by the flat `KH_STALE_WEIGHT` once `kh daily` has marked it stale. The graduated weight grows with the days overdue and does not wait for `kh daily`.
+By default a T0 document past its `review_by` is weighted by the flat `KH_STALE_WEIGHT` once it is marked stale (by `kh daily` or when the file is indexed). The graduated weight grows with the days overdue and does not wait for `kh daily`.
 
 1. Ship with `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS=0` (off).
 2. Per environment, set `KH_REVIEW_OVERDUE_HALF_LIFE_DAYS=180` (and `KH_REVIEW_OVERDUE_FLOOR`, default `0.5`) and restart `kh serve`.
