@@ -4,6 +4,8 @@ All notable changes to knowledge-hub, the trusted core of the company knowledge 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-27
+
 ### Added
 
 - `list_groups` and `list_repos`: read-only tools (scope `kh:read`, not limited by group) that list the groups with their approvers and the indexed repos with audience and index state. An existing hub key needs a new key (`kh key`) to get them.
