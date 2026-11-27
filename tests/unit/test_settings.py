@@ -31,6 +31,7 @@ def test_defaults():
     assert s.dev_identity is None and s.db_app_password_file is None
     assert s.bi_enabled is False
     assert s.review_overdue_half_life_days == 0 and s.review_overdue_floor == 0.5
+    assert s.default_review_days == 365
 
 
 def test_overdue_settings_are_bounded(monkeypatch):
@@ -44,6 +45,13 @@ def test_overdue_settings_are_bounded(monkeypatch):
         with pytest.raises(ValidationError):
             Settings()
         monkeypatch.delenv(name)
+
+
+def test_default_review_days_is_bounded(monkeypatch):
+    for value in ("0", "3651"):
+        monkeypatch.setenv("KH_DEFAULT_REVIEW_DAYS", value)
+        with pytest.raises(ValidationError):
+            Settings()
 
 
 def test_record_purge_days(monkeypatch):

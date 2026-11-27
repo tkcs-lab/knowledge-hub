@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from knowledge_hub.forgejo import ForgejoBot, ForgejoRefused
@@ -46,6 +48,21 @@ def forgejo() -> FakeForgejo:
 def deps(deps, forgejo):
     deps.forgejo_bot = ForgejoBot("https://forgejo.test", "tok", "kh", transport=forgejo.transport)
     return deps
+
+
+@pytest.fixture
+def today(monkeypatch):
+    monkeypatch.setattr("knowledge_hub.tools.propose._today", lambda: date(2026, 11, 27))
+
+
+async def call_without_review_by(mcp_client, args=None):
+    given = {k: v for k, v in ARGS.items() if k != "review_by"}
+    return await mcp_client.call(alice_all, "propose_doc", {**given, **(args or {})})
+
+
+def _review_by_line(forgejo, res, path="guides/new.md"):
+    text = forgejo.files("kb-all", res.data["branch"])[path]
+    return next(line for line in text.splitlines() if line.startswith("review_by:"))
 
 
 async def call(mcp_client, args=None, caller=alice_all):
@@ -94,6 +111,47 @@ async def test_edit_with_base_blob(mcp_client, seeded_db, forgejo):
     assert not res.is_error, res.text
     assert forgejo.files("kb-all", res.data["branch"])["guides/old.md"].startswith('---\nid: "old-doc"')
     assert forgejo.files("kb-all")["guides/old.md"] == old
+
+
+async def test_omitted_review_by_is_one_year_after_the_proposal_date(mcp_client, seeded_db, forgejo, today):
+    res = await call_without_review_by(mcp_client)
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res) == 'review_by: "2027-11-27"'
+
+
+async def test_empty_review_by_is_the_default(mcp_client, seeded_db, forgejo, today):
+    res = await call(mcp_client, {"review_by": ""})
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res) == 'review_by: "2027-11-27"'
+
+
+async def test_default_review_days_follows_the_setting(mcp_client, seeded_db, forgejo, deps, today):
+    deps.settings = deps.settings.model_copy(update={"default_review_days": 30})
+    res = await call_without_review_by(mcp_client)
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res) == 'review_by: "2026-12-27"'
+
+
+async def test_explicit_review_by_is_kept(mcp_client, seeded_db, forgejo, today):
+    res = await call(mcp_client, {"review_by": "2027-06-30"})
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res) == 'review_by: "2027-06-30"'
+
+
+@pytest.mark.parametrize("value", ["2020-01-01", "9999-12-31"])
+async def test_past_and_distant_review_by_are_accepted(mcp_client, seeded_db, forgejo, today, value):
+    res = await call(mcp_client, {"review_by": value})
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res) == f'review_by: "{value}"'
+
+
+async def test_edit_without_review_by_resets_to_the_default(mcp_client, seeded_db, forgejo, today):
+    old = md("old-doc", "Old", review_by="2099-01-01")
+    forgejo.commit("kb-all", {"guides/old.md": old})
+    args = {"path": "guides/old.md", "id": "old-doc", "base_blob": blob_sha(old)}
+    res = await call_without_review_by(mcp_client, args)
+    assert not res.is_error, res.text
+    assert _review_by_line(forgejo, res, "guides/old.md") == 'review_by: "2027-11-27"'
 
 
 async def test_stale_base_blob(mcp_client, seeded_db, forgejo):
@@ -169,6 +227,7 @@ async def test_not_configured(mcp_client, seeded_db, deps):
         ({"id": "Bad Id"}, "id"), ({"id": ""}, "id"),
         ({"review_by": "2027-02-30"}, "review_by"), ({"review_by": "tomorrow"}, "review_by"),
         ({"title": ""}, "title"), ({"title": "two\nlines"}, "title"),
+        ({"review_by": " "}, "review_by"),
     ],
 )
 async def test_bad_args(mcp_client, seeded_db, forgejo, args, name):
